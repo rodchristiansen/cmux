@@ -25,6 +25,20 @@ jobs:
       - name: Typecheck
         run: bun tsc --noEmit
 
+  cmuxd-go-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build
+        working-directory: cmuxd-go
+        run: go build ./...
+      - name: Vet
+        working-directory: cmuxd-go
+        run: go vet ./...
+
   ui-tests:
     runs-on: self-hosted
     concurrency:

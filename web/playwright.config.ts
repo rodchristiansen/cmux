@@ -16,7 +16,7 @@ export default defineConfig({
       reuseExistingServer: true,
     },
     {
-      command: "PTY_CWD=$(pwd) ../cmuxd/zig-out/bin/cmuxd --port 3778",
+      command: "cd ../cmuxd-go && go run . --port 3778",
       port: 3778,
       reuseExistingServer: true,
     },
