@@ -75,7 +75,7 @@ class TerminalController {
         let pendingRearmGeneration: UInt64?
     }
 
-    private static let focusIntentV1Commands: Set<String> = [
+    private nonisolated static let focusIntentV1Commands: Set<String> = [
         "focus_window",
         "select_workspace",
         "focus_surface",
@@ -86,12 +86,14 @@ class TerminalController {
         "activate_app"
     ]
 
-    private static let focusIntentV2Methods: Set<String> = [
+    private nonisolated static let focusIntentV2Methods: Set<String> = [
         "window.focus",
+        "workspace.create",
         "workspace.select",
         "workspace.next",
         "workspace.previous",
         "workspace.last",
+        "surface.move",
         "surface.focus",
         "pane.focus",
         "pane.last",
@@ -201,12 +203,18 @@ class TerminalController {
         return socketCommandFocusAllowanceStack.last ?? false
     }
 
-    private static func socketCommandAllowsInAppFocusMutations(commandKey: String, isV2: Bool) -> Bool {
+    private nonisolated static func socketCommandAllowsInAppFocusMutations(commandKey: String, isV2: Bool) -> Bool {
         if isV2 {
             return focusIntentV2Methods.contains(commandKey)
         }
         return focusIntentV1Commands.contains(commandKey)
     }
+
+#if DEBUG
+    nonisolated static func debugSocketCommandAllowsInAppFocusMutations(commandKey: String, isV2: Bool) -> Bool {
+        socketCommandAllowsInAppFocusMutations(commandKey: commandKey, isV2: isV2)
+    }
+#endif
 
     private func withSocketCommandPolicy<T>(commandKey: String, isV2: Bool, _ body: () -> T) -> T {
         let allowsFocusMutation = Self.socketCommandAllowsInAppFocusMutations(commandKey: commandKey, isV2: isV2)

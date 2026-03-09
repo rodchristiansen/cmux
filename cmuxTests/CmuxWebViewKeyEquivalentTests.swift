@@ -11597,6 +11597,27 @@ final class TerminalControllerSidebarDedupeTests: XCTestCase {
             firstWindowId
         )
     }
+
+    func testSocketFocusIntentIncludesWorkspaceCreateAndSurfaceMoveForV2() {
+        XCTAssertTrue(
+            TerminalController.debugSocketCommandAllowsInAppFocusMutations(
+                commandKey: "workspace.create",
+                isV2: true
+            )
+        )
+        XCTAssertTrue(
+            TerminalController.debugSocketCommandAllowsInAppFocusMutations(
+                commandKey: "surface.move",
+                isV2: true
+            )
+        )
+        XCTAssertFalse(
+            TerminalController.debugSocketCommandAllowsInAppFocusMutations(
+                commandKey: "debug.panel_lifecycle",
+                isV2: true
+            )
+        )
+    }
 }
 
 final class TerminalControllerSocketTextChunkTests: XCTestCase {
