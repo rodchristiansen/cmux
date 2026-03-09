@@ -84,7 +84,7 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             return
         }
         XCTAssertEqual(
-            waitForCurrentWorkspaceId(timeout: 8.0),
+            waitForCurrentWorkspaceId(windowId: currentWindowId, timeout: 8.0),
             sourceWorkspaceId,
             "Expected fresh source workspace to be current before opening browser"
         )
@@ -255,26 +255,29 @@ final class BrowserLifecycleDragUITests: XCTestCase {
         return BrowserLifecycleSnapshot(result: snapshot)
     }
 
-    private func waitForCurrentWorkspaceId(timeout: TimeInterval) -> String? {
+    private func waitForCurrentWorkspaceId(windowId: String? = nil, timeout: TimeInterval) -> String? {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if let workspaceId = loadSocketSanityData()?["currentWorkspaceId"], !workspaceId.isEmpty {
-                return workspaceId
+                if windowId == nil {
+                    return workspaceId
+                }
             }
-            if let response = v2Call("workspace.current"),
+            let currentParams = windowId.map { ["window_id": $0] } ?? [:]
+            if let response = v2Call("workspace.current", params: currentParams),
                let result = response["result"] as? [String: Any],
                let workspaceId = result["workspace_id"] as? String,
                !workspaceId.isEmpty {
                 return workspaceId
             }
-            if let response = v2Call("workspace.list"),
+            if let response = v2Call("workspace.list", params: currentParams),
                let result = response["result"] as? [String: Any],
                let workspaces = result["workspaces"] as? [[String: Any]],
                let selected = workspaces.first(where: { $0["selected"] as? Bool == true })?["workspace_id"] as? String,
                !selected.isEmpty {
                 return selected
             }
-            if let response = v2Call("workspace.list"),
+            if let response = v2Call("workspace.list", params: currentParams),
                let result = response["result"] as? [String: Any],
                let workspaces = result["workspaces"] as? [[String: Any]],
                let first = workspaces.first?["workspace_id"] as? String,
@@ -289,7 +292,9 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
         if let workspaceId = loadSocketSanityData()?["currentWorkspaceId"], !workspaceId.isEmpty {
-            return workspaceId
+            if windowId == nil {
+                return workspaceId
+            }
         }
         return nil
     }
