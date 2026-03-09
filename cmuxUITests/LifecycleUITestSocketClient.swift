@@ -98,10 +98,17 @@ final class LifecycleUITestSocketClient {
         }
         guard connected == 0 else {
             let directFailure = errnoDescription("connect")
+            if let cliFallback = callOnceViaBundledCLI(method: method, params: params) {
+                return cliFallback
+            }
             if let fallback = callOnceViaNetcat(method: method, params: params) {
                 return fallback
             }
-            return transportFailure(method: method, stage: "connect", detail: "\(directFailure); netcat fallback unavailable")
+            return transportFailure(
+                method: method,
+                stage: "connect",
+                detail: "\(directFailure); bundled CLI and netcat fallbacks unavailable"
+            )
         }
 
         let payload: [String: Any] = [
@@ -255,6 +262,95 @@ final class LifecycleUITestSocketClient {
             return nil
         }
         return json
+    }
+
+    private func callOnceViaBundledCLI(method: String, params: [String: Any]) -> [String: Any]? {
+        guard let cliPath = resolveBundledCLIPath(),
+              let paramsData = try? JSONSerialization.data(withJSONObject: params),
+              let paramsJSON = String(data: paramsData, encoding: .utf8) else {
+            return nil
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: cliPath)
+        process.arguments = [
+            "--socket", path,
+            "v2-call", method,
+            "--params-json", paramsJSON,
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC"] = String(Self.responseTimeout)
+        process.environment = environment
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        guard !outputData.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: outputData) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
+    private func resolveBundledCLIPath() -> String? {
+        let fileManager = FileManager.default
+        var candidates: [String] = []
+        let environment = ProcessInfo.processInfo.environment
+
+        if let override = environment["CMUX_UI_TEST_CLI_PATH"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            candidates.append(override)
+        }
+
+        if let builtProductsDir = environment["BUILT_PRODUCTS_DIR"], !builtProductsDir.isEmpty {
+            candidates.append("\(builtProductsDir)/cmux DEV.app/Contents/Resources/bin/cmux")
+            candidates.append("\(builtProductsDir)/cmux.app/Contents/Resources/bin/cmux")
+        }
+
+        if let testHost = environment["TEST_HOST"], !testHost.isEmpty {
+            let hostURL = URL(fileURLWithPath: testHost)
+            let productsDir = hostURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+            candidates.append("\(productsDir)/cmux DEV.app/Contents/Resources/bin/cmux")
+            candidates.append("\(productsDir)/cmux.app/Contents/Resources/bin/cmux")
+        }
+
+        let bundleCandidates = [
+            Bundle.main.bundleURL,
+            Bundle(for: Self.self).bundleURL,
+        ]
+        for bundleURL in bundleCandidates {
+            let cliPath = bundleURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("Resources/bin/cmux")
+                .path
+            candidates.append(cliPath)
+        }
+
+        for candidate in candidates {
+            if fileManager.isExecutableFile(atPath: candidate) {
+                return URL(fileURLWithPath: candidate).resolvingSymlinksInPath().path
+            }
+        }
+        return nil
     }
 
     private func preview(_ data: Data) -> String {

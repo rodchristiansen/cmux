@@ -1016,6 +1016,9 @@ struct CMUXCLI {
                 print(response)
             }
 
+        case "v2-call":
+            try runV2CallCommand(commandArgs: commandArgs, client: client, idFormat: idFormat)
+
         case "new-window":
             let response = try sendV1Command("new_window", client: client)
             print(response)
@@ -1863,6 +1866,35 @@ struct CMUXCLI {
             let filePath = (payload["path"] as? String) ?? absolutePath
             print("OK surface=\(surfaceText) pane=\(paneText) path=\(filePath)")
         }
+    }
+
+    private func runV2CallCommand(
+        commandArgs: [String],
+        client: SocketClient,
+        idFormat: CLIIDFormat
+    ) throws {
+        let (paramsJSON, remainingArgs) = parseOption(commandArgs, name: "--params-json")
+        guard let method = remainingArgs.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !method.isEmpty else {
+            throw CLIError(message: "v2-call requires a method")
+        }
+        if let extraArg = remainingArgs.dropFirst().first {
+            throw CLIError(message: "v2-call: unexpected argument '\(extraArg)'")
+        }
+
+        let params: [String: Any]
+        if let paramsJSON {
+            guard let data = paramsJSON.data(using: .utf8),
+                  let decoded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw CLIError(message: "v2-call: --params-json must be a JSON object")
+            }
+            params = decoded
+        } else {
+            params = [:]
+        }
+
+        let payload = try client.sendV2(method: method, params: params)
+        print(jsonString(formatIDs(payload, mode: idFormat)))
     }
 
     /// Returns true if the argument looks like a filesystem path rather than a CLI command.
@@ -6951,6 +6983,7 @@ struct CMUXCLI {
           rename-workspace [--workspace <id|ref>] <title>
           rename-window [--workspace <id|ref>] <title>
           current-workspace
+          v2-call <method> [--params-json <json-object>]
           read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]
           send [--workspace <id|ref>] [--surface <id|ref>] <text>
           send-key [--workspace <id|ref>] [--surface <id|ref>] <key>
