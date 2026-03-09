@@ -2754,17 +2754,54 @@ class TerminalController {
         if let windowId = v2UUID(params, "window_id") {
             return v2MainSync { AppDelegate.shared?.tabManagerFor(windowId: windowId) }
         }
-        if let wsId = v2UUID(params, "workspace_id") {
-            if let tm = v2MainSync({ AppDelegate.shared?.tabManagerFor(tabId: wsId) }) {
+        let workspaceId = v2UUID(params, "workspace_id")
+        let surfaceId = v2UUID(params, "surface_id") ?? v2UUID(params, "tab_id")
+
+        if let workspaceId {
+            if let tm = v2MainSync({ AppDelegate.shared?.tabManagerFor(tabId: workspaceId) }) {
                 return tm
             }
         }
-        if let surfaceId = v2UUID(params, "surface_id") ?? v2UUID(params, "tab_id") {
+        if let surfaceId {
             if let tm = v2MainSync({ AppDelegate.shared?.locateSurface(surfaceId: surfaceId)?.tabManager }) {
                 return tm
             }
         }
-        return tabManager
+
+        return v2MainSync {
+            guard let app = AppDelegate.shared else { return self.tabManager }
+            let summaries = app.listMainWindowSummaries()
+
+            if let workspaceId {
+                for summary in summaries {
+                    guard let manager = app.tabManagerFor(windowId: summary.windowId) else { continue }
+                    if manager.tabs.contains(where: { $0.id == workspaceId }) {
+                        return manager
+                    }
+                }
+            }
+
+            if let surfaceId {
+                for summary in summaries {
+                    guard let manager = app.tabManagerFor(windowId: summary.windowId) else { continue }
+                    if manager.tabs.contains(where: { $0.panels[surfaceId] != nil }) {
+                        return manager
+                    }
+                }
+            }
+
+            if let tabManager = self.tabManager {
+                return tabManager
+            }
+
+            if let preferredWindow = summaries.first(where: { $0.isKeyWindow })
+                ?? summaries.first(where: { $0.isVisible })
+                ?? summaries.first {
+                return app.tabManagerFor(windowId: preferredWindow.windowId)
+            }
+
+            return nil
+        }
     }
 
     private func v2ResolveWindowId(tabManager: TabManager?) -> UUID? {
