@@ -8,9 +8,15 @@ final class BrowserOmnibarSuggestionsUITests: XCTestCase {
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
-        dataPath = "/tmp/cmux-ui-test-omnibar-suggestions-\(UUID().uuidString).json"
+        // GitHub Actions' UI test runner can deny writes to hardcoded /tmp paths.
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+        dataPath = temporaryDirectory
+            .appendingPathComponent("cmux-ui-test-omnibar-suggestions-\(UUID().uuidString).json")
+            .path
         try? FileManager.default.removeItem(atPath: dataPath)
-        historyPath = "/tmp/cmux-ui-test-omnibar-history-\(UUID().uuidString).json"
+        historyPath = temporaryDirectory
+            .appendingPathComponent("cmux-ui-test-omnibar-history-\(UUID().uuidString).json")
+            .path
         try? FileManager.default.removeItem(atPath: historyPath)
 
         // Terminate any lingering app from a prior test so its debounced
@@ -18,6 +24,12 @@ final class BrowserOmnibarSuggestionsUITests: XCTestCase {
         let cleanup = XCUIApplication()
         cleanup.terminate()
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(atPath: dataPath)
+        try? FileManager.default.removeItem(atPath: historyPath)
+        super.tearDown()
     }
 
     func testOmnibarSuggestionsAlignToPillAndCmdNP() {
