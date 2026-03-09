@@ -7,6 +7,70 @@ import XCTest
 #endif
 
 final class TerminalLifecycleExecutorTests: XCTestCase {
+    func testCurrentRecordUsesVisiblePortalBindingForActiveWindowMembership() {
+        let current = makeCurrentTerminalRecord(
+            state: .awaitingAnchor,
+            residency: .detachedRetained,
+            activeWindowMembership: false,
+            desiredActive: true,
+            responderEligible: false,
+            accessibilityParticipation: false
+        )
+        let binding = makeBinding(
+            panelId: current.panelId,
+            anchorId: UUID(),
+            windowNumber: 41,
+            visibleInUI: true,
+            hostedHidden: false,
+            attachedToPortalHost: true,
+            guardGeneration: 5
+        )
+
+        let overlaid = TerminalLifecycleExecutor.currentRecord(
+            current,
+            applying: binding,
+            activeWindowNumber: 41
+        )
+
+        XCTAssertEqual(overlaid.state, .boundVisible)
+        XCTAssertEqual(overlaid.residency, .visibleInActiveWindow)
+        XCTAssertTrue(overlaid.activeWindowMembership)
+        XCTAssertTrue(overlaid.responderEligible)
+        XCTAssertTrue(overlaid.accessibilityParticipation)
+    }
+
+    func testCurrentRecordUsesHiddenPortalBindingForDetachedTerminalResidency() {
+        let current = makeCurrentTerminalRecord(
+            state: .boundVisible,
+            residency: .visibleInActiveWindow,
+            activeWindowMembership: true,
+            desiredActive: false,
+            responderEligible: false,
+            accessibilityParticipation: true
+        )
+        let binding = makeBinding(
+            panelId: current.panelId,
+            anchorId: UUID(),
+            windowNumber: 41,
+            visibleInUI: false,
+            hostedHidden: true,
+            attachedToPortalHost: true,
+            guardGeneration: 5
+        )
+
+        let overlaid = TerminalLifecycleExecutor.currentRecord(
+            current,
+            applying: binding,
+            activeWindowNumber: 41
+        )
+
+        XCTAssertEqual(overlaid.state, .boundHidden)
+        XCTAssertEqual(overlaid.residency, .detachedRetained)
+        XCTAssertFalse(overlaid.activeWindowMembership)
+        XCTAssertFalse(overlaid.responderEligible)
+        XCTAssertFalse(overlaid.accessibilityParticipation)
+    }
+
     func testVisibleTerminalWithoutReadyAnchorPlansWaitForAnchor() {
         let current = makeCurrentTerminalRecord(
             state: .awaitingAnchor,

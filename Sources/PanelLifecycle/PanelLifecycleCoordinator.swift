@@ -64,10 +64,15 @@ final class PanelLifecycleCoordinator {
         browserBindings: [BrowserLifecycleExecutorBindingSnapshot],
         audit: PanelLifecycleExecutorAuditSnapshot?
     ) -> PanelLifecycleSnapshot {
-        let records = buildRecords(
-            workspaces: workspaces,
-            selectedWorkspaceId: selectedWorkspaceId,
-            activeWindowNumber: activeWindowNumber
+        let records = applyCurrentBindings(
+            to: buildRecords(
+                workspaces: workspaces,
+                selectedWorkspaceId: selectedWorkspaceId,
+                activeWindowNumber: activeWindowNumber
+            ),
+            activeWindowNumber: activeWindowNumber,
+            terminalBindings: terminalBindings,
+            browserBindings: browserBindings
         )
         let desiredRecords = records.map {
             PanelLifecycleShadowMapper.desiredRecord(from: $0, activeWindowNumber: activeWindowNumber)
@@ -113,16 +118,50 @@ final class PanelLifecycleCoordinator {
         )
     }
 
+    private func applyCurrentBindings(
+        to records: [PanelLifecycleRecordSnapshot],
+        activeWindowNumber: Int?,
+        terminalBindings: [TerminalLifecycleExecutorBindingSnapshot],
+        browserBindings: [BrowserLifecycleExecutorBindingSnapshot]
+    ) -> [PanelLifecycleRecordSnapshot] {
+        let terminalBindingByPanelId = Dictionary(uniqueKeysWithValues: terminalBindings.map { ($0.panelId, $0) })
+        let browserBindingByPanelId = Dictionary(uniqueKeysWithValues: browserBindings.map { ($0.panelId, $0) })
+
+        return records.map { record in
+            switch record.panelType {
+            case .terminal:
+                return TerminalLifecycleExecutor.currentRecord(
+                    record,
+                    applying: terminalBindingByPanelId[record.panelId],
+                    activeWindowNumber: activeWindowNumber
+                )
+            case .browser:
+                return BrowserLifecycleExecutor.currentRecord(
+                    record,
+                    applying: browserBindingByPanelId[record.panelId],
+                    activeWindowNumber: activeWindowNumber
+                )
+            case .markdown:
+                return record
+            }
+        }
+    }
+
     func desiredRecord(
         for panelId: UUID,
         workspaces: [Workspace],
         selectedWorkspaceId: UUID?,
         activeWindowNumber: Int?
     ) -> PanelLifecycleDesiredRecordSnapshot? {
-        buildRecords(
-            workspaces: workspaces,
-            selectedWorkspaceId: selectedWorkspaceId,
-            activeWindowNumber: activeWindowNumber
+        applyCurrentBindings(
+            to: buildRecords(
+                workspaces: workspaces,
+                selectedWorkspaceId: selectedWorkspaceId,
+                activeWindowNumber: activeWindowNumber
+            ),
+            activeWindowNumber: activeWindowNumber,
+            terminalBindings: [],
+            browserBindings: []
         )
         .first(where: { $0.panelId == panelId })
         .map { PanelLifecycleShadowMapper.desiredRecord(from: $0, activeWindowNumber: activeWindowNumber) }

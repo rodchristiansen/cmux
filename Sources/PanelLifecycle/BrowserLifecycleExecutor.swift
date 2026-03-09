@@ -205,6 +205,82 @@ struct BrowserLifecycleExecutorVisibleApplicationPlan: Sendable {
 }
 
 enum BrowserLifecycleExecutor {
+    static func currentRecord(
+        _ current: PanelLifecycleRecordSnapshot,
+        applying binding: BrowserLifecycleExecutorBindingSnapshot?,
+        activeWindowNumber: Int?
+    ) -> PanelLifecycleRecordSnapshot {
+        guard current.panelType == .browser, let binding else { return current }
+
+        let visibleInActiveWindow =
+            binding.windowNumber == activeWindowNumber &&
+            binding.visibleInUI &&
+            !binding.containerHidden &&
+            binding.attachedToPortalHost
+
+        if visibleInActiveWindow {
+            let state: PanelLifecycleState
+            if current.retiringWorkspace && current.desiredVisible && current.mountedWorkspace {
+                state = .handoff
+            } else {
+                state = .boundVisible
+            }
+            return PanelLifecycleRecordSnapshot(
+                panelId: current.panelId,
+                workspaceId: current.workspaceId,
+                paneId: current.paneId,
+                tabId: current.tabId,
+                panelType: current.panelType,
+                generation: current.generation,
+                state: state,
+                residency: .visibleInActiveWindow,
+                mountedWorkspace: current.mountedWorkspace,
+                selectedWorkspace: current.selectedWorkspace,
+                retiringWorkspace: current.retiringWorkspace,
+                selectedInPane: current.selectedInPane,
+                desiredVisible: current.desiredVisible,
+                desiredActive: current.desiredActive,
+                activeWindowMembership: true,
+                responderEligible: current.desiredActive &&
+                    current.backendProfile.focusPolicy == .firstResponder,
+                accessibilityParticipation: current.backendProfile.accessibilityPolicy == .activeVisibleTree,
+                backendProfile: current.backendProfile,
+                anchor: current.anchor
+            )
+        }
+
+        let hiddenInPortal =
+            binding.attachedToPortalHost &&
+            (!binding.visibleInUI || binding.containerHidden)
+        guard hiddenInPortal else { return current }
+
+        let residency: PanelResidency = current.backendProfile.residencyPolicy == .parked
+            ? .parkedOffscreen
+            : .detachedRetained
+        let state: PanelLifecycleState = current.mountedWorkspace ? .boundHidden : .parked
+        return PanelLifecycleRecordSnapshot(
+            panelId: current.panelId,
+            workspaceId: current.workspaceId,
+            paneId: current.paneId,
+            tabId: current.tabId,
+            panelType: current.panelType,
+            generation: current.generation,
+            state: state,
+            residency: residency,
+            mountedWorkspace: current.mountedWorkspace,
+            selectedWorkspace: current.selectedWorkspace,
+            retiringWorkspace: current.retiringWorkspace,
+            selectedInPane: current.selectedInPane,
+            desiredVisible: current.desiredVisible,
+            desiredActive: current.desiredActive,
+            activeWindowMembership: false,
+            responderEligible: false,
+            accessibilityParticipation: false,
+            backendProfile: current.backendProfile,
+            anchor: current.anchor
+        )
+    }
+
     static func isCurrentGenerationBoundVisibleReadyForWorkspaceHandoff(
         currentRecord: PanelLifecycleRecordSnapshot,
         desiredRecord: PanelLifecycleDesiredRecordSnapshot,

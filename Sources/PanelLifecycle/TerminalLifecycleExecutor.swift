@@ -377,6 +377,82 @@ struct TerminalLifecycleExecutorTransientRecoveryContext: Sendable {
 }
 
 enum TerminalLifecycleExecutor {
+    static func currentRecord(
+        _ current: PanelLifecycleRecordSnapshot,
+        applying binding: TerminalLifecycleExecutorBindingSnapshot?,
+        activeWindowNumber: Int?
+    ) -> PanelLifecycleRecordSnapshot {
+        guard current.panelType == .terminal, let binding else { return current }
+
+        let visibleInActiveWindow =
+            binding.windowNumber == activeWindowNumber &&
+            binding.visibleInUI &&
+            !binding.hostedHidden &&
+            binding.attachedToPortalHost
+
+        if visibleInActiveWindow {
+            let state: PanelLifecycleState
+            if current.retiringWorkspace && current.desiredVisible && current.mountedWorkspace {
+                state = .handoff
+            } else {
+                state = .boundVisible
+            }
+            return PanelLifecycleRecordSnapshot(
+                panelId: current.panelId,
+                workspaceId: current.workspaceId,
+                paneId: current.paneId,
+                tabId: current.tabId,
+                panelType: current.panelType,
+                generation: current.generation,
+                state: state,
+                residency: .visibleInActiveWindow,
+                mountedWorkspace: current.mountedWorkspace,
+                selectedWorkspace: current.selectedWorkspace,
+                retiringWorkspace: current.retiringWorkspace,
+                selectedInPane: current.selectedInPane,
+                desiredVisible: current.desiredVisible,
+                desiredActive: current.desiredActive,
+                activeWindowMembership: true,
+                responderEligible: current.desiredActive &&
+                    current.backendProfile.focusPolicy == .firstResponder,
+                accessibilityParticipation: current.backendProfile.accessibilityPolicy == .activeVisibleTree,
+                backendProfile: current.backendProfile,
+                anchor: current.anchor
+            )
+        }
+
+        let hiddenInPortal =
+            binding.attachedToPortalHost &&
+            (!binding.visibleInUI || binding.hostedHidden)
+        guard hiddenInPortal else { return current }
+
+        let residency: PanelResidency = current.backendProfile.residencyPolicy == .parked
+            ? .parkedOffscreen
+            : .detachedRetained
+        let state: PanelLifecycleState = current.mountedWorkspace ? .boundHidden : .parked
+        return PanelLifecycleRecordSnapshot(
+            panelId: current.panelId,
+            workspaceId: current.workspaceId,
+            paneId: current.paneId,
+            tabId: current.tabId,
+            panelType: current.panelType,
+            generation: current.generation,
+            state: state,
+            residency: residency,
+            mountedWorkspace: current.mountedWorkspace,
+            selectedWorkspace: current.selectedWorkspace,
+            retiringWorkspace: current.retiringWorkspace,
+            selectedInPane: current.selectedInPane,
+            desiredVisible: current.desiredVisible,
+            desiredActive: current.desiredActive,
+            activeWindowMembership: false,
+            responderEligible: false,
+            accessibilityParticipation: false,
+            backendProfile: current.backendProfile,
+            anchor: current.anchor
+        )
+    }
+
     static func hostedStateApplicationPlan(
         target: TerminalLifecycleExecutorRuntimeTarget,
         hostedViewHasSuperview: Bool,
