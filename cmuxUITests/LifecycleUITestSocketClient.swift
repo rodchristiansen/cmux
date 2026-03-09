@@ -88,13 +88,20 @@ final class LifecycleUITestSocketClient {
 
         let sunPathOffset = MemoryLayout.offset(of: \sockaddr_un.sun_path) ?? 0
         let addrLen = socklen_t(sunPathOffset + bytes.count)
+#if os(macOS)
+        addr.sun_len = UInt8(min(Int(addrLen), 255))
+#endif
         let connected = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, addrLen)
             }
         }
         guard connected == 0 else {
-            return transportFailure(method: method, stage: "connect", detail: errnoDescription("connect"))
+            let directFailure = errnoDescription("connect")
+            if let fallback = callOnceViaNetcat(method: method, params: params) {
+                return fallback
+            }
+            return transportFailure(method: method, stage: "connect", detail: "\(directFailure); netcat fallback unavailable")
         }
 
         let payload: [String: Any] = [
@@ -144,6 +151,16 @@ final class LifecycleUITestSocketClient {
         let deadline = Date().addingTimeInterval(Self.responseTimeout)
 
         while Date() < deadline {
+            var pollDescriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let pollTimeoutMs = Int32(max(1, min(250, Int((deadline.timeIntervalSinceNow) * 1000.0))))
+            let pollResult = poll(&pollDescriptor, 1, pollTimeoutMs)
+            if pollResult == 0 {
+                continue
+            }
+            if pollResult < 0 {
+                return transportFailure(method: method, stage: "read", detail: errnoDescription("poll"))
+            }
+
             var chunk = [UInt8](repeating: 0, count: 4096)
             let readCount = recv(fd, &chunk, chunk.count, 0)
             if readCount > 0 {
@@ -188,6 +205,55 @@ final class LifecycleUITestSocketClient {
             )
         }
 
+        return json
+    }
+
+    private func callOnceViaNetcat(method: String, params: [String: Any]) -> [String: Any]? {
+        let netcatPath = "/usr/bin/nc"
+        guard FileManager.default.isExecutableFile(atPath: netcatPath) else {
+            return nil
+        }
+
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: netcatPath)
+        process.arguments = ["-U", path, "-w", "2"]
+
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        if let payloadData = (text + "\n").data(using: .utf8) {
+            inputPipe.fileHandleForWriting.write(payloadData)
+        }
+        inputPipe.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        guard !outputData.isEmpty,
+              let output = String(data: outputData, encoding: .utf8),
+              let line = output.split(separator: "\n", maxSplits: 1).first,
+              let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
+            return nil
+        }
         return json
     }
 
