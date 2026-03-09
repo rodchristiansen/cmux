@@ -89,12 +89,20 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             "Expected fresh source workspace to be current before opening browser"
         )
 
+        guard let sourceTerminalPanelId = waitForSelectedTerminalPanelId(
+            workspaceId: sourceWorkspaceId,
+            timeout: 8.0
+        ) else {
+            XCTFail("Expected selected terminal panel in fresh source workspace before opening browser")
+            return
+        }
+
         let opened = v2Call(
             "browser.open_split",
             params: [
                 "url": "https://example.com/browser-drag",
                 "workspace_id": sourceWorkspaceId,
-                "surface_id": currentSurfaceId,
+                "surface_id": sourceTerminalPanelId,
             ]
         )
         let openedResult = opened?["result"] as? [String: Any]
@@ -316,6 +324,34 @@ final class BrowserLifecycleDragUITests: XCTestCase {
         let created = v2Call("workspace.create", params: params)
         let result = created?["result"] as? [String: Any]
         return result?["workspace_id"] as? String
+    }
+
+    private func waitForSelectedTerminalPanelId(
+        workspaceId: String,
+        timeout: TimeInterval
+    ) -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let panelId = selectedTerminalPanelId(workspaceId: workspaceId) {
+                return panelId
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return selectedTerminalPanelId(workspaceId: workspaceId)
+    }
+
+    private func selectedTerminalPanelId(workspaceId: String) -> String? {
+        guard let response = v2Call("debug.panel_lifecycle"),
+              let result = response["result"] as? [String: Any],
+              let snapshot = result["snapshot"] as? [String: Any],
+              let records = snapshot["records"] as? [[String: Any]] else {
+            return nil
+        }
+        return records.first(where: { row in
+            (row["workspaceId"] as? String) == workspaceId &&
+            (row["panelType"] as? String) == "terminal" &&
+            (row["selectedWorkspace"] as? Bool) == true
+        })?["panelId"] as? String
     }
 
     private func v2Call(_ method: String, params: [String: Any] = [:]) -> [String: Any]? {
