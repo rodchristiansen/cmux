@@ -4,6 +4,7 @@ import Darwin
 final class LifecycleUITestSocketClient {
     private let path: String
     private static var bundledCLIPathOverride: String?
+    private static var fileBridgeDirectoryOverride: String?
 
     private static let readinessAttempts = 12
     private static let readinessDelay: TimeInterval = 0.1
@@ -18,6 +19,11 @@ final class LifecycleUITestSocketClient {
     static func setBundledCLIPathOverride(_ path: String?) {
         let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         bundledCLIPathOverride = trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func setFileBridgeDirectoryOverride(_ path: String?) {
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        fileBridgeDirectoryOverride = trimmed.isEmpty ? nil : trimmed
     }
 
     func call(method: String, params: [String: Any] = [:]) -> [String: Any]? {
@@ -104,6 +110,9 @@ final class LifecycleUITestSocketClient {
         }
         guard connected == 0 else {
             let directFailure = errnoDescription("connect")
+            if let fileBridgeResponse = callOnceViaFileBridge(method: method, params: params) {
+                return fileBridgeResponse
+            }
             if let cliFallback = callOnceViaBundledCLI(method: method, params: params) {
                 return cliFallback
             }
@@ -219,6 +228,56 @@ final class LifecycleUITestSocketClient {
         }
 
         return json
+    }
+
+    private func callOnceViaFileBridge(method: String, params: [String: Any]) -> [String: Any]? {
+        guard let bridgeDirectory = resolveFileBridgeDirectory() else {
+            return nil
+        }
+
+        let fileManager = FileManager.default
+        do {
+            try fileManager.createDirectory(atPath: bridgeDirectory, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+
+        let requestId = UUID().uuidString
+        let requestURL = URL(fileURLWithPath: bridgeDirectory, isDirectory: true)
+            .appendingPathComponent("\(requestId).request.json")
+        let responseURL = URL(fileURLWithPath: bridgeDirectory, isDirectory: true)
+            .appendingPathComponent("\(requestId).response.json")
+
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        ]
+        guard let requestData = try? JSONSerialization.data(withJSONObject: payload) else {
+            return transportFailure(method: method, stage: "file_bridge", detail: "invalid JSON payload")
+        }
+
+        do {
+            try requestData.write(to: requestURL, options: .atomic)
+        } catch {
+            return transportFailure(method: method, stage: "file_bridge", detail: "write failed: \(error.localizedDescription)")
+        }
+        defer {
+            try? fileManager.removeItem(at: requestURL)
+            try? fileManager.removeItem(at: responseURL)
+        }
+
+        let deadline = Date().addingTimeInterval(Self.responseTimeout)
+        while Date() < deadline {
+            if let responseData = try? Data(contentsOf: responseURL),
+               let json = try? JSONSerialization.jsonObject(with: responseData, options: []) as? [String: Any] {
+                return json
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        return transportFailure(method: method, stage: "file_bridge", detail: "timeout waiting for response")
     }
 
     private func callOnceViaNetcat(method: String, params: [String: Any]) -> [String: Any]? {
@@ -355,6 +414,18 @@ final class LifecycleUITestSocketClient {
             if fileManager.isExecutableFile(atPath: candidate) {
                 return URL(fileURLWithPath: candidate).resolvingSymlinksInPath().path
             }
+        }
+        return nil
+    }
+
+    private func resolveFileBridgeDirectory() -> String? {
+        if let override = Self.fileBridgeDirectoryOverride {
+            return override
+        }
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["CMUX_UI_TEST_V2_BRIDGE_DIR"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override
         }
         return nil
     }

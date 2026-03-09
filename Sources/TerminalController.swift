@@ -2074,6 +2074,38 @@ class TerminalController {
         return response
     }
 
+#if DEBUG
+    func processUITestV2BridgeRequest(_ request: [String: Any]) -> [String: Any] {
+        let id = request["id"] ?? NSNull()
+        guard JSONSerialization.isValidJSONObject(request),
+              let data = try? JSONSerialization.data(withJSONObject: request),
+              let jsonLine = String(data: data, encoding: .utf8) else {
+            return [
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": [
+                    "code": -32600,
+                    "message": "Invalid bridge request",
+                ],
+            ]
+        }
+
+        let responseLine = processV2Command(jsonLine)
+        guard let responseData = responseLine.data(using: .utf8),
+              let response = try? JSONSerialization.jsonObject(with: responseData, options: []) as? [String: Any] else {
+            return [
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": [
+                    "code": -32603,
+                    "message": "Invalid bridge response",
+                ],
+            ]
+        }
+        return response
+    }
+#endif
+
     private func v2Capabilities() -> [String: Any] {
         var methods: [String] = [
             "system.ping",

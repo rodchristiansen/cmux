@@ -1558,6 +1558,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var didSetupGotoSplitUITest = false
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
     private var didSetupMultiWindowNotificationsUITest = false
+    private var uiTestV2BridgeDirectory: String?
+    private var uiTestV2BridgeTimer: Timer?
+    private var uiTestV2BridgeIsProcessing = false
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
     private var debugDetachedContextWindows: [NSWindow] = []
 
@@ -1931,6 +1934,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         setupGotoSplitUITestIfNeeded()
         setupMultiWindowNotificationsUITestIfNeeded()
         setupSocketSanityUITestIfNeeded()
+        setupUITestV2BridgeIfNeeded()
 
         // UI tests sometimes don't run SwiftUI `.onAppear` soon enough (or at all) on the VM.
         // The automation socket is a core testing primitive, so ensure it's started here when
@@ -6905,6 +6909,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             writeMultiWindowNotificationTestData([
                 "socketExpectedPath": env["CMUX_SOCKET_PATH"] ?? "",
                 "bundledCLIPath": currentBundledCLIPathForSocketSanity(),
+                "v2BridgeDir": env["CMUX_UI_TEST_V2_BRIDGE_DIR"] ?? "",
                 "socketMode": "off",
                 "socketReady": "0",
                 "workspaceReady": "0",
@@ -6927,6 +6932,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         writeMultiWindowNotificationTestData([
             "socketExpectedPath": config.path,
             "bundledCLIPath": currentBundledCLIPathForSocketSanity(),
+            "v2BridgeDir": env["CMUX_UI_TEST_V2_BRIDGE_DIR"] ?? "",
             "socketMode": config.mode.rawValue,
             "socketReady": "pending",
             "workspaceReady": "pending",
@@ -6978,6 +6984,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     self.writeMultiWindowNotificationTestData([
                         "socketExpectedPath": socketPath,
                         "bundledCLIPath": self.currentBundledCLIPathForSocketSanity(),
+                        "v2BridgeDir": env["CMUX_UI_TEST_V2_BRIDGE_DIR"] ?? "",
                         "socketMode": socketMode,
                         "socketReady": isReady ? "1" : (isTimedOut ? "0" : "pending"),
                         "workspaceReady": workspaceReady ? "1" : (isTimedOut ? "0" : "pending"),
@@ -7073,6 +7080,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard let path = env["CMUX_UI_TEST_SOCKET_SANITY_PATH"], !path.isEmpty else { return }
         try? FileManager.default.removeItem(atPath: path)
         publishMultiWindowNotificationSocketStateIfNeeded(at: path)
+    }
+
+    private func setupUITestV2BridgeIfNeeded() {
+        let env = ProcessInfo.processInfo.environment
+        guard let directory = env["CMUX_UI_TEST_V2_BRIDGE_DIR"], !directory.isEmpty else { return }
+
+        uiTestV2BridgeTimer?.invalidate()
+        uiTestV2BridgeDirectory = directory
+        uiTestV2BridgeIsProcessing = false
+
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(atPath: directory)
+        try? fileManager.createDirectory(atPath: directory, withIntermediateDirectories: true)
+
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.pollUITestV2BridgeDirectory()
+        }
+        uiTestV2BridgeTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func pollUITestV2BridgeDirectory() {
+        guard let directory = uiTestV2BridgeDirectory, !uiTestV2BridgeIsProcessing else { return }
+        let directoryURL = URL(fileURLWithPath: directory, isDirectory: true)
+        guard let requestURL = nextUITestV2BridgeRequest(in: directoryURL) else { return }
+
+        uiTestV2BridgeIsProcessing = true
+        defer { uiTestV2BridgeIsProcessing = false }
+
+        let processingURL = requestURL.deletingPathExtension().appendingPathExtension("processing.json")
+        let fileManager = FileManager.default
+        do {
+            try fileManager.moveItem(at: requestURL, to: processingURL)
+        } catch {
+            return
+        }
+        defer { try? fileManager.removeItem(at: processingURL) }
+
+        guard let data = try? Data(contentsOf: processingURL),
+              let request = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            writeUITestV2BridgeResponse(
+                [
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": [
+                        "code": -32700,
+                        "message": "Invalid bridge request JSON",
+                    ],
+                ],
+                for: processingURL
+            )
+            return
+        }
+
+        let response = TerminalController.shared.processUITestV2BridgeRequest(request)
+        writeUITestV2BridgeResponse(response, for: processingURL)
+    }
+
+    private func nextUITestV2BridgeRequest(in directoryURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        return urls
+            .filter { $0.lastPathComponent.hasSuffix(".request.json") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .first
+    }
+
+    private func writeUITestV2BridgeResponse(_ response: [String: Any], for requestURL: URL) {
+        let responseURL = requestURL.deletingLastPathComponent().appendingPathComponent(
+            requestURL.lastPathComponent
+                .replacingOccurrences(of: ".processing.json", with: ".response.json")
+        )
+        guard let data = try? JSONSerialization.data(withJSONObject: response) else { return }
+        try? data.write(to: responseURL, options: .atomic)
     }
 
     private func writeMultiWindowNotificationTestData(_ updates: [String: String], at path: String) {

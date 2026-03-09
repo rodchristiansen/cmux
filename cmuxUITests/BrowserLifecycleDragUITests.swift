@@ -5,6 +5,7 @@ import Darwin
 final class BrowserLifecycleDragUITests: XCTestCase {
     private var socketPath = ""
     private var dataPath = ""
+    private var bridgeDir = ""
     private var launchTag = ""
 
     override func setUp() {
@@ -13,14 +14,19 @@ final class BrowserLifecycleDragUITests: XCTestCase {
         launchTag = "ui-tests-browser-drag-\(UUID().uuidString.prefix(8))"
         socketPath = "/tmp/cmux-debug-\(launchTag).sock"
         dataPath = "/tmp/cmux-ui-socket-sanity-\(launchTag).json"
+        bridgeDir = "/tmp/cmux-ui-v2-bridge-\(launchTag)"
         LifecycleUITestSocketClient.setBundledCLIPathOverride(nil)
+        LifecycleUITestSocketClient.setFileBridgeDirectoryOverride(bridgeDir)
         try? FileManager.default.removeItem(atPath: socketPath)
         try? FileManager.default.removeItem(atPath: dataPath)
+        try? FileManager.default.removeItem(atPath: bridgeDir)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(atPath: socketPath)
         try? FileManager.default.removeItem(atPath: dataPath)
+        try? FileManager.default.removeItem(atPath: bridgeDir)
+        LifecycleUITestSocketClient.setFileBridgeDirectoryOverride(nil)
         super.tearDown()
     }
 
@@ -32,6 +38,7 @@ final class BrowserLifecycleDragUITests: XCTestCase {
         app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_V2_BRIDGE_DIR"] = bridgeDir
         app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
         app.launchEnvironment["CMUX_TAG"] = launchTag
         app.launch()
