@@ -56,6 +56,11 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             XCTFail("Missing current workspace result")
             return
         }
+        guard let currentSurfaceId = socketState["currentSurfaceId"],
+              !currentSurfaceId.isEmpty else {
+            XCTFail("Socket sanity did not publish currentSurfaceId. state=\(socketState)")
+            return
+        }
 
         guard let currentWindowId = socketState["currentWindowId"],
               !currentWindowId.isEmpty else {
@@ -68,6 +73,7 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             params: [
                 "url": "https://example.com/browser-drag",
                 "workspace_id": originalWorkspaceId,
+                "surface_id": currentSurfaceId,
             ]
         )
         let openedResult = opened?["result"] as? [String: Any]
@@ -77,7 +83,11 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             return
         }
 
-        let created = v2Call("workspace.create", params: ["window_id": currentWindowId])
+        let created = v2Call("workspace.create", params: [
+            "window_id": currentWindowId,
+            "workspace_id": originalWorkspaceId,
+            "surface_id": currentSurfaceId,
+        ])
         let createdResult = created?["result"] as? [String: Any]
         guard let destinationWorkspaceId = createdResult?["workspace_id"] as? String,
               !destinationWorkspaceId.isEmpty else {
@@ -376,6 +386,6 @@ private final class BrowserLifecycleV2SocketClient {
         else {
             return nil
         }
-        return object["ok"] as? Bool == true ? object : nil
+        return object
     }
 }

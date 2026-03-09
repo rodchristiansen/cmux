@@ -56,6 +56,11 @@ final class MarkdownDragPerformanceUITests: XCTestCase {
             XCTFail("Missing current workspace result")
             return
         }
+        guard let currentSurfaceId = socketState["currentSurfaceId"],
+              !currentSurfaceId.isEmpty else {
+            XCTFail("Socket sanity did not publish currentSurfaceId. state=\(socketState)")
+            return
+        }
 
         let markdownURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-ui-markdown-drag-\(UUID().uuidString).md")
@@ -69,6 +74,7 @@ final class MarkdownDragPerformanceUITests: XCTestCase {
             params: [
                 "path": markdownURL.path,
                 "workspace_id": workspaceId,
+                "surface_id": currentSurfaceId,
             ]
         )
         let openResult = open?["result"] as? [String: Any]

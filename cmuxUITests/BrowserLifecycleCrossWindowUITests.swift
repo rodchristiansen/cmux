@@ -56,12 +56,18 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
             XCTFail("Missing current workspace result")
             return
         }
+        guard let currentSurfaceId = socketState["currentSurfaceId"],
+              !currentSurfaceId.isEmpty else {
+            XCTFail("Socket sanity did not publish currentSurfaceId. state=\(socketState)")
+            return
+        }
 
         let opened = v2Call(
             "browser.open_split",
             params: [
                 "url": "https://example.com/browser-cross-window",
                 "workspace_id": workspaceId,
+                "surface_id": currentSurfaceId,
             ]
         )
         let openedResult = opened?["result"] as? [String: Any]
@@ -359,6 +365,6 @@ private final class BrowserCrossWindowV2SocketClient {
         else {
             return nil
         }
-        return object["ok"] as? Bool == true ? object : nil
+        return object
     }
 }

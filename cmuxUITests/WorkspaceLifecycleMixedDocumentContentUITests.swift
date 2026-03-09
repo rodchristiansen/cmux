@@ -56,6 +56,11 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
             XCTFail("Missing current workspace result")
             return
         }
+        guard let currentSurfaceId = socketState["currentSurfaceId"],
+              !currentSurfaceId.isEmpty else {
+            XCTFail("Socket sanity did not publish currentSurfaceId. state=\(socketState)")
+            return
+        }
 
         guard let currentWindowId = socketState["currentWindowId"],
               !currentWindowId.isEmpty else {
@@ -73,6 +78,7 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
             params: [
                 "path": markdownURL.path,
                 "workspace_id": visibleWorkspaceId,
+                "surface_id": currentSurfaceId,
             ]
         )
         let openResult = open?["result"] as? [String: Any]
@@ -82,7 +88,11 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
             return
         }
 
-        let created = v2Call("workspace.create", params: ["window_id": currentWindowId])
+        let created = v2Call("workspace.create", params: [
+            "window_id": currentWindowId,
+            "workspace_id": visibleWorkspaceId,
+            "surface_id": currentSurfaceId,
+        ])
         let createdResult = created?["result"] as? [String: Any]
         guard let hiddenWorkspaceId = createdResult?["workspace_id"] as? String,
               !hiddenWorkspaceId.isEmpty else {
@@ -387,8 +397,7 @@ private final class MixedDocumentV2SocketClient {
 
         guard let text = String(data: buffer, encoding: .utf8),
               let line = text.split(separator: "\n", maxSplits: 1).first,
-              let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-              json["ok"] as? Bool == true else {
+              let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
             return nil
         }
         return json
