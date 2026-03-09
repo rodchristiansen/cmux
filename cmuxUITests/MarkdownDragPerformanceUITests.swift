@@ -19,7 +19,7 @@ final class MarkdownDragPerformanceUITests: XCTestCase {
         LifecycleUITestSocketClient.setFileBridgeDirectoryOverride(bridgeDir)
         try? FileManager.default.removeItem(atPath: socketPath)
         try? FileManager.default.removeItem(atPath: dataPath)
-        try? FileManager.default.removeItem(atPath: bridgeDir)
+        LifecycleUITestSocketClient.prepareSharedFileBridgeDirectory(bridgeDir)
     }
 
     override func tearDown() {

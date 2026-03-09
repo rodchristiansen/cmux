@@ -7091,8 +7091,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         uiTestV2BridgeIsProcessing = false
 
         let fileManager = FileManager.default
-        try? fileManager.removeItem(atPath: directory)
-        try? fileManager.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o777]
+        )
+        try? fileManager.setAttributes([.posixPermissions: 0o777], ofItemAtPath: directory)
+        if let urls = try? fileManager.contentsOfDirectory(
+            at: URL(fileURLWithPath: directory, isDirectory: true),
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for url in urls where url.lastPathComponent.hasSuffix(".json") {
+                try? fileManager.removeItem(at: url)
+            }
+        }
 
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.pollUITestV2BridgeDirectory()

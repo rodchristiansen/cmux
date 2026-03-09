@@ -26,6 +26,20 @@ final class LifecycleUITestSocketClient {
         fileBridgeDirectoryOverride = trimmed.isEmpty ? nil : trimmed
     }
 
+    static func prepareSharedFileBridgeDirectory(_ path: String) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(atPath: trimmed)
+        try? fileManager.createDirectory(
+            atPath: trimmed,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o777]
+        )
+        try? fileManager.setAttributes([.posixPermissions: 0o777], ofItemAtPath: trimmed)
+    }
+
     func call(method: String, params: [String: Any] = [:]) -> [String: Any]? {
         if method != "system.ping" {
             _ = warmSocket()
@@ -237,7 +251,12 @@ final class LifecycleUITestSocketClient {
 
         let fileManager = FileManager.default
         do {
-            try fileManager.createDirectory(atPath: bridgeDirectory, withIntermediateDirectories: true)
+            try fileManager.createDirectory(
+                atPath: bridgeDirectory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o777]
+            )
+            try? fileManager.setAttributes([.posixPermissions: 0o777], ofItemAtPath: bridgeDirectory)
         } catch {
             return nil
         }
