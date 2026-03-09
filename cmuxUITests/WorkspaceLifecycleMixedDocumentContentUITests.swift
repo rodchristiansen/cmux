@@ -50,6 +50,7 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
         XCTAssertEqual(socketState["socketReady"], "1", "Expected ready socket. state=\(socketState)")
         XCTAssertEqual(socketState["windowReady"], "1", "Expected ready current window. state=\(socketState)")
         XCTAssertEqual(socketState["surfaceReady"], "1", "Expected ready current surface. state=\(socketState)")
+        XCTAssertEqual(socketState["mutationReady"], "1", "Expected lifecycle mutation routing to be ready. state=\(socketState)")
         XCTAssertEqual(socketState["socketPingResponse"], "PONG", "Expected healthy socket ping. state=\(socketState)")
 
         guard let visibleWorkspaceId = waitForCurrentWorkspaceId(timeout: 20.0) else {
@@ -168,6 +169,7 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
                data["workspaceReady"] == "1",
                data["windowReady"] == "1",
                data["surfaceReady"] == "1",
+               data["mutationReady"] == "1",
                data["socketPingResponse"] == "PONG" {
                 return data
             }

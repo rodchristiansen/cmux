@@ -6909,6 +6909,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 "workspaceReady": "0",
                 "windowReady": "0",
                 "surfaceReady": "0",
+                "mutationReady": "0",
                 "currentWorkspaceId": "",
                 "currentWindowId": "",
                 "currentSurfaceId": "",
@@ -6929,6 +6930,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             "workspaceReady": "pending",
             "windowReady": "pending",
             "surfaceReady": "pending",
+            "mutationReady": "pending",
             "currentWorkspaceId": "",
             "currentWindowId": "",
             "currentSurfaceId": "",
@@ -6950,6 +6952,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let windowReady = !currentWindowId.isEmpty
             let currentSurfaceId = currentSurfaceIdForSocketSanity()
             let surfaceReady = !currentSurfaceId.isEmpty
+            let mutationReady = currentLifecycleMutationReadyForSocketSanity(
+                workspaceIdString: currentWorkspaceId,
+                windowIdString: currentWindowId,
+                surfaceIdString: currentSurfaceId
+            )
 
             DispatchQueue.global(qos: .utility).async {
                 let pingResponse = health.isHealthy
@@ -6973,6 +6980,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         "workspaceReady": workspaceReady ? "1" : (isTimedOut ? "0" : "pending"),
                         "windowReady": windowReady ? "1" : (isTimedOut ? "0" : "pending"),
                         "surfaceReady": surfaceReady ? "1" : (isTimedOut ? "0" : "pending"),
+                        "mutationReady": mutationReady ? "1" : (isTimedOut ? "0" : "pending"),
                         "currentWorkspaceId": currentWorkspaceId,
                         "currentWindowId": currentWindowId,
                         "currentSurfaceId": currentSurfaceId,
@@ -6983,7 +6991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         "socketPathExists": health.socketPathExists ? "1" : "0",
                         "socketFailureSignals": failureSignals,
                     ], at: dataPath)
-                    guard !isTimedOut, !(isReady && workspaceReady && windowReady && surfaceReady) else { return }
+                    guard !isTimedOut, !(isReady && workspaceReady && windowReady && surfaceReady && mutationReady) else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         publish()
                     }
@@ -7021,6 +7029,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return focusedPanelId.uuidString
         }
         return ""
+    }
+
+    private func currentLifecycleMutationReadyForSocketSanity(
+        workspaceIdString: String,
+        windowIdString: String,
+        surfaceIdString: String
+    ) -> Bool {
+        guard let workspaceId = UUID(uuidString: workspaceIdString),
+              let windowId = UUID(uuidString: windowIdString),
+              let surfaceId = UUID(uuidString: surfaceIdString) else {
+            return false
+        }
+
+        if let manager = tabManagerFor(windowId: windowId),
+           let workspace = manager.tabs.first(where: { $0.id == workspaceId }),
+           workspace.panels[surfaceId] != nil {
+            return true
+        }
+
+        if let located = locateSurface(surfaceId: surfaceId),
+           located.windowId == windowId,
+           located.workspaceId == workspaceId {
+            return true
+        }
+
+        return false
     }
 
     private func setupSocketSanityUITestIfNeeded() {
