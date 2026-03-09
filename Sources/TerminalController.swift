@@ -9451,10 +9451,33 @@ class TerminalController {
         return resp == "OK" ? .ok([:]) : .err(code: "internal_error", message: resp, data: nil)
     }
 
-    private func v2DebugPanelLifecycle() -> V2CallResult {
-        let snapshot: PanelLifecycleSnapshot? = v2MainSync {
-            tabManager?.debugPanelLifecycleSnapshot()
+    static func preferredPanelLifecycleWindowId(
+        summaries: [AppDelegate.MainWindowSummary],
+        currentWindowId: UUID?
+    ) -> UUID? {
+        summaries.first(where: { $0.isKeyWindow })?.windowId
+            ?? summaries.first(where: { $0.isVisible })?.windowId
+            ?? currentWindowId
+            ?? summaries.first?.windowId
+    }
+
+    private func v2ResolvePanelLifecycleTabManager() -> TabManager? {
+        v2MainSync {
+            guard let app = AppDelegate.shared else { return tabManager }
+            let summaries = app.listMainWindowSummaries()
+            let currentWindowId = tabManager.flatMap { app.windowId(for: $0) }
+            guard let preferredWindowId = Self.preferredPanelLifecycleWindowId(
+                summaries: summaries,
+                currentWindowId: currentWindowId
+            ) else {
+                return tabManager
+            }
+            return app.tabManagerFor(windowId: preferredWindowId) ?? tabManager
         }
+    }
+
+    private func v2DebugPanelLifecycle() -> V2CallResult {
+        let snapshot: PanelLifecycleSnapshot? = v2ResolvePanelLifecycleTabManager()?.debugPanelLifecycleSnapshot()
         guard let snapshot else {
             return .err(code: "internal_error", message: "TabManager not available", data: nil)
         }

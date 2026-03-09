@@ -11517,6 +11517,86 @@ final class TerminalControllerSidebarDedupeTests: XCTestCase {
             "file://bad host"
         )
     }
+
+    @MainActor
+    func testPreferredPanelLifecycleWindowIdPrefersKeyWindow() {
+        let currentWindowId = UUID()
+        let keyWindowId = UUID()
+        let visibleWindowId = UUID()
+
+        let preferred = TerminalController.preferredPanelLifecycleWindowId(
+            summaries: [
+                AppDelegate.MainWindowSummary(
+                    windowId: visibleWindowId,
+                    isKeyWindow: false,
+                    isVisible: true,
+                    workspaceCount: 1,
+                    selectedWorkspaceId: nil
+                ),
+                AppDelegate.MainWindowSummary(
+                    windowId: keyWindowId,
+                    isKeyWindow: true,
+                    isVisible: true,
+                    workspaceCount: 1,
+                    selectedWorkspaceId: nil
+                )
+            ],
+            currentWindowId: currentWindowId
+        )
+
+        XCTAssertEqual(preferred, keyWindowId)
+    }
+
+    @MainActor
+    func testPreferredPanelLifecycleWindowIdPrefersVisibleWindowOverCurrentWindow() {
+        let currentWindowId = UUID()
+        let visibleWindowId = UUID()
+
+        let preferred = TerminalController.preferredPanelLifecycleWindowId(
+            summaries: [
+                AppDelegate.MainWindowSummary(
+                    windowId: visibleWindowId,
+                    isKeyWindow: false,
+                    isVisible: true,
+                    workspaceCount: 1,
+                    selectedWorkspaceId: nil
+                )
+            ],
+            currentWindowId: currentWindowId
+        )
+
+        XCTAssertEqual(preferred, visibleWindowId)
+    }
+
+    @MainActor
+    func testPreferredPanelLifecycleWindowIdFallsBackToCurrentWindowThenFirstSummary() {
+        let currentWindowId = UUID()
+        let firstWindowId = UUID()
+
+        XCTAssertEqual(
+            TerminalController.preferredPanelLifecycleWindowId(
+                summaries: [],
+                currentWindowId: currentWindowId
+            ),
+            currentWindowId
+        )
+
+        XCTAssertEqual(
+            TerminalController.preferredPanelLifecycleWindowId(
+                summaries: [
+                    AppDelegate.MainWindowSummary(
+                        windowId: firstWindowId,
+                        isKeyWindow: false,
+                        isVisible: false,
+                        workspaceCount: 1,
+                        selectedWorkspaceId: nil
+                    )
+                ],
+                currentWindowId: nil
+            ),
+            firstWindowId
+        )
+    }
 }
 
 final class TerminalControllerSocketTextChunkTests: XCTestCase {
