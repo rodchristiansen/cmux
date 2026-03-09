@@ -62,17 +62,17 @@ final class MarkdownDragPerformanceUITests: XCTestCase {
             .write(to: markdownURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: markdownURL) }
 
-        guard let open = v2Call(
+        let open = v2Call(
             "markdown.open",
             params: [
                 "path": markdownURL.path,
                 "workspace_id": workspaceId,
             ]
-        ),
-        let openResult = open["result"] as? [String: Any],
-        let panelId = openResult["surface_id"] as? String,
-        !panelId.isEmpty else {
-            XCTFail("markdown.open did not return surface_id")
+        )
+        let openResult = open?["result"] as? [String: Any]
+        guard let panelId = openResult?["surface_id"] as? String,
+              !panelId.isEmpty else {
+            XCTFail("markdown.open did not return surface_id. payload=\(String(describing: open))")
             return
         }
 

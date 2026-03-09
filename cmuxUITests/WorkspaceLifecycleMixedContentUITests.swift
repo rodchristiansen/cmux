@@ -55,22 +55,33 @@ final class WorkspaceLifecycleMixedContentUITests: XCTestCase {
             return
         }
 
-        guard let browser = v2Call(
-            "browser.open_split",
-            params: ["url": "https://example.com"]
-        ),
-        let browserResult = browser["result"] as? [String: Any],
-        let browserPanelId = browserResult["surface_id"] as? String,
-        !browserPanelId.isEmpty else {
-            XCTFail("browser.open_split did not return surface_id")
+        guard let currentWindow = v2Call("window.current"),
+              let currentWindowResult = currentWindow["result"] as? [String: Any],
+              let currentWindowId = currentWindowResult["window_id"] as? String,
+              !currentWindowId.isEmpty else {
+            XCTFail("window.current did not return window_id")
             return
         }
 
-        guard let created = v2Call("workspace.create"),
-              let createdResult = created["result"] as? [String: Any],
-              let hiddenWorkspaceId = createdResult["workspace_id"] as? String,
+        let browser = v2Call(
+            "browser.open_split",
+            params: [
+                "url": "https://example.com",
+                "workspace_id": visibleWorkspaceId,
+            ]
+        )
+        let browserResult = browser?["result"] as? [String: Any]
+        guard let browserPanelId = browserResult?["surface_id"] as? String,
+              !browserPanelId.isEmpty else {
+            XCTFail("browser.open_split did not return surface_id. payload=\(String(describing: browser))")
+            return
+        }
+
+        let created = v2Call("workspace.create", params: ["window_id": currentWindowId])
+        let createdResult = created?["result"] as? [String: Any]
+        guard let hiddenWorkspaceId = createdResult?["workspace_id"] as? String,
               !hiddenWorkspaceId.isEmpty else {
-            XCTFail("Failed to create hidden workspace")
+            XCTFail("Failed to create hidden workspace. payload=\(String(describing: created))")
             return
         }
 

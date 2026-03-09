@@ -55,30 +55,38 @@ final class MarkdownLifecycleUITests: XCTestCase {
             return
         }
 
+        guard let currentWindow = v2Call("window.current"),
+              let currentWindowResult = currentWindow["result"] as? [String: Any],
+              let currentWindowId = currentWindowResult["window_id"] as? String,
+              !currentWindowId.isEmpty else {
+            XCTFail("window.current did not return window_id")
+            return
+        }
+
         let markdownURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-ui-markdown-\(UUID().uuidString).md")
         try "# lifecycle\n\nhello\n".write(to: markdownURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: markdownURL) }
 
-        guard let open = v2Call(
+        let open = v2Call(
             "markdown.open",
             params: [
                 "path": markdownURL.path,
                 "workspace_id": originalWorkspaceId,
             ]
-        ),
-        let openResult = open["result"] as? [String: Any],
-        let panelId = openResult["surface_id"] as? String,
-        !panelId.isEmpty else {
-            XCTFail("markdown.open did not return surface_id")
+        )
+        let openResult = open?["result"] as? [String: Any]
+        guard let panelId = openResult?["surface_id"] as? String,
+              !panelId.isEmpty else {
+            XCTFail("markdown.open did not return surface_id. payload=\(String(describing: open))")
             return
         }
 
-        guard let created = v2Call("workspace.create"),
-              let createdResult = created["result"] as? [String: Any],
-              let hiddenWorkspaceId = createdResult["workspace_id"] as? String,
+        let created = v2Call("workspace.create", params: ["window_id": currentWindowId])
+        let createdResult = created?["result"] as? [String: Any]
+        guard let hiddenWorkspaceId = createdResult?["workspace_id"] as? String,
               !hiddenWorkspaceId.isEmpty else {
-            XCTFail("Failed to create hidden workspace")
+            XCTFail("Failed to create hidden workspace. payload=\(String(describing: created))")
             return
         }
 

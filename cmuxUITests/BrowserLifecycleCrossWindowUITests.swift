@@ -55,14 +55,17 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
             return
         }
 
-        guard let opened = v2Call(
+        let opened = v2Call(
             "browser.open_split",
-            params: ["url": "https://example.com/browser-cross-window"]
-        ),
-        let openedResult = opened["result"] as? [String: Any],
-        let browserPanelId = openedResult["surface_id"] as? String,
-        !browserPanelId.isEmpty else {
-            XCTFail("browser.open_split did not return surface_id")
+            params: [
+                "url": "https://example.com/browser-cross-window",
+                "workspace_id": workspaceId,
+            ]
+        )
+        let openedResult = opened?["result"] as? [String: Any]
+        guard let browserPanelId = openedResult?["surface_id"] as? String,
+              !browserPanelId.isEmpty else {
+            XCTFail("browser.open_split did not return surface_id. payload=\(String(describing: opened))")
             return
         }
 

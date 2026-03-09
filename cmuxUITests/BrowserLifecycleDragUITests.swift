@@ -55,22 +55,33 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             return
         }
 
-        guard let opened = v2Call(
-            "browser.open_split",
-            params: ["url": "https://example.com/browser-drag"]
-        ),
-        let openedResult = opened["result"] as? [String: Any],
-        let browserPanelId = openedResult["surface_id"] as? String,
-        !browserPanelId.isEmpty else {
-            XCTFail("browser.open_split did not return surface_id")
+        guard let currentWindow = v2Call("window.current"),
+              let currentWindowResult = currentWindow["result"] as? [String: Any],
+              let currentWindowId = currentWindowResult["window_id"] as? String,
+              !currentWindowId.isEmpty else {
+            XCTFail("window.current did not return window_id")
             return
         }
 
-        guard let created = v2Call("workspace.create"),
-              let createdResult = created["result"] as? [String: Any],
-              let destinationWorkspaceId = createdResult["workspace_id"] as? String,
+        let opened = v2Call(
+            "browser.open_split",
+            params: [
+                "url": "https://example.com/browser-drag",
+                "workspace_id": originalWorkspaceId,
+            ]
+        )
+        let openedResult = opened?["result"] as? [String: Any]
+        guard let browserPanelId = openedResult?["surface_id"] as? String,
+              !browserPanelId.isEmpty else {
+            XCTFail("browser.open_split did not return surface_id. payload=\(String(describing: opened))")
+            return
+        }
+
+        let created = v2Call("workspace.create", params: ["window_id": currentWindowId])
+        let createdResult = created?["result"] as? [String: Any]
+        guard let destinationWorkspaceId = createdResult?["workspace_id"] as? String,
               !destinationWorkspaceId.isEmpty else {
-            XCTFail("workspace.create did not return workspace_id")
+            XCTFail("workspace.create did not return workspace_id. payload=\(String(describing: created))")
             return
         }
 
