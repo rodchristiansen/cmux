@@ -55,6 +55,7 @@ def main() -> int:
         source_window_id = client.current_window()
 
         browser_panel_id = client.open_browser("https://example.com/browser-workspace-move-to-window")
+        _wait_for_browser_visibility(client, browser_panel_id, workspace_id)
         destination_window_id = client.new_window()
 
         _must(source_window_id != destination_window_id, "window.create should return a new window id")

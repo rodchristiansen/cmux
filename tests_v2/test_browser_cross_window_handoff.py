@@ -43,12 +43,31 @@ def _wait_for_browser_plan(c: cmux, panel_id: str, timeout_s: float = 4.0) -> tu
     raise cmuxError(f"timed out waiting for browser plan for {panel_id}: {last_snapshot}")
 
 
+def _wait_for_browser_visibility(c: cmux, panel_id: str, workspace_id: str, timeout_s: float = 8.0) -> dict:
+    start = time.time()
+    last_snapshot: dict | None = None
+    while time.time() - start < timeout_s:
+        snapshot = c.panel_lifecycle()
+        last_snapshot = snapshot
+        current = next((row for row in list(snapshot.get("records") or []) if row.get("panelId") == panel_id), None)
+        if current and current.get("workspaceId") == workspace_id:
+            if (
+                current.get("selectedWorkspace") is True
+                and current.get("activeWindowMembership") is True
+                and current.get("residency") == "visibleInActiveWindow"
+            ):
+                return dict(current)
+        time.sleep(0.05)
+    raise cmuxError(f"timed out waiting for browser visibility for {panel_id}: {last_snapshot}")
+
+
 def main() -> int:
     with cmux(SOCKET_PATH) as c:
         first_workspace = c.list_workspaces()[0][1]
         c.select_workspace(first_workspace)
 
         browser_panel = c.open_browser("https://example.com/handoff")
+        _wait_for_browser_visibility(c, browser_panel, first_workspace)
         second_workspace = c.new_workspace()
         c.move_surface(browser_panel, workspace=second_workspace, focus=False)
         c.select_workspace(second_workspace)

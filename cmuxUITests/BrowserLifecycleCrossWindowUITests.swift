@@ -86,6 +86,18 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
             XCTFail("browser.open_split did not return surface_id. payload=\(String(describing: opened))")
             return
         }
+        XCTAssertTrue(
+            waitForLifecycleSnapshot(timeout: 8.0) { snapshot in
+                guard let browser = snapshot.records.first(where: { $0.panelId == browserPanelId }) else {
+                    return false
+                }
+                return browser.workspaceId == workspaceId &&
+                    browser.selectedWorkspace &&
+                    browser.activeWindowMembership &&
+                    browser.targetResidency == "visibleInActiveWindow"
+            },
+            "Expected browser to converge before cross-window workspace move"
+        )
 
         guard let sourceWindowId = socketState["currentWindowId"],
               !sourceWindowId.isEmpty else {
