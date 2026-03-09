@@ -2752,6 +2752,7 @@ final class Workspace: Identifiable, ObservableObject {
 
     @discardableResult
     private func moveSurfaceToAdjacentPane(panelId: UUID, direction: NavigationDirection) -> Bool {
+        let shouldFocus = (focusedPanelId == panelId)
         guard terminalPanel(for: panelId) != nil,
               let sourcePaneId = paneId(forPanelId: panelId),
               let targetPaneId = bonsplitController.adjacentPane(to: sourcePaneId, direction: direction) else {
@@ -2760,7 +2761,7 @@ final class Workspace: Identifiable, ObservableObject {
         if bonsplitController.isSplitZoomed {
             bonsplitController.clearPaneZoom()
         }
-        return moveSurface(panelId: panelId, toPane: targetPaneId, focus: true)
+        return moveSurface(panelId: panelId, toPane: targetPaneId, focus: shouldFocus)
     }
 
     @discardableResult
