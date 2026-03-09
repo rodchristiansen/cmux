@@ -278,7 +278,15 @@ private final class MarkdownDragV2SocketClient {
                let window = callOnce(method: "window.current"),
                let windowResult = window["result"] as? [String: Any],
                let windowId = windowResult["window_id"] as? String,
-               !windowId.isEmpty {
+               !windowId.isEmpty,
+               let workspace = callOnce(method: "workspace.current"),
+               let workspaceResult = workspace["result"] as? [String: Any],
+               let workspaceId = workspaceResult["workspace_id"] as? String,
+               !workspaceId.isEmpty,
+               let surface = callOnce(method: "surface.current"),
+               let surfaceResult = surface["result"] as? [String: Any],
+               let surfaceId = surfaceResult["surface_id"] as? String,
+               !surfaceId.isEmpty {
                 return true
             }
             Thread.sleep(forTimeInterval: Self.readinessDelay)
