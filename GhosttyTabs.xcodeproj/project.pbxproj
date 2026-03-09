@@ -6,26 +6,48 @@
 	objectVersion = 56;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		A5001001 /* cmuxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001011 /* cmuxApp.swift */; };
-		A5001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001012 /* ContentView.swift */; };
-		A5001003 /* TabManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001013 /* TabManager.swift */; };
-		A5001004 /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001014 /* GhosttyConfig.swift */; };
-		A5001005 /* GhosttyTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001015 /* GhosttyTerminalView.swift */; };
-		A5001006 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5001016 /* GhosttyKit.xcframework */; };
+		/* Begin PBXBuildFile section */
+			A5001001 /* cmuxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001011 /* cmuxApp.swift */; };
+			A5001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001012 /* ContentView.swift */; };
+			E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */; };
+			B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */; };
+			A5001003 /* TabManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001013 /* TabManager.swift */; };
+			A5001004 /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001014 /* GhosttyConfig.swift */; };
+			A5001005 /* GhosttyTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001015 /* GhosttyTerminalView.swift */; };
+			A5001532 /* TerminalWindowPortal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001531 /* TerminalWindowPortal.swift */; };
+			A5001534 /* BrowserWindowPortal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001533 /* BrowserWindowPortal.swift */; };
+		A5001540 /* PortScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001541 /* PortScanner.swift */; };
+			A5001006 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5001016 /* GhosttyKit.xcframework */; };
 		A5001007 /* TerminalController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001019 /* TerminalController.swift */; };
+		A5001500 /* CmuxWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001510 /* CmuxWebView.swift */; };
+		A5001501 /* UITestRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001511 /* UITestRecorder.swift */; };
 		A5001226 /* SocketControlSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001225 /* SocketControlSettings.swift */; };
-		A5001093 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001090 /* AppDelegate.swift */; };
-		A5001094 /* NotificationsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001091 /* NotificationsPage.swift */; };
-		A5001095 /* TerminalNotificationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001092 /* TerminalNotificationStore.swift */; };
-		A5001250 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A5001251 /* Sentry */; };
-		A50010A4 /* SplitTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50010A0 /* SplitTree.swift */; };
-		A50010A5 /* SplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50010A1 /* SplitView.swift */; };
-		A50010A6 /* TerminalSplitTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50010A2 /* TerminalSplitTreeView.swift */; };
-		A5001303 /* SurfaceSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001301 /* SurfaceSearchOverlay.swift */; };
-		A50012F1 /* Backport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F0 /* Backport.swift */; };
-		A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
-		A5001201 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001211 /* UpdateController.swift */; };
+		A5001601 /* SentryHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001600 /* SentryHelper.swift */; };
+		A5001400 /* Panel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001410 /* Panel.swift */; };
+		A5001401 /* TerminalPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001411 /* TerminalPanel.swift */; };
+		A5001402 /* BrowserPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001412 /* BrowserPanel.swift */; };
+		A5001403 /* TerminalPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001413 /* TerminalPanelView.swift */; };
+		A5001404 /* BrowserPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001414 /* BrowserPanelView.swift */; };
+		A5001420 /* MarkdownPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001418 /* MarkdownPanel.swift */; };
+		A5001421 /* MarkdownPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001419 /* MarkdownPanelView.swift */; };
+		A5001290 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A5001291 /* MarkdownUI */; };
+		A5001405 /* PanelContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001415 /* PanelContentView.swift */; };
+		A5001406 /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001416 /* Workspace.swift */; };
+		A5001407 /* WorkspaceContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001417 /* WorkspaceContentView.swift */; };
+			A5001093 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001090 /* AppDelegate.swift */; };
+			A5001094 /* NotificationsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001091 /* NotificationsPage.swift */; };
+			A5001095 /* TerminalNotificationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001092 /* TerminalNotificationStore.swift */; };
+			A5001250 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A5001251 /* Sentry */; };
+			B9000024A1B2C3D4E5F60719 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A5001251 /* Sentry */; };
+			A5001270 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = A5001271 /* PostHog */; };
+			A5001303 /* SurfaceSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001301 /* SurfaceSearchOverlay.swift */; };
+			A5008371 /* BrowserSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5008370 /* BrowserSearchOverlay.swift */; };
+			A5008373 /* BrowserFindJavaScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5008372 /* BrowserFindJavaScript.swift */; };
+			A50012F1 /* Backport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F0 /* Backport.swift */; };
+			A50012F3 /* KeyboardShortcutSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F2 /* KeyboardShortcutSettings.swift */; };
+			A50012F5 /* KeyboardLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F4 /* KeyboardLayout.swift */; };
+			A5001521 /* PostHogAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001520 /* PostHogAnalytics.swift */; };
+			A5001201 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001211 /* UpdateController.swift */; };
 		A5001202 /* UpdateDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001212 /* UpdateDelegate.swift */; };
 		A5001203 /* UpdateDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001213 /* UpdateDriver.swift */; };
 		A5001204 /* UpdateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001214 /* UpdateViewModel.swift */; };
@@ -40,17 +62,39 @@
 		A5001208 /* UpdateTitlebarAccessory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001218 /* UpdateTitlebarAccessory.swift */; };
 		A5001209 /* WindowToolbarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001219 /* WindowToolbarController.swift */; };
 		A5001240 /* WindowDecorationsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001241 /* WindowDecorationsController.swift */; };
+		A5001610 /* SessionPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001611 /* SessionPersistence.swift */; };
 		A5001100 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A5001101 /* Assets.xcassets */; };
 		A5001230 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A5001231 /* Sparkle */; };
 		B9000002A1B2C3D4E5F60719 /* cmux.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000001A1B2C3D4E5F60719 /* cmux.swift */; };
 		B900000BA1B2C3D4E5F60719 /* cmux in Copy CLI */ = {isa = PBXBuildFile; fileRef = B9000004A1B2C3D4E5F60719 /* cmux */; };
+		C1ADE00002A1B2C3D4E5F719 /* claude in Copy CLI */ = {isa = PBXBuildFile; fileRef = C1ADE00001A1B2C3D4E5F719 /* claude */; };
+		D1BEF00002A1B2C3D4E5F719 /* open in Copy CLI */ = {isa = PBXBuildFile; fileRef = D1BEF00001A1B2C3D4E5F719 /* open */; };
 		84E00D47E4584162AE53BC8D /* xterm-ghostty in Resources */ = {isa = PBXBuildFile; fileRef = B2E7294509CC42FE9191870E /* xterm-ghostty */; };
-		C1D2E3F4A5B6C7D8E9F00001 /* shell-integration in Resources */ = {isa = PBXBuildFile; fileRef = C1D2E3F4A5B6C7D8E9F00002 /* shell-integration */; };
-		B9000012A1B2C3D4E5F60719 /* AutomationSocketUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000011A1B2C3D4E5F60719 /* AutomationSocketUITests.swift */; };
-		B8F266236A1A3D9A45BD840F /* SidebarResizeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818DBCD4AB69EB72573E8138 /* SidebarResizeUITests.swift */; };
-		C0B4D9B0A1B2C3D4E5F60718 /* UpdatePillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B4D9B1A1B2C3D4E5F60718 /* UpdatePillUITests.swift */; };
-		B9000014A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000013A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift */; };
-/* End PBXBuildFile section */
+		A5002000 /* THIRD_PARTY_LICENSES.md in Resources */ = {isa = PBXBuildFile; fileRef = A5002001 /* THIRD_PARTY_LICENSES.md */; };
+			B9000012A1B2C3D4E5F60719 /* AutomationSocketUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000011A1B2C3D4E5F60719 /* AutomationSocketUITests.swift */; };
+			B8F266236A1A3D9A45BD840F /* SidebarResizeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818DBCD4AB69EB72573E8138 /* SidebarResizeUITests.swift */; };
+			B8F266246A1A3D9A45BD840F /* SidebarHelpMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F266256A1A3D9A45BD840F /* SidebarHelpMenuUITests.swift */; };
+			C0B4D9B0A1B2C3D4E5F60718 /* UpdatePillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B4D9B1A1B2C3D4E5F60718 /* UpdatePillUITests.swift */; };
+					B9000014A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000013A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift */; };
+					B9000015A1B2C3D4E5F60719 /* MultiWindowNotificationsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000016A1B2C3D4E5F60719 /* MultiWindowNotificationsUITests.swift */; };
+					B900001AA1B2C3D4E5F60719 /* CloseWorkspaceConfirmDialogUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000019A1B2C3D4E5F60719 /* CloseWorkspaceConfirmDialogUITests.swift */; };
+					B9000023A1B2C3D4E5F60719 /* CloseWorkspaceCmdDUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000022A1B2C3D4E5F60719 /* CloseWorkspaceCmdDUITests.swift */; };
+					D0E0F0B0A1B2C3D4E5F60718 /* BrowserPaneNavigationKeybindUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E0F0B1A1B2C3D4E5F60718 /* BrowserPaneNavigationKeybindUITests.swift */; };
+					D0E0F0B2A1B2C3D4E5F60718 /* BrowserOmnibarSuggestionsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E0F0B3A1B2C3D4E5F60718 /* BrowserOmnibarSuggestionsUITests.swift */; };
+					E1000000A1B2C3D4E5F60718 /* MenuKeyEquivalentRoutingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000001A1B2C3D4E5F60718 /* MenuKeyEquivalentRoutingUITests.swift */; };
+					F1000000A1B2C3D4E5F60718 /* CmuxWebViewKeyEquivalentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000001A1B2C3D4E5F60718 /* CmuxWebViewKeyEquivalentTests.swift */; };
+					F2000000A1B2C3D4E5F60718 /* UpdatePillReleaseVisibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000001A1B2C3D4E5F60718 /* UpdatePillReleaseVisibilityTests.swift */; };
+					F3000000A1B2C3D4E5F60718 /* CJKIMEInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3000001A1B2C3D4E5F60718 /* CJKIMEInputTests.swift */; };
+					F4000000A1B2C3D4E5F60718 /* GhosttyConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4000001A1B2C3D4E5F60718 /* GhosttyConfigTests.swift */; };
+					F5000000A1B2C3D4E5F60718 /* SessionPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5000001A1B2C3D4E5F60718 /* SessionPersistenceTests.swift */; };
+					F6000000A1B2C3D4E5F60718 /* AppDelegateShortcutRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6000001A1B2C3D4E5F60718 /* AppDelegateShortcutRoutingTests.swift */; };
+					F7000000A1B2C3D4E5F60718 /* WorkspaceContentViewVisibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7000001A1B2C3D4E5F60718 /* WorkspaceContentViewVisibilityTests.swift */; };
+					F8000000A1B2C3D4E5F60718 /* SocketControlPasswordStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000001A1B2C3D4E5F60718 /* SocketControlPasswordStoreTests.swift */; };
+					A5008381 /* BrowserFindJavaScriptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5008380 /* BrowserFindJavaScriptTests.swift */; };
+					A5008383 /* CommandPaletteSearchEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5008382 /* CommandPaletteSearchEngineTests.swift */; };
+		DA7A10CA710E000000000003 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = DA7A10CA710E000000000001 /* Localizable.xcstrings */; };
+		DA7A10CA710E000000000004 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = DA7A10CA710E000000000002 /* InfoPlist.xcstrings */; };
+			/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		A5001020 /* Embed Frameworks */ = {
@@ -70,6 +114,8 @@
 			dstSubfolderSpec = 7;
 			files = (
 				B900000BA1B2C3D4E5F60719 /* cmux in Copy CLI */,
+				C1ADE00002A1B2C3D4E5F719 /* claude in Copy CLI */,
+				D1BEF00002A1B2C3D4E5F719 /* open in Copy CLI */,
 			);
 			name = "Copy CLI";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -91,30 +137,57 @@
 			remoteGlobalIDString = B9000005A1B2C3D4E5F60719 /* cmux-cli */;
 			remoteInfo = "cmux-cli";
 		};
+		F1000008A1B2C3D4E5F60718 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A5001070 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A5001050 /* GhosttyTabs */;
+			remoteInfo = GhosttyTabs;
+		};
 /* End PBXContainerItemProxy section */
 
-/* Begin PBXFileReference section */
-		A5001000 /* cmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7E7E6EF344A568AC7FEE3715 /* GhosttyTabsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GhosttyTabsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A5001011 /* cmuxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = cmuxApp.swift; sourceTree = "<group>"; };
-		A5001012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		A5001013 /* TabManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabManager.swift; sourceTree = "<group>"; };
-		A5001014 /* GhosttyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfig.swift; sourceTree = "<group>"; };
-		A5001015 /* GhosttyTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalView.swift; sourceTree = "<group>"; };
-		A5001016 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
+		/* Begin PBXFileReference section */
+			A5001000 /* cmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
+			F1000002A1B2C3D4E5F60718 /* cmuxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cmuxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+			7E7E6EF344A568AC7FEE3715 /* cmuxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cmuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+			A5001011 /* cmuxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = cmuxApp.swift; sourceTree = "<group>"; };
+			A5001012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+			9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSelectionState.swift; sourceTree = "<group>"; };
+			B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDragHandleView.swift; sourceTree = "<group>"; };
+			A5001013 /* TabManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabManager.swift; sourceTree = "<group>"; };
+			A5001014 /* GhosttyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfig.swift; sourceTree = "<group>"; };
+			A5001015 /* GhosttyTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalView.swift; sourceTree = "<group>"; };
+			A5001531 /* TerminalWindowPortal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWindowPortal.swift; sourceTree = "<group>"; };
+			A5001533 /* BrowserWindowPortal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWindowPortal.swift; sourceTree = "<group>"; };
+		A5001541 /* PortScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
+			A5001016 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		A5001017 /* ghostty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ghostty.h; sourceTree = "<group>"; };
 		A5001018 /* cmux-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "cmux-Bridging-Header.h"; sourceTree = "<group>"; };
 		A5001019 /* TerminalController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalController.swift; sourceTree = "<group>"; };
-		A5001225 /* SocketControlSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketControlSettings.swift; sourceTree = "<group>"; };
+		A5001600 /* SentryHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryHelper.swift; sourceTree = "<group>"; };
+			A5001510 /* CmuxWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/CmuxWebView.swift; sourceTree = "<group>"; };
+			A5001511 /* UITestRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestRecorder.swift; sourceTree = "<group>"; };
+			A5001520 /* PostHogAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogAnalytics.swift; sourceTree = "<group>"; };
+			A5001225 /* SocketControlSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketControlSettings.swift; sourceTree = "<group>"; };
+		A5001410 /* Panel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/Panel.swift; sourceTree = "<group>"; };
+		A5001411 /* TerminalPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/TerminalPanel.swift; sourceTree = "<group>"; };
+		A5001412 /* BrowserPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/BrowserPanel.swift; sourceTree = "<group>"; };
+		A5001413 /* TerminalPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/TerminalPanelView.swift; sourceTree = "<group>"; };
+		A5001414 /* BrowserPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/BrowserPanelView.swift; sourceTree = "<group>"; };
+		A5001415 /* PanelContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/PanelContentView.swift; sourceTree = "<group>"; };
+		A5001418 /* MarkdownPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanel.swift; sourceTree = "<group>"; };
+		A5001419 /* MarkdownPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanelView.swift; sourceTree = "<group>"; };
+		A5001416 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
+		A5001417 /* WorkspaceContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceContentView.swift; sourceTree = "<group>"; };
 		A5001090 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A5001091 /* NotificationsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsPage.swift; sourceTree = "<group>"; };
 		A5001092 /* TerminalNotificationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalNotificationStore.swift; sourceTree = "<group>"; };
-		A50010A0 /* SplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splits/SplitTree.swift; sourceTree = "<group>"; };
-		A50010A1 /* SplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splits/SplitView.swift; sourceTree = "<group>"; };
-		A50010A2 /* TerminalSplitTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splits/TerminalSplitTreeView.swift; sourceTree = "<group>"; };
 		A5001301 /* SurfaceSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Find/SurfaceSearchOverlay.swift; sourceTree = "<group>"; };
+		A5008370 /* BrowserSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Find/BrowserSearchOverlay.swift; sourceTree = "<group>"; };
+		A5008372 /* BrowserFindJavaScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Find/BrowserFindJavaScript.swift; sourceTree = "<group>"; };
 		A50012F0 /* Backport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backport.swift; sourceTree = "<group>"; };
 		A50012F2 /* KeyboardShortcutSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettings.swift; sourceTree = "<group>"; };
+		A50012F4 /* KeyboardLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayout.swift; sourceTree = "<group>"; };
 		A5001211 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Update/UpdateController.swift; sourceTree = "<group>"; };
 		A5001212 /* UpdateDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Update/UpdateDelegate.swift; sourceTree = "<group>"; };
 		A5001213 /* UpdateDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Update/UpdateDriver.swift; sourceTree = "<group>"; };
@@ -130,29 +203,61 @@
 		A5001222 /* WindowAccessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowAccessor.swift; sourceTree = "<group>"; };
 		A5001223 /* UpdateLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Update/UpdateLogStore.swift; sourceTree = "<group>"; };
 		A5001241 /* WindowDecorationsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDecorationsController.swift; sourceTree = "<group>"; };
+		A5001611 /* SessionPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPersistence.swift; sourceTree = "<group>"; };
 		818DBCD4AB69EB72573E8138 /* SidebarResizeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarResizeUITests.swift; sourceTree = "<group>"; };
+		B8F266256A1A3D9A45BD840F /* SidebarHelpMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHelpMenuUITests.swift; sourceTree = "<group>"; };
 		C0B4D9B1A1B2C3D4E5F60718 /* UpdatePillUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatePillUITests.swift; sourceTree = "<group>"; };
 		A5001101 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		IC000002 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; path = AppIcon.icon; sourceTree = "<group>"; };
 		B2E7294509CC42FE9191870E /* xterm-ghostty */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ghostty/terminfo/78/xterm-ghostty"; sourceTree = "<group>"; };
-		C1D2E3F4A5B6C7D8E9F00002 /* shell-integration */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "shell-integration"; sourceTree = "<group>"; };
+		C1ADE00001A1B2C3D4E5F719 /* claude */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "Resources/bin/claude"; sourceTree = SOURCE_ROOT; };
+		D1BEF00001A1B2C3D4E5F719 /* open */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "Resources/bin/open"; sourceTree = SOURCE_ROOT; };
+		A5002001 /* THIRD_PARTY_LICENSES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_LICENSES.md; sourceTree = SOURCE_ROOT; };
 		B9000001A1B2C3D4E5F60719 /* cmux.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = cmux.swift; sourceTree = "<group>"; };
 		B9000004A1B2C3D4E5F60719 /* cmux */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = cmux; sourceTree = BUILT_PRODUCTS_DIR; };
-		B9000011A1B2C3D4E5F60719 /* AutomationSocketUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationSocketUITests.swift; sourceTree = "<group>"; };
-		B9000013A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JumpToUnreadUITests.swift; sourceTree = "<group>"; };
+				B9000011A1B2C3D4E5F60719 /* AutomationSocketUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationSocketUITests.swift; sourceTree = "<group>"; };
+					B9000013A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JumpToUnreadUITests.swift; sourceTree = "<group>"; };
+					B9000016A1B2C3D4E5F60719 /* MultiWindowNotificationsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowNotificationsUITests.swift; sourceTree = "<group>"; };
+					B9000019A1B2C3D4E5F60719 /* CloseWorkspaceConfirmDialogUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloseWorkspaceConfirmDialogUITests.swift; sourceTree = "<group>"; };
+					B9000022A1B2C3D4E5F60719 /* CloseWorkspaceCmdDUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloseWorkspaceCmdDUITests.swift; sourceTree = "<group>"; };
+						D0E0F0B1A1B2C3D4E5F60718 /* BrowserPaneNavigationKeybindUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPaneNavigationKeybindUITests.swift; sourceTree = "<group>"; };
+						D0E0F0B3A1B2C3D4E5F60718 /* BrowserOmnibarSuggestionsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserOmnibarSuggestionsUITests.swift; sourceTree = "<group>"; };
+						E1000001A1B2C3D4E5F60718 /* MenuKeyEquivalentRoutingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuKeyEquivalentRoutingUITests.swift; sourceTree = "<group>"; };
+				F1000001A1B2C3D4E5F60718 /* CmuxWebViewKeyEquivalentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxWebViewKeyEquivalentTests.swift; sourceTree = "<group>"; };
+				F2000001A1B2C3D4E5F60718 /* UpdatePillReleaseVisibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatePillReleaseVisibilityTests.swift; sourceTree = "<group>"; };
+				F3000001A1B2C3D4E5F60718 /* CJKIMEInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CJKIMEInputTests.swift; sourceTree = "<group>"; };
+				F4000001A1B2C3D4E5F60718 /* GhosttyConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigTests.swift; sourceTree = "<group>"; };
+				F5000001A1B2C3D4E5F60718 /* SessionPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPersistenceTests.swift; sourceTree = "<group>"; };
+				F6000001A1B2C3D4E5F60718 /* AppDelegateShortcutRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateShortcutRoutingTests.swift; sourceTree = "<group>"; };
+				F7000001A1B2C3D4E5F60718 /* WorkspaceContentViewVisibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceContentViewVisibilityTests.swift; sourceTree = "<group>"; };
+				F8000001A1B2C3D4E5F60718 /* SocketControlPasswordStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketControlPasswordStoreTests.swift; sourceTree = "<group>"; };
+				A5008380 /* BrowserFindJavaScriptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserFindJavaScriptTests.swift; sourceTree = "<group>"; };
+				A5008382 /* CommandPaletteSearchEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteSearchEngineTests.swift; sourceTree = "<group>"; };
+					DA7A10CA710E000000000001 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		DA7A10CA710E000000000002 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A5001030 /* Frameworks */ = {
+			A5001030 /* Frameworks */ = {
+				isa = PBXFrameworksBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					A5001006 /* GhosttyKit.xcframework in Frameworks */,
+					A5001230 /* Sparkle in Frameworks */,
+					A5001250 /* Sentry in Frameworks */,
+					A5001270 /* PostHog in Frameworks */,
+					A5001290 /* MarkdownUI in Frameworks */,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
+		AB408954939A11B8A87BB5DE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A5001006 /* GhosttyKit.xcframework in Frameworks */,
-				A5001230 /* Sparkle in Frameworks */,
-				A5001250 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AB408954939A11B8A87BB5DE /* Frameworks */ = {
+		F1000006A1B2C3D4E5F60718 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -163,6 +268,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B9000024A1B2C3D4E5F60719 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -175,11 +281,20 @@
 			files = (
 				A5001100 /* Assets.xcassets in Resources */,
 				84E00D47E4584162AE53BC8D /* xterm-ghostty in Resources */,
-				C1D2E3F4A5B6C7D8E9F00001 /* shell-integration in Resources */,
+				A5002000 /* THIRD_PARTY_LICENSES.md in Resources */,
+				DA7A10CA710E000000000003 /* Localizable.xcstrings in Resources */,
+				DA7A10CA710E000000000004 /* InfoPlist.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		EC1BC8BE24F703F6BBEAA1DE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1000007A1B2C3D4E5F60718 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -204,7 +319,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-				shellScript = "set -euo pipefail\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nGHOSTTY_DEST=\"${DEST}/ghostty\"\nTERMINFO_DEST=\"${DEST}/terminfo\"\nSRC_SHARE=\"${SRCROOT}/ghostty/zig-out/share\"\nGHOSTTY_SRC=\"${SRC_SHARE}/ghostty\"\nTERMINFO_SRC=\"${SRC_SHARE}/terminfo\"\nFALLBACK_GHOSTTY=\"${SRCROOT}/Resources/ghostty\"\nFALLBACK_TERMINFO=\"${SRCROOT}/Resources/ghostty/terminfo\"\nTERMINFO_OVERLAY=\"${SRCROOT}/Resources/terminfo-overlay\"\nif [ -d \"$GHOSTTY_SRC\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  rsync -a --delete \"$GHOSTTY_SRC/\" \"$GHOSTTY_DEST/\"\nelif [ -d \"$FALLBACK_GHOSTTY\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  rsync -a --delete \"$FALLBACK_GHOSTTY/\" \"$GHOSTTY_DEST/\"\nfi\nif [ -d \"$TERMINFO_SRC\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a --delete \"$TERMINFO_SRC/\" \"$TERMINFO_DEST/\"\nelif [ -d \"$FALLBACK_TERMINFO\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a --delete \"$FALLBACK_TERMINFO/\" \"$TERMINFO_DEST/\"\nfi\n# Overlay any cmux-specific terminfo adjustments.\n# This intentionally does not use --delete so we only patch specific entries.\nif [ -d \"$TERMINFO_OVERLAY\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a \"$TERMINFO_OVERLAY/\" \"$TERMINFO_DEST/\"\nfi\nINFO_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nCOMMIT=\"$(git -C \"${SRCROOT}\" rev-parse --short=9 HEAD 2>/dev/null || true)\"\nif [ -n \"$COMMIT\" ] && [ -f \"$INFO_PLIST\" ]; then\n  /usr/libexec/PlistBuddy -c \"Set :CMUXCommit $COMMIT\" \"$INFO_PLIST\" >/dev/null 2>&1 || /usr/libexec/PlistBuddy -c \"Add :CMUXCommit string $COMMIT\" \"$INFO_PLIST\" >/dev/null 2>&1 || true\nfi\n";
+			shellScript = "set -euo pipefail\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nGHOSTTY_DEST=\"${DEST}/ghostty\"\nTERMINFO_DEST=\"${DEST}/terminfo\"\nCMUX_SHELL_DEST=\"${DEST}/shell-integration\"\nSRC_SHARE=\"${SRCROOT}/ghostty/zig-out/share\"\nGHOSTTY_SRC=\"${SRC_SHARE}/ghostty\"\nTERMINFO_SRC=\"${SRC_SHARE}/terminfo\"\nFALLBACK_GHOSTTY=\"${SRCROOT}/Resources/ghostty\"\nFALLBACK_TERMINFO=\"${SRCROOT}/Resources/ghostty/terminfo\"\nTERMINFO_OVERLAY=\"${SRCROOT}/Resources/terminfo-overlay\"\nCMUX_SHELL_SRC=\"${SRCROOT}/Resources/shell-integration\"\nif [ -d \"$GHOSTTY_SRC\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  rsync -a --delete \"$GHOSTTY_SRC/\" \"$GHOSTTY_DEST/\"\nelif [ -d \"$FALLBACK_GHOSTTY\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  rsync -a --delete \"$FALLBACK_GHOSTTY/\" \"$GHOSTTY_DEST/\"\nfi\nif [ -d \"$TERMINFO_SRC\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a --delete \"$TERMINFO_SRC/\" \"$TERMINFO_DEST/\"\nelif [ -d \"$FALLBACK_TERMINFO\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a --delete \"$FALLBACK_TERMINFO/\" \"$TERMINFO_DEST/\"\nfi\n# Overlay any cmux-specific terminfo adjustments.\n# This intentionally does not use --delete so we only patch specific entries.\nif [ -d \"$TERMINFO_OVERLAY\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a \"$TERMINFO_OVERLAY/\" \"$TERMINFO_DEST/\"\nfi\nif [ -d \"$CMUX_SHELL_SRC\" ]; then\n  mkdir -p \"$CMUX_SHELL_DEST\"\n  # Use '/.' so dotfiles like .zshenv/.zprofile are copied too.\n  rsync -a \"$CMUX_SHELL_SRC/.\" \"$CMUX_SHELL_DEST/\"\nfi\nINFO_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nCOMMIT=\"$(git -C \"${SRCROOT}\" rev-parse --short=9 HEAD 2>/dev/null || true)\"\nif [ -n \"$COMMIT\" ] && [ -f \"$INFO_PLIST\" ]; then\n  /usr/libexec/PlistBuddy -c \"Set :CMUXCommit $COMMIT\" \"$INFO_PLIST\" >/dev/null 2>&1 || /usr/libexec/PlistBuddy -c \"Add :CMUXCommit string $COMMIT\" \"$INFO_PLIST\" >/dev/null 2>&1 || true\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -216,33 +331,54 @@
 				B9000003A1B2C3D4E5F60719 /* CLI */,
 				087C454FFF74443AB06942C3 /* Resources */,
 				A5001101 /* Assets.xcassets */,
+				IC000002 /* AppIcon.icon */,
 				A5001016 /* GhosttyKit.xcframework */,
 				A5001017 /* ghostty.h */,
 				A5001018 /* cmux-Bridging-Header.h */,
-				3196C9C2D01F054C1D3385DD /* GhosttyTabsUITests */,
+				3196C9C2D01F054C1D3385DD /* cmuxUITests */,
+				F1000003A1B2C3D4E5F60718 /* cmuxTests */,
 				A5001042 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A5001041 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				A5001011 /* cmuxApp.swift */,
-				A5001012 /* ContentView.swift */,
-				A50012F0 /* Backport.swift */,
-				A50012F2 /* KeyboardShortcutSettings.swift */,
-				A5001013 /* TabManager.swift */,
+			A5001041 /* Sources */ = {
+				isa = PBXGroup;
+				children = (
+					A5001011 /* cmuxApp.swift */,
+					A5001012 /* ContentView.swift */,
+					9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */,
+					B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */,
+					A50012F0 /* Backport.swift */,
+					A50012F2 /* KeyboardShortcutSettings.swift */,
+					A50012F4 /* KeyboardLayout.swift */,
+					A5001013 /* TabManager.swift */,
+					A5001511 /* UITestRecorder.swift */,
+					A5001520 /* PostHogAnalytics.swift */,
+					A5001416 /* Workspace.swift */,
+				A5001417 /* WorkspaceContentView.swift */,
 				A5001014 /* GhosttyConfig.swift */,
 				A5001015 /* GhosttyTerminalView.swift */,
+				A5001531 /* TerminalWindowPortal.swift */,
+				A5001533 /* BrowserWindowPortal.swift */,
 				A5001019 /* TerminalController.swift */,
+				A5001541 /* PortScanner.swift */,
 				A5001225 /* SocketControlSettings.swift */,
+				A5001600 /* SentryHelper.swift */,
 				A5001090 /* AppDelegate.swift */,
 				A5001091 /* NotificationsPage.swift */,
 				A5001092 /* TerminalNotificationStore.swift */,
-				A50010A0 /* SplitTree.swift */,
-				A50010A1 /* SplitView.swift */,
-				A50010A2 /* TerminalSplitTreeView.swift */,
 				A5001301 /* SurfaceSearchOverlay.swift */,
+				A5008370 /* BrowserSearchOverlay.swift */,
+				A5008372 /* BrowserFindJavaScript.swift */,
+				A5001410 /* Panel.swift */,
+				A5001411 /* TerminalPanel.swift */,
+				A5001412 /* BrowserPanel.swift */,
+				A5001413 /* TerminalPanelView.swift */,
+				A5001414 /* BrowserPanelView.swift */,
+				A5001418 /* MarkdownPanel.swift */,
+				A5001419 /* MarkdownPanelView.swift */,
+				A5001510 /* CmuxWebView.swift */,
+				A5001415 /* PanelContentView.swift */,
 				A5001211 /* UpdateController.swift */,
 				A5001212 /* UpdateDelegate.swift */,
 				A5001213 /* UpdateDriver.swift */,
@@ -258,6 +394,7 @@
 				A5001219 /* WindowToolbarController.swift */,
 				A5001241 /* WindowDecorationsController.swift */,
 				A5001222 /* WindowAccessor.swift */,
+				A5001611 /* SessionPersistence.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -274,7 +411,10 @@
 			isa = PBXGroup;
 			children = (
 				B2E7294509CC42FE9191870E /* xterm-ghostty */,
-				C1D2E3F4A5B6C7D8E9F00002 /* shell-integration */,
+				A5002001 /* THIRD_PARTY_LICENSES.md */,
+				C1ADE00001A1B2C3D4E5F719 /* claude */,
+				DA7A10CA710E000000000001 /* Localizable.xcstrings */,
+				DA7A10CA710E000000000002 /* InfoPlist.xcstrings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -284,22 +424,47 @@
 			children = (
 				A5001000 /* cmux.app */,
 				B9000004A1B2C3D4E5F60719 /* cmux */,
-				7E7E6EF344A568AC7FEE3715 /* GhosttyTabsUITests.xctest */,
+				7E7E6EF344A568AC7FEE3715 /* cmuxUITests.xctest */,
+				F1000002A1B2C3D4E5F60718 /* cmuxTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		3196C9C2D01F054C1D3385DD /* GhosttyTabsUITests */ = {
-			isa = PBXGroup;
-			children = (
-				B9000011A1B2C3D4E5F60719 /* AutomationSocketUITests.swift */,
-				B9000013A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift */,
-				818DBCD4AB69EB72573E8138 /* SidebarResizeUITests.swift */,
-				C0B4D9B1A1B2C3D4E5F60718 /* UpdatePillUITests.swift */,
-			);
-			path = GhosttyTabsUITests;
-			sourceTree = "<group>";
-		};
+			3196C9C2D01F054C1D3385DD /* cmuxUITests */ = {
+				isa = PBXGroup;
+						children = (
+							B9000011A1B2C3D4E5F60719 /* AutomationSocketUITests.swift */,
+							B9000013A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift */,
+							B9000022A1B2C3D4E5F60719 /* CloseWorkspaceCmdDUITests.swift */,
+							B9000019A1B2C3D4E5F60719 /* CloseWorkspaceConfirmDialogUITests.swift */,
+							B9000016A1B2C3D4E5F60719 /* MultiWindowNotificationsUITests.swift */,
+							818DBCD4AB69EB72573E8138 /* SidebarResizeUITests.swift */,
+							B8F266256A1A3D9A45BD840F /* SidebarHelpMenuUITests.swift */,
+							D0E0F0B1A1B2C3D4E5F60718 /* BrowserPaneNavigationKeybindUITests.swift */,
+							D0E0F0B3A1B2C3D4E5F60718 /* BrowserOmnibarSuggestionsUITests.swift */,
+							C0B4D9B1A1B2C3D4E5F60718 /* UpdatePillUITests.swift */,
+						E1000001A1B2C3D4E5F60718 /* MenuKeyEquivalentRoutingUITests.swift */,
+					);
+				path = cmuxUITests;
+				sourceTree = "<group>";
+			};
+			F1000003A1B2C3D4E5F60718 /* cmuxTests */ = {
+				isa = PBXGroup;
+				children = (
+					F1000001A1B2C3D4E5F60718 /* CmuxWebViewKeyEquivalentTests.swift */,
+					F2000001A1B2C3D4E5F60718 /* UpdatePillReleaseVisibilityTests.swift */,
+					F3000001A1B2C3D4E5F60718 /* CJKIMEInputTests.swift */,
+					F4000001A1B2C3D4E5F60718 /* GhosttyConfigTests.swift */,
+					F5000001A1B2C3D4E5F60718 /* SessionPersistenceTests.swift */,
+					F6000001A1B2C3D4E5F60718 /* AppDelegateShortcutRoutingTests.swift */,
+					F7000001A1B2C3D4E5F60718 /* WorkspaceContentViewVisibilityTests.swift */,
+					F8000001A1B2C3D4E5F60718 /* SocketControlPasswordStoreTests.swift */,
+					A5008380 /* BrowserFindJavaScriptTests.swift */,
+					A5008382 /* CommandPaletteSearchEngineTests.swift */,
+				);
+				path = cmuxTests;
+				sourceTree = "<group>";
+			};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -309,20 +474,23 @@
 			buildPhases = (
 				A5001051 /* Sources */,
 				A5001030 /* Frameworks */,
-				A5001300A1B2C3D4E5F60719 /* Copy Ghostty Resources */,
 				A5001102 /* Resources */,
 				A5001020 /* Embed Frameworks */,
 				B900000AA1B2C3D4E5F60719 /* Copy CLI */,
+				A5001300A1B2C3D4E5F60719 /* Copy Ghostty Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				B900000EA1B2C3D4E5F60719 /* PBXTargetDependency */,
 			);
-			packageProductDependencies = (
-				A5001231 /* Sparkle */,
-				A5001251 /* Sentry */,
-			);
+				packageProductDependencies = (
+					A5001231 /* Sparkle */,
+					A5001251 /* Sentry */,
+					A5001271 /* PostHog */,
+					A5001261 /* Bonsplit */,
+					A5001291 /* MarkdownUI */,
+				);
 			name = GhosttyTabs;
 			productName = GhosttyTabs;
 			productReference = A5001000 /* cmux.app */;
@@ -339,14 +507,17 @@
 			);
 			dependencies = (
 			);
+			packageProductDependencies = (
+				A5001251 /* Sentry */,
+			);
 			name = "cmux-cli";
 			productName = cmux;
 			productReference = B9000004A1B2C3D4E5F60719 /* cmux */;
 			productType = "com.apple.product-type.tool";
 		};
-		CB450DF0F0B3839599082C4D /* GhosttyTabsUITests */ = {
+		CB450DF0F0B3839599082C4D /* cmuxUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AD2C7ED08993D3CD4910A1FF /* Build configuration list for PBXNativeTarget "GhosttyTabsUITests" */;
+			buildConfigurationList = AD2C7ED08993D3CD4910A1FF /* Build configuration list for PBXNativeTarget "cmuxUITests" */;
 			buildPhases = (
 				E436EF0BA8EC9E6721A42F79 /* Sources */,
 				AB408954939A11B8A87BB5DE /* Frameworks */,
@@ -357,10 +528,28 @@
 			dependencies = (
 				32568B0DCFC8656BA952468E /* PBXTargetDependency */,
 			);
-			name = GhosttyTabsUITests;
-			productName = GhosttyTabsUITests;
-			productReference = 7E7E6EF344A568AC7FEE3715 /* GhosttyTabsUITests.xctest */;
+			name = cmuxUITests;
+			productName = cmuxUITests;
+			productReference = 7E7E6EF344A568AC7FEE3715 /* cmuxUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		F1000004A1B2C3D4E5F60718 /* cmuxTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1000010A1B2C3D4E5F60718 /* Build configuration list for PBXNativeTarget "cmuxTests" */;
+			buildPhases = (
+				F1000005A1B2C3D4E5F60718 /* Sources */,
+				F1000006A1B2C3D4E5F60718 /* Frameworks */,
+				F1000007A1B2C3D4E5F60718 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F1000009A1B2C3D4E5F60718 /* PBXTargetDependency */,
+			);
+			name = cmuxTests;
+			productName = cmuxTests;
+			productReference = F1000002A1B2C3D4E5F60718 /* cmuxTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -379,44 +568,84 @@
 			knownRegions = (
 				en,
 				Base,
+				ja,
+				ar,
+				bs,
+				da,
+				de,
+				es,
+				fr,
+				it,
+				ko,
+				nb,
+				pl,
+				pt-BR,
+				ru,
+				th,
+				tr,
+				zh-Hans,
+				zh-Hant,
 			);
 			mainGroup = A5001040;
-			packageReferences = (
-				A5001232 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
-			);
+				packageReferences = (
+					A5001232 /* XCRemoteSwiftPackageReference "Sparkle" */,
+					A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+					A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */,
+					A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+					A5001260 /* XCLocalSwiftPackageReference "bonsplit" */,
+				);
 			productRefGroup = A5001042 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				A5001050 /* GhosttyTabs */,
 				B9000005A1B2C3D4E5F60719 /* cmux-cli */,
-				CB450DF0F0B3839599082C4D /* GhosttyTabsUITests */,
+				CB450DF0F0B3839599082C4D /* cmuxUITests */,
+				F1000004A1B2C3D4E5F60718 /* cmuxTests */,
 			);
 		};
 /* End PBXProject section */
 
-/* Begin PBXSourcesBuildPhase section */
-		A5001051 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A5001001 /* cmuxApp.swift in Sources */,
-				A5001002 /* ContentView.swift in Sources */,
-				A50012F1 /* Backport.swift in Sources */,
-				A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
-				A5001003 /* TabManager.swift in Sources */,
+		/* Begin PBXSourcesBuildPhase section */
+			A5001051 /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					A5001001 /* cmuxApp.swift in Sources */,
+					A5001002 /* ContentView.swift in Sources */,
+					E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */,
+					B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */,
+					A50012F1 /* Backport.swift in Sources */,
+					A50012F3 /* KeyboardShortcutSettings.swift in Sources */,
+					A50012F5 /* KeyboardLayout.swift in Sources */,
+						A5001003 /* TabManager.swift in Sources */,
+						A5001501 /* UITestRecorder.swift in Sources */,
+						A5001521 /* PostHogAnalytics.swift in Sources */,
+						A5001406 /* Workspace.swift in Sources */,
+				A5001407 /* WorkspaceContentView.swift in Sources */,
 				A5001004 /* GhosttyConfig.swift in Sources */,
 				A5001005 /* GhosttyTerminalView.swift in Sources */,
+				A5001532 /* TerminalWindowPortal.swift in Sources */,
+				A5001534 /* BrowserWindowPortal.swift in Sources */,
 				A5001007 /* TerminalController.swift in Sources */,
+				A5001540 /* PortScanner.swift in Sources */,
 				A5001226 /* SocketControlSettings.swift in Sources */,
+				A5001601 /* SentryHelper.swift in Sources */,
 				A5001093 /* AppDelegate.swift in Sources */,
 				A5001094 /* NotificationsPage.swift in Sources */,
 				A5001095 /* TerminalNotificationStore.swift in Sources */,
-				A50010A4 /* SplitTree.swift in Sources */,
-				A50010A5 /* SplitView.swift in Sources */,
-				A50010A6 /* TerminalSplitTreeView.swift in Sources */,
 				A5001303 /* SurfaceSearchOverlay.swift in Sources */,
+				A5008371 /* BrowserSearchOverlay.swift in Sources */,
+				A5008373 /* BrowserFindJavaScript.swift in Sources */,
+				A5001400 /* Panel.swift in Sources */,
+				A5001401 /* TerminalPanel.swift in Sources */,
+				A5001402 /* BrowserPanel.swift in Sources */,
+				A5001403 /* TerminalPanelView.swift in Sources */,
+				A5001404 /* BrowserPanelView.swift in Sources */,
+				A5001420 /* MarkdownPanel.swift in Sources */,
+				A5001421 /* MarkdownPanelView.swift in Sources */,
+				A5001500 /* CmuxWebView.swift in Sources */,
+				A5001405 /* PanelContentView.swift in Sources */,
 				A5001201 /* UpdateController.swift in Sources */,
 				A5001202 /* UpdateDelegate.swift in Sources */,
 				A5001203 /* UpdateDriver.swift in Sources */,
@@ -432,21 +661,46 @@
 				A5001209 /* WindowToolbarController.swift in Sources */,
 				A5001240 /* WindowDecorationsController.swift in Sources */,
 				A500120C /* WindowAccessor.swift in Sources */,
+				A5001610 /* SessionPersistence.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		E436EF0BA8EC9E6721A42F79 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				B9000012A1B2C3D4E5F60719 /* AutomationSocketUITests.swift in Sources */,
-				B9000014A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift in Sources */,
-				B8F266236A1A3D9A45BD840F /* SidebarResizeUITests.swift in Sources */,
-				C0B4D9B0A1B2C3D4E5F60718 /* UpdatePillUITests.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		B9000006A1B2C3D4E5F60719 /* Sources */ = {
+			E436EF0BA8EC9E6721A42F79 /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+						files = (
+							B9000012A1B2C3D4E5F60719 /* AutomationSocketUITests.swift in Sources */,
+							B9000014A1B2C3D4E5F60719 /* JumpToUnreadUITests.swift in Sources */,
+							B900001AA1B2C3D4E5F60719 /* CloseWorkspaceConfirmDialogUITests.swift in Sources */,
+							B9000023A1B2C3D4E5F60719 /* CloseWorkspaceCmdDUITests.swift in Sources */,
+							B9000015A1B2C3D4E5F60719 /* MultiWindowNotificationsUITests.swift in Sources */,
+							B8F266236A1A3D9A45BD840F /* SidebarResizeUITests.swift in Sources */,
+							B8F266246A1A3D9A45BD840F /* SidebarHelpMenuUITests.swift in Sources */,
+							D0E0F0B0A1B2C3D4E5F60718 /* BrowserPaneNavigationKeybindUITests.swift in Sources */,
+							D0E0F0B2A1B2C3D4E5F60718 /* BrowserOmnibarSuggestionsUITests.swift in Sources */,
+							C0B4D9B0A1B2C3D4E5F60718 /* UpdatePillUITests.swift in Sources */,
+						E1000000A1B2C3D4E5F60718 /* MenuKeyEquivalentRoutingUITests.swift in Sources */,
+					);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
+			F1000005A1B2C3D4E5F60718 /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					F1000000A1B2C3D4E5F60718 /* CmuxWebViewKeyEquivalentTests.swift in Sources */,
+					F2000000A1B2C3D4E5F60718 /* UpdatePillReleaseVisibilityTests.swift in Sources */,
+					F3000000A1B2C3D4E5F60718 /* CJKIMEInputTests.swift in Sources */,
+					F4000000A1B2C3D4E5F60718 /* GhosttyConfigTests.swift in Sources */,
+					F5000000A1B2C3D4E5F60718 /* SessionPersistenceTests.swift in Sources */,
+					F6000000A1B2C3D4E5F60718 /* AppDelegateShortcutRoutingTests.swift in Sources */,
+					F7000000A1B2C3D4E5F60718 /* WorkspaceContentViewVisibilityTests.swift in Sources */,
+					F8000000A1B2C3D4E5F60718 /* SocketControlPasswordStoreTests.swift in Sources */,
+					A5008381 /* BrowserFindJavaScriptTests.swift in Sources */,
+					A5008383 /* CommandPaletteSearchEngineTests.swift in Sources */,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
+			B9000006A1B2C3D4E5F60719 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -461,6 +715,11 @@
 			isa = PBXTargetDependency;
 			target = A5001050 /* GhosttyTabs */;
 			targetProxy = 738BF3D3196765B250928A93 /* PBXContainerItemProxy */;
+		};
+		F1000009A1B2C3D4E5F60718 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A5001050 /* GhosttyTabs */;
+			targetProxy = F1000008A1B2C3D4E5F60718 /* PBXContainerItemProxy */;
 		};
 		B900000EA1B2C3D4E5F60719 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -494,7 +753,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -522,9 +781,10 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -538,23 +798,16 @@
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 73;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "cmux DEV";
-				INFOPLIST_KEY_CFBundleName = "cmux DEV";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMainStoryboardFile = "";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				INFOPLIST_KEY_SUFeedURL = "https://github.com/manaflow-ai/cmux/releases/latest/download/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_KEY)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.27.0;
+				MARKETING_VERSION = 0.61.0;
 				OTHER_LDFLAGS = (
 					"-lc++",
 					"-framework",
@@ -568,8 +821,9 @@
 					"-framework",
 					Carbon,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.cmux.app.debug;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.app.debug;
 				PRODUCT_NAME = "cmux DEV";
+				SPARKLE_PUBLIC_KEY = "avjcgKibf1FTvhIjLBxhd+0HSpsXU4D0IGlVk8cgqRc=";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "cmux-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -583,23 +837,16 @@
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 73;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = cmux;
-				INFOPLIST_KEY_CFBundleName = cmux;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMainStoryboardFile = "";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				INFOPLIST_KEY_SUFeedURL = "https://github.com/manaflow-ai/cmux/releases/latest/download/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_KEY)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.27.0;
+				MARKETING_VERSION = 0.61.0;
 				OTHER_LDFLAGS = (
 					"-lc++",
 					"-framework",
@@ -613,9 +860,10 @@
 					"-framework",
 					Carbon,
 				);
-				ONLY_ACTIVE_ARCH = YES;
+				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.app;
 				PRODUCT_NAME = cmux;
+				SPARKLE_PUBLIC_KEY = "avjcgKibf1FTvhIjLBxhd+0HSpsXU4D0IGlVk8cgqRc=";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "cmux-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -626,7 +874,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = cmux;
 				PRODUCT_MODULE_NAME = cmux_cli;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -639,9 +893,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = cmux;
 				PRODUCT_MODULE_NAME = cmux_cli;
+				ONLY_ACTIVE_ARCH = NO;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -652,12 +913,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 73;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.27.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.61.0;
 				ONLY_ACTIVE_ARCH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cmux.appuitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.appuitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_VERSION = 5.0;
@@ -669,14 +930,51 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 73;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.27.0;
-				ONLY_ACTIVE_ARCH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cmux.appuitests;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.61.0;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.appuitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = GhosttyTabs;
+			};
+			name = Release;
+		};
+		F1000011A1B2C3D4E5F60718 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 73;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.61.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.apptests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cmux DEV.app/Contents/MacOS/cmux DEV";
+				TEST_TARGET_NAME = GhosttyTabs;
+			};
+			name = Debug;
+		};
+		F1000012A1B2C3D4E5F60718 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 73;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.61.0;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cmuxterm.apptests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cmux.app/Contents/MacOS/cmux";
 				TEST_TARGET_NAME = GhosttyTabs;
 			};
 			name = Release;
@@ -692,14 +990,34 @@
 				minimumVersion = 2.5.1;
 			};
 		};
-		A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 9.3.0;
+			A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+				isa = XCRemoteSwiftPackageReference;
+				repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+				requirement = {
+					kind = upToNextMajorVersion;
+					minimumVersion = 9.3.0;
+				};
 			};
-		};
+			A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+				isa = XCRemoteSwiftPackageReference;
+				repositoryURL = "https://github.com/PostHog/posthog-ios.git";
+				requirement = {
+					kind = upToNextMajorVersion;
+					minimumVersion = 3.41.0;
+				};
+			};
+			A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+				isa = XCRemoteSwiftPackageReference;
+				repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+				requirement = {
+					kind = upToNextMajorVersion;
+					minimumVersion = 2.4.1;
+				};
+			};
+			A5001260 /* XCLocalSwiftPackageReference "bonsplit" */ = {
+				isa = XCLocalSwiftPackageReference;
+				relativePath = vendor/bonsplit;
+			};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -708,11 +1026,26 @@
 			package = A5001232 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
-		A5001251 /* Sentry */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
-			productName = Sentry;
-		};
+			A5001251 /* Sentry */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+				productName = Sentry;
+			};
+			A5001271 /* PostHog */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+				productName = PostHog;
+			};
+			A5001261 /* Bonsplit */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = A5001260 /* XCLocalSwiftPackageReference "bonsplit" */;
+				productName = Bonsplit;
+			};
+			A5001291 /* MarkdownUI */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+				productName = MarkdownUI;
+			};
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
@@ -725,11 +1058,20 @@
 		defaultConfigurationIsVisible = 0;
 		defaultConfigurationName = Release;
 	};
-	AD2C7ED08993D3CD4910A1FF /* Build configuration list for PBXNativeTarget "GhosttyTabsUITests" */ = {
+	AD2C7ED08993D3CD4910A1FF /* Build configuration list for PBXNativeTarget "cmuxUITests" */ = {
 		isa = XCConfigurationList;
 		buildConfigurations = (
 			C117776A77E71D1432F570D7 /* Debug */,
 			442A6A86CAC6E8AD27FDD8F2 /* Release */,
+		);
+		defaultConfigurationIsVisible = 0;
+		defaultConfigurationName = Release;
+	};
+	F1000010A1B2C3D4E5F60718 /* Build configuration list for PBXNativeTarget "cmuxTests" */ = {
+		isa = XCConfigurationList;
+		buildConfigurations = (
+			F1000011A1B2C3D4E5F60718 /* Debug */,
+			F1000012A1B2C3D4E5F60718 /* Release */,
 		);
 		defaultConfigurationIsVisible = 0;
 		defaultConfigurationName = Release;

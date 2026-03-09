@@ -38,6 +38,11 @@ const CATEGORIES: ShortcutCategory[] = [
         combos: [["⌘", "⇧", "W"]],
         description: "Close workspace",
       },
+      {
+        id: "ws-rename",
+        combos: [["⌘", "⇧", "R"]],
+        description: "Rename workspace",
+      },
     ],
   },
   {
@@ -80,6 +85,16 @@ const CATEGORIES: ShortcutCategory[] = [
         combos: [["⌥", "⌘", "←/→/↑/↓"]],
         description: "Focus pane directionally",
       },
+      {
+        id: "sp-browser-right",
+        combos: [["⌥", "⌘", "D"]],
+        description: "Split browser right",
+      },
+      {
+        id: "sp-browser-down",
+        combos: [["⌥", "⌘", "⇧", "D"]],
+        description: "Split browser down",
+      },
     ],
   },
   {
@@ -88,8 +103,8 @@ const CATEGORIES: ShortcutCategory[] = [
     shortcuts: [
       {
         id: "br-open",
-        combos: [["⌘", "⇧", "B"]],
-        description: "Open browser in split",
+        combos: [["⌘", "⇧", "L"]],
+        description: "Open browser surface",
       },
       { id: "br-addr", combos: [["⌘", "L"]], description: "Focus address bar" },
       { id: "br-forward", combos: [["⌘", "]"]], description: "Forward" },

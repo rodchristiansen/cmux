@@ -4,6 +4,7 @@ import Link from "next/link";
 import { NavLinks } from "./nav-links";
 import { DownloadButton } from "./download-button";
 import { ThemeToggle } from "../theme";
+import { GitHubStarsBadge } from "./github-stars";
 import {
   useMobileDrawer,
   MobileDrawerOverlay,
@@ -21,7 +22,7 @@ export function SiteHeader({
 
   return (
     <>
-      <header className="sticky top-0 z-30 w-full bg-background/80 backdrop-blur-sm">
+      <header className="sticky top-0 z-30 w-full bg-background">
         <div className="w-full max-w-6xl mx-auto flex items-center px-6 h-12">
           {/* Left: logo + section */}
           <div className="flex flex-1 items-center gap-3 min-w-0">
@@ -54,10 +55,11 @@ export function SiteHeader({
             <NavLinks />
           </nav>
 
-          {/* Right: Download + theme + mobile */}
-          <div className="flex flex-1 items-center justify-end gap-1 min-w-0">
+          {/* Right: GitHub stars + Download + theme + mobile */}
+          <div className="flex flex-1 items-center justify-end gap-3 min-w-0">
+            <GitHubStarsBadge />
             <div className="hidden md:block">
-              <DownloadButton size="sm" />
+              <DownloadButton size="sm" location="navbar" />
             </div>
             <ThemeToggle />
             <MobileDrawerToggle
@@ -132,16 +134,9 @@ export function SiteHeader({
           >
             Community
           </Link>
-          <a
-            href="https://github.com/manaflow-ai/cmux"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-foreground transition-colors py-1"
-          >
-            GitHub
-          </a>
+          <GitHubStarsBadge location="mobile_drawer" />
           <div className="pt-2">
-            <DownloadButton size="sm" />
+            <DownloadButton size="sm" location="mobile_drawer" />
           </div>
         </div>
       </nav>

@@ -9,19 +9,75 @@ on:
 permissions:
   contents: write
 
+env:
+  CREATE_DMG_VERSION: 8.0.0
+
 jobs:
   build-sign-notarize:
-    runs-on: self-hosted
-    concurrency:
-      group: self-hosted-build
-      cancel-in-progress: false
+    runs-on: depot-macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
 
+      - name: Guard immutable release assets
+        id: guard_release_assets
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { evaluateReleaseAssetGuard } = require('./scripts/release_asset_guard');
+            const tag = context.ref.replace('refs/tags/', '');
+            core.setOutput('skip_all', 'false');
+            core.setOutput('skip_upload', 'false');
+            core.setOutput('release_state', 'clear');
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              const existingAssetNames = (release.data.assets || []).map((asset) => asset.name);
+              const {
+                conflicts,
+                missingImmutableAssets,
+                guardState,
+                hasPartialConflict,
+                shouldSkipBuildAndUpload,
+              } = evaluateReleaseAssetGuard({ existingAssetNames });
+
+              core.setOutput('release_state', guardState);
+
+              if (hasPartialConflict) {
+                core.setFailed(
+                  `Release ${tag} has a partial immutable asset state. Existing immutable assets: ` +
+                  `${conflicts.join(', ')}. Missing immutable assets: ${missingImmutableAssets.join(', ')}. ` +
+                  'Resolve release assets manually before rerunning.'
+                );
+                return;
+              }
+
+              if (shouldSkipBuildAndUpload) {
+                core.notice(
+                  `Release ${tag} already contains immutable assets (${conflicts.join(', ')}). ` +
+                  'Skipping build, notarization, and upload to preserve existing signed artifacts.'
+                );
+                core.setOutput('skip_all', 'true');
+                core.setOutput('skip_upload', 'true');
+                return;
+              }
+
+              core.notice(`Release ${tag} exists but has no immutable release assets yet; continuing.`);
+            } catch (error) {
+              if (error.status === 404) {
+                core.notice(`Release ${tag} does not exist yet; safe to build and publish assets.`);
+                return;
+              }
+              throw error;
+            }
+
       - name: Select Xcode
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         run: |
           set -euo pipefail
           if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
@@ -41,33 +97,25 @@ jobs:
           xcrun --sdk macosx --show-sdk-path
 
       - name: Install build deps
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         run: |
-          brew update
-          brew install zig
-          npm install --global create-dmg
+          npm install --global "create-dmg@${CREATE_DMG_VERSION}"
 
-      - name: Build GhosttyKit.xcframework
+      - name: Download pre-built GhosttyKit.xcframework
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         run: |
-          cd ghostty
-          zig build -Demit-xcframework=true -Demit-macos-app=false -Dxcframework-target=native -Doptimize=ReleaseFast
-          cd ..
-          rm -rf GhosttyKit.xcframework
-          cp -R ghostty/macos/GhosttyKit.xcframework GhosttyKit.xcframework
+          ./scripts/download-prebuilt-ghosttykit.sh
 
-      - name: Clear SPM cache
-        run: |
-          rm -rf ~/Library/Caches/org.swift.swiftpm
-          rm -rf ~/Library/Developer/Xcode/DerivedData/GhosttyTabs-*
-
-      - name: Configure SwiftPM cache
-        run: |
-          set -euo pipefail
-          CACHE_DIR="${RUNNER_TEMP}/swiftpm-cache/${GITHUB_RUN_ID}"
-          rm -rf "$CACHE_DIR"
-          mkdir -p "$CACHE_DIR"
-          echo "SWIFTPM_CACHE_PATH=$CACHE_DIR" >> "$GITHUB_ENV"
+      - name: Cache Swift packages
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .spm-cache
+          key: spm-${{ hashFiles('GhosttyTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-
 
       - name: Derive Sparkle public key from private key
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -80,12 +128,18 @@ jobs:
           echo "SPARKLE_PUBLIC_KEY=$DERIVED_PUBLIC_KEY" >> "$GITHUB_ENV"
 
       - name: Build app (Release)
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         run: |
-          xcodebuild -scheme cmux -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -scheme cmux -configuration Release -derivedDataPath build \
+            -clonedSourcePackagesDirPath .spm-cache \
+            CODE_SIGNING_ALLOWED=NO build
 
       - name: Inject Sparkle keys into Info.plist
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         run: |
           APP_PLIST="build/Build/Products/Release/cmux.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :SUPublicEDKey" "$APP_PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$APP_PLIST" >/dev/null 2>&1 || true
           echo "Adding SUPublicEDKey to Info.plist..."
           /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_KEY}" "$APP_PLIST"
           echo "Adding SUFeedURL to Info.plist..."
@@ -95,6 +149,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$APP_PLIST"
 
       - name: Import signing cert
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -118,6 +173,7 @@ jobs:
           security list-keychains -d user -s build.keychain
 
       - name: Codesign app
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -126,14 +182,16 @@ jobs:
             exit 1
           fi
           APP_PATH="build/Build/Products/Release/cmux.app"
+          ENTITLEMENTS="cmux.entitlements"
           CLI_PATH="$APP_PATH/Contents/Resources/bin/cmux"
           if [ -f "$CLI_PATH" ]; then
-            /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$CLI_PATH"
+            /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" "$CLI_PATH"
           fi
-          /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --deep "$APP_PATH"
+          /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" --deep "$APP_PATH"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Notarize app
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -177,7 +235,22 @@ jobs:
           xcrun stapler staple "$DMG_RELEASE"
           xcrun stapler validate "$DMG_RELEASE"
 
+      - name: Upload dSYMs to Sentry
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: manaflow
+          SENTRY_PROJECT: cmuxterm-macos
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "SENTRY_AUTH_TOKEN not set, skipping dSYM upload"
+            exit 0
+          fi
+          brew install getsentry/tools/sentry-cli || true
+          sentry-cli debug-files upload --include-sources build/Build/Products/Release/
+
       - name: Generate Sparkle appcast
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -188,12 +261,14 @@ jobs:
           ./scripts/sparkle_generate_appcast.sh cmux-macos.dmg "$GITHUB_REF_NAME" appcast.xml
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        if: steps.guard_release_assets.outputs.skip_upload != 'true'
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           files: |
             cmux-macos.dmg
             appcast.xml
           generate_release_notes: true
+          overwrite_files: false
 
       - name: Cleanup keychain
         if: always()

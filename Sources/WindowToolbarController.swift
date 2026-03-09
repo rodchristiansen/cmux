@@ -2,20 +2,17 @@ import AppKit
 import Combine
 import SwiftUI
 
+@MainActor
 final class WindowToolbarController: NSObject, NSToolbarDelegate {
     private let commandItemIdentifier = NSToolbarItem.Identifier("cmux.focusedCommand")
-    private let updateItemIdentifier = NSToolbarItem.Identifier("cmux.updatePill")
 
     private weak var tabManager: TabManager?
-    private weak var updateViewModel: UpdateViewModel?
 
     private var commandLabels: [ObjectIdentifier: NSTextField] = [:]
     private var observers: [NSObjectProtocol] = []
-    private var updateCancellables: [ObjectIdentifier: AnyCancellable] = [:]
-    private var updateHostingViews: [ObjectIdentifier: NSView] = [:]
+    private let focusedCommandUpdateCoalescer = NotificationBurstCoalescer(delay: 1.0 / 30.0)
 
-    init(updateViewModel: UpdateViewModel) {
-        self.updateViewModel = updateViewModel
+    override init() {
         super.init()
     }
 
@@ -23,16 +20,13 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
-        for cancellable in updateCancellables.values {
-            cancellable.cancel()
-        }
     }
 
     func start(tabManager: TabManager) {
         self.tabManager = tabManager
         attachToExistingWindows()
         installObservers()
-        updateFocusedCommandText()
+        scheduleFocusedCommandTextUpdate()
     }
 
     private func installObservers() {
@@ -42,7 +36,9 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.updateFocusedCommandText()
+            Task { @MainActor [weak self] in
+                self?.scheduleFocusedCommandTextUpdate()
+            }
         })
 
         observers.append(center.addObserver(
@@ -50,7 +46,9 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.updateFocusedCommandText()
+            Task { @MainActor [weak self] in
+                self?.scheduleFocusedCommandTextUpdate()
+            }
         })
 
         observers.append(center.addObserver(
@@ -59,7 +57,9 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
             queue: .main
         ) { [weak self] notification in
             guard let window = notification.object as? NSWindow else { return }
-            self?.attach(to: window)
+            Task { @MainActor in
+                self?.attach(to: window)
+            }
         })
     }
 
@@ -83,6 +83,12 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
         window.titleVisibility = .hidden
     }
 
+    private func scheduleFocusedCommandTextUpdate() {
+        focusedCommandUpdateCoalescer.signal { [weak self] in
+            self?.updateFocusedCommandText()
+        }
+    }
+
     private func updateFocusedCommandText() {
         guard let tabManager else { return }
         let text: String
@@ -95,18 +101,20 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
         }
 
         for label in commandLabels.values {
-            label.stringValue = text
+            if label.stringValue != text {
+                label.stringValue = text
+            }
         }
     }
 
     // MARK: - NSToolbarDelegate
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [commandItemIdentifier, .flexibleSpace, updateItemIdentifier]
+        [commandItemIdentifier, .flexibleSpace]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [commandItemIdentifier, .flexibleSpace, updateItemIdentifier]
+        [commandItemIdentifier, .flexibleSpace]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -119,29 +127,10 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
             label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             item.view = label
             commandLabels[ObjectIdentifier(toolbar)] = label
-            updateFocusedCommandText()
+            scheduleFocusedCommandTextUpdate()
             return item
         }
 
-        if itemIdentifier == updateItemIdentifier, let updateViewModel {
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            let hostingView = NonDraggableHostingView(rootView: UpdatePill(model: updateViewModel))
-            let key = ObjectIdentifier(toolbar)
-            item.view = hostingView
-            updateHostingViews[key] = hostingView
-
-            // Observe state changes to nudge the toolbar into re-laying-out
-            // the item when the pill's intrinsic content size changes.
-            updateCancellables[key]?.cancel()
-            updateCancellables[key] = updateViewModel.$state
-                .receive(on: DispatchQueue.main)
-                .sink { [weak hostingView] _ in
-                    DispatchQueue.main.async { [weak hostingView] in
-                        hostingView?.invalidateIntrinsicContentSize()
-                    }
-                }
-            return item
-        }
 
         return nil
     }

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { DevPanel } from "./components/spacing-control";
+import { SiteFooter } from "./components/site-footer";
 import { Providers } from "./providers";
-
 import "./globals.css";
 
 const geistSans = Geist({
@@ -75,6 +76,10 @@ export default function RootLayout({
       <head>
         <meta name="theme-color" content="#0a0a0a" />
         <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+        <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem("theme");var light=t==="light"||(t==="system"&&window.matchMedia("(prefers-color-scheme:light)").matches);if(!light)document.documentElement.classList.add("dark");var m=document.querySelector('meta[name="theme-color"]');if(m)m.content=light?"#fafafa":"#0a0a0a"}catch(e){}})()`,
           }}
@@ -83,12 +88,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
         <Providers>
           {children}
+          <SiteFooter />
+          <DevPanel />
         </Providers>
       </body>
     </html>

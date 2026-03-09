@@ -95,16 +95,40 @@ working-directory = ~/Projects`}</CodeBlock>
           <strong>Off</strong> — no socket control (most secure)
         </li>
         <li>
-          <strong>Notifications only</strong> — only allow notification commands
+          <strong>cmux processes only</strong> — only allow processes started
+          inside cmux terminals to connect
         </li>
         <li>
-          <strong>Full control</strong> — allow all socket commands
+          <strong>allowAll</strong> — allow any local process to connect (
+          <code>CMUX_SOCKET_MODE=allowAll</code>, env override only)
         </li>
       </ul>
       <Callout type="warn">
-        On shared machines, consider using &ldquo;Notifications only&rdquo; mode
-        to prevent other processes from controlling your terminals.
+        On shared machines, consider using &ldquo;Off&rdquo; or
+        &ldquo;cmux processes only&rdquo; mode.
       </Callout>
+
+      <h3>Browser link behavior</h3>
+      <p>
+        In <strong>Settings → Browser</strong>, cmux exposes two host lists with
+        different purposes:
+      </p>
+      <ul>
+        <li>
+          <strong>Hosts to Open in Embedded Browser</strong> — applies to links
+          clicked from terminal output. Hosts in this list open in cmux; other
+          hosts open in your default browser. Supports one host or wildcard per
+          line (for example: <code>example.com</code>,{" "}
+          <code>*.internal.example</code>).
+        </li>
+        <li>
+          <strong>HTTP Hosts Allowed in Embedded Browser</strong> — applies only
+          to HTTP (non-HTTPS) URLs. Hosts in this list can open in cmux without
+          a warning prompt. Defaults include <code>localhost</code>,{" "}
+          <code>127.0.0.1</code>, <code>::1</code>, <code>0.0.0.0</code>, and{" "}
+          <code>*.localtest.me</code>.
+        </li>
+      </ul>
 
       <h2>Example config</h2>
       <CodeBlock title="~/.config/ghostty/config" lang="ini">{`# Font

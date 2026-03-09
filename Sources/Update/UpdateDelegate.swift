@@ -1,6 +1,17 @@
 import Sparkle
 import Cocoa
 
+enum UpdateFeedResolver {
+    static let fallbackFeedURL = "https://github.com/manaflow-ai/cmux/releases/latest/download/appcast.xml"
+
+    static func resolvedFeedURLString(infoFeedURL: String?) -> (url: String, isNightly: Bool, usedFallback: Bool) {
+        guard let infoFeedURL, !infoFeedURL.isEmpty else {
+            return (fallbackFeedURL, false, true)
+        }
+        return (infoFeedURL, infoFeedURL.contains("/nightly/"), false)
+    }
+}
+
 extension UpdateDriver: SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? {
 #if DEBUG
@@ -11,11 +22,14 @@ extension UpdateDriver: SPUUpdaterDelegate {
             return override
         }
 #endif
-        let infoURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
-        let fallback = "https://github.com/manaflow-ai/cmux/releases/latest/download/appcast.xml"
-        let feedURLString = (infoURL?.isEmpty == false) ? infoURL! : fallback
-        recordFeedURLString(feedURLString, usedFallback: feedURLString == fallback)
-        return feedURLString
+        // The feed URL is baked into Info.plist at build time:
+        // - Stable releases use the stable appcast URL
+        // - cmux NIGHTLY has the nightly appcast URL injected by CI
+        let infoFeedURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
+        let resolved = UpdateFeedResolver.resolvedFeedURLString(infoFeedURL: infoFeedURL)
+        UpdateLogStore.shared.append("update channel: \(resolved.isNightly ? "nightly" : "stable")")
+        recordFeedURLString(resolved.url, usedFallback: resolved.usedFallback)
+        return infoFeedURL
     }
 
     /// Called when an update is scheduled to install silently,
@@ -66,7 +80,10 @@ extension UpdateDriver: SPUUpdaterDelegate {
         }
     }
 
+    @MainActor
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        AppDelegate.shared?.persistSessionForUpdateRelaunch()
+        TerminalController.shared.stop()
         NSApp.invalidateRestorableState()
         for window in NSApp.windows {
             window.invalidateRestorableState()

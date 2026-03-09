@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="cmux STAGING"
-BUNDLE_ID="com.cmux.app.staging"
+BUNDLE_ID="com.cmuxterm.app.staging"
 BASE_APP_NAME="cmux"
 DERIVED_DATA=""
 NAME_SET=0
@@ -103,7 +103,7 @@ if [[ -n "$TAG" ]]; then
     APP_NAME="cmux STAGING ${TAG}"
   fi
   if [[ "$BUNDLE_SET" -eq 0 ]]; then
-    BUNDLE_ID="com.cmux.app.staging.${TAG_ID}"
+    BUNDLE_ID="com.cmuxterm.app.staging.${TAG_ID}"
   fi
   if [[ "$DERIVED_SET" -eq 0 ]]; then
     DERIVED_DATA="/tmp/cmux-staging-${TAG_SLUG}"
@@ -251,8 +251,7 @@ OPEN_CLEAN_ENV=(
 
 # Always inject staging socket paths via env to ensure they take effect
 # (LSEnvironment requires app restart to pick up plist changes).
-"${OPEN_CLEAN_ENV[@]}" CMUX_SOCKET_PATH="$CMUX_SOCKET" CMUXD_UNIX_PATH="$CMUXD_SOCKET" open "$APP_PATH"
-osascript -e "tell application id \"${BUNDLE_ID}\" to activate" || true
+"${OPEN_CLEAN_ENV[@]}" CMUX_SOCKET_PATH="$CMUX_SOCKET" CMUXD_UNIX_PATH="$CMUXD_SOCKET" open -g "$APP_PATH"
 
 # Safety: ensure only one instance is running.
 sleep 0.2

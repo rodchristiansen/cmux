@@ -4,9 +4,9 @@
 _cmux_send() {
     local payload="$1"
     if command -v ncat >/dev/null 2>&1; then
-        print -r -- "$payload" | ncat -U "$CMUX_SOCKET_PATH" --send-only
+        print -r -- "$payload" | ncat -w 1 -U "$CMUX_SOCKET_PATH" --send-only
     elif command -v socat >/dev/null 2>&1; then
-        print -r -- "$payload" | socat - "UNIX-CONNECT:$CMUX_SOCKET_PATH"
+        print -r -- "$payload" | socat -T 1 - "UNIX-CONNECT:$CMUX_SOCKET_PATH"
     elif command -v nc >/dev/null 2>&1; then
         # Some nc builds don't support unix sockets, but keep as a last-ditch fallback.
         #
@@ -24,34 +24,40 @@ _cmux_send() {
     fi
 }
 
+_cmux_restore_scrollback_once() {
+    local path="${CMUX_RESTORE_SCROLLBACK_FILE:-}"
+    [[ -n "$path" ]] || return 0
+    unset CMUX_RESTORE_SCROLLBACK_FILE
+
+    if [[ -r "$path" ]]; then
+        /bin/cat -- "$path" 2>/dev/null || true
+        /bin/rm -f -- "$path" >/dev/null 2>&1 || true
+    fi
+}
+_cmux_restore_scrollback_once
+
 # Throttle heavy work to avoid prompt latency.
 typeset -g _CMUX_PWD_LAST_PWD=""
 typeset -g _CMUX_GIT_LAST_PWD=""
 typeset -g _CMUX_GIT_LAST_RUN=0
 typeset -g _CMUX_GIT_JOB_PID=""
+typeset -g _CMUX_GIT_JOB_STARTED_AT=0
 typeset -g _CMUX_GIT_FORCE=0
 typeset -g _CMUX_GIT_HEAD_LAST_PWD=""
 typeset -g _CMUX_GIT_HEAD_PATH=""
-typeset -g _CMUX_GIT_HEAD_MTIME=0
-typeset -g _CMUX_HAVE_ZSTAT=0
+typeset -g _CMUX_GIT_HEAD_SIGNATURE=""
+typeset -g _CMUX_GIT_HEAD_WATCH_PID=""
+typeset -g _CMUX_PR_LAST_PWD=""
+typeset -g _CMUX_PR_LAST_RUN=0
+typeset -g _CMUX_PR_JOB_PID=""
+typeset -g _CMUX_PR_JOB_STARTED_AT=0
+typeset -g _CMUX_PR_FORCE=0
+typeset -g _CMUX_ASYNC_JOB_TIMEOUT=20
 
 typeset -g _CMUX_PORTS_LAST_RUN=0
-typeset -g _CMUX_PORTS_JOB_PID=""
 typeset -g _CMUX_CMD_START=0
 typeset -g _CMUX_TTY_NAME=""
-
-_cmux_ensure_zstat() {
-    # zstat is substantially cheaper than spawning external `stat`.
-    if (( _CMUX_HAVE_ZSTAT != 0 )); then
-        return 0
-    fi
-    if zmodload -F zsh/stat b:zstat 2>/dev/null; then
-        _CMUX_HAVE_ZSTAT=1
-        return 0
-    fi
-    _CMUX_HAVE_ZSTAT=-1
-    return 1
-}
+typeset -g _CMUX_TTY_REPORTED=0
 
 _cmux_git_resolve_head_path() {
     # Resolve the HEAD file path without invoking git (fast; works for worktrees).
@@ -80,112 +86,100 @@ _cmux_git_resolve_head_path() {
     return 1
 }
 
-_cmux_git_head_mtime() {
+_cmux_git_head_signature() {
     local head_path="$1"
-    [[ -n "$head_path" && -f "$head_path" ]] || { print -r -- 0; return 0; }
-
-    if _cmux_ensure_zstat; then
-        typeset -A st
-        if zstat -H st +mtime -- "$head_path" 2>/dev/null; then
-            print -r -- "${st[mtime]:-0}"
-            return 0
-        fi
-    fi
-
-    # Fallback for environments where zsh/stat isn't available.
-    if command -v stat >/dev/null 2>&1; then
-        local mtime
-        mtime="$(stat -f %m "$head_path" 2>/dev/null || stat -c %Y "$head_path" 2>/dev/null || echo 0)"
-        print -r -- "$mtime"
+    [[ -n "$head_path" && -r "$head_path" ]] || return 1
+    local line=""
+    if IFS= read -r line < "$head_path"; then
+        print -r -- "$line"
         return 0
     fi
-
-    print -r -- 0
+    return 1
 }
 
-_cmux_ports_scan() {
-    [[ -n "$CMUX_PANEL_ID" ]] || return 0
-
-    # Report listening TCP ports for the current shell session only (so a fresh
-    # tab doesn't inherit unrelated machine-wide ports). We restrict the scan to
-    # the current controlling TTY which keeps this cheap enough to run often.
-    local -a ports
-    local line name port
-
-    # Best-effort: restrict to the current controlling TTY so a fresh tab doesn't
-    # inherit unrelated machine-wide ports. This is a pragmatic heuristic that
-    # works well for typical dev servers started from that shell.
-    local tty_name pids_csv
-    tty_name="$_CMUX_TTY_NAME"
-    if [[ -z "$tty_name" ]]; then
-        local t
-        t="$(tty 2>/dev/null || true)"
-        t="${t##*/}"
-        [[ "$t" != "not a tty" ]] && tty_name="$t"
-    fi
-
-    if [[ -z "$tty_name" ]]; then
-        _cmux_send "clear_ports --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
-        return 0
-    fi
-
-    pids_csv="$(ps -axo pid=,tty= 2>/dev/null | awk -v tty="$tty_name" '$2 == tty {print $1}' | tr '\n' ',' || true)"
-    pids_csv="${pids_csv%,}"
-    if [[ -z "$pids_csv" ]]; then
-        _cmux_send "clear_ports --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
-        return 0
-    fi
-
-    while IFS= read -r line; do
-        [[ "$line" == n* ]] || continue
-        name="${line#n}"
-        # Defensive: if the format ever includes a remote endpoint, keep the local side.
-        name="${name%%->*}"
-        port="${name##*:}"
-        # Strip anything non-numeric (paranoia: "8000 (LISTEN)" etc).
-        port="${port%%[^0-9]*}"
-        [[ -n "$port" ]] && ports+=("$port")
-    done < <(
-        lsof -nP -a -p "$pids_csv" -iTCP -sTCP:LISTEN -F n 2>/dev/null || true
-    )
-
-    ports=("${(@u)ports}")
-    ports=("${(@on)ports}")
-
-    if (( ${#ports[@]} > 0 )); then
-        _cmux_send "report_ports ${(j: :)ports} --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
-    else
-        _cmux_send "clear_ports --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
-    fi
-}
-
-_cmux_ports_kick() {
-    # De-duped, async scans (with a short burst) so we still update when a command
-    # runs in the foreground (no prompt updates while it is running).
+_cmux_report_tty_once() {
+    # Send the TTY name to the app once per session so the batched port scanner
+    # knows which TTY belongs to this panel.
+    (( _CMUX_TTY_REPORTED )) && return 0
     [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
     [[ -n "$CMUX_TAB_ID" ]] || return 0
     [[ -n "$CMUX_PANEL_ID" ]] || return 0
-    if [[ -n "$_CMUX_PORTS_JOB_PID" ]] && kill -0 "$_CMUX_PORTS_JOB_PID" 2>/dev/null; then
-        return 0
-    fi
+    [[ -n "$_CMUX_TTY_NAME" ]] || return 0
+    _CMUX_TTY_REPORTED=1
+    {
+        _cmux_send "report_tty $_CMUX_TTY_NAME --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+    } >/dev/null 2>&1 &!
+}
+
+_cmux_ports_kick() {
+    # Lightweight: just tell the app to run a batched scan for this panel.
+    # The app coalesces kicks across all panels and runs a single ps+lsof.
+    [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
+    [[ -n "$CMUX_TAB_ID" ]] || return 0
+    [[ -n "$CMUX_PANEL_ID" ]] || return 0
     _CMUX_PORTS_LAST_RUN=$EPOCHSECONDS
     {
-        # Scan over ~10 seconds so slow-starting servers (e.g. `npm run dev`)
-        # still show ports while the command is in the foreground.
-        sleep 0.5 2>/dev/null || true
-        _cmux_ports_scan
-        sleep 1.0 2>/dev/null || true
-        _cmux_ports_scan
-        sleep 1.5 2>/dev/null || true
-        _cmux_ports_scan
-        sleep 2.0 2>/dev/null || true
-        _cmux_ports_scan
-        sleep 2.5 2>/dev/null || true
-        _cmux_ports_scan
-        sleep 2.5 2>/dev/null || true
-        _cmux_ports_scan
+        _cmux_send "ports_kick --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
     } >/dev/null 2>&1 &!
-    _CMUX_PORTS_JOB_PID=$!
+}
+
+_cmux_report_git_branch_for_path() {
+    local repo_path="$1"
+    [[ -n "$repo_path" ]] || return 0
+    [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
+    [[ -n "$CMUX_TAB_ID" ]] || return 0
+    [[ -n "$CMUX_PANEL_ID" ]] || return 0
+
+    local branch dirty_opt="" first
+    branch="$(git -C "$repo_path" branch --show-current 2>/dev/null)"
+    if [[ -n "$branch" ]]; then
+        first="$(git -C "$repo_path" status --porcelain -uno 2>/dev/null | head -1)"
+        [[ -n "$first" ]] && dirty_opt="--status=dirty"
+        _cmux_send "report_git_branch $branch $dirty_opt --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+    else
+        _cmux_send "clear_git_branch --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+    fi
+}
+
+_cmux_stop_git_head_watch() {
+    if [[ -n "$_CMUX_GIT_HEAD_WATCH_PID" ]]; then
+        kill "$_CMUX_GIT_HEAD_WATCH_PID" >/dev/null 2>&1 || true
+        _CMUX_GIT_HEAD_WATCH_PID=""
+    fi
+}
+
+_cmux_start_git_head_watch() {
+    [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
+    [[ -n "$CMUX_TAB_ID" ]] || return 0
+    [[ -n "$CMUX_PANEL_ID" ]] || return 0
+
+    local watch_pwd="$PWD"
+    local watch_head_path
+    watch_head_path="$(_cmux_git_resolve_head_path 2>/dev/null || true)"
+    [[ -n "$watch_head_path" ]] || return 0
+
+    local watch_head_signature
+    watch_head_signature="$(_cmux_git_head_signature "$watch_head_path" 2>/dev/null || true)"
+
+    _CMUX_GIT_HEAD_LAST_PWD="$watch_pwd"
+    _CMUX_GIT_HEAD_PATH="$watch_head_path"
+    _CMUX_GIT_HEAD_SIGNATURE="$watch_head_signature"
+
+    _cmux_stop_git_head_watch
+    {
+        local last_signature="$watch_head_signature"
+        while true; do
+            sleep 1
+
+            local signature
+            signature="$(_cmux_git_head_signature "$watch_head_path" 2>/dev/null || true)"
+            if [[ -n "$signature" && "$signature" != "$last_signature" ]]; then
+                last_signature="$signature"
+                _cmux_report_git_branch_for_path "$watch_pwd"
+            fi
+        done
+    } >/dev/null 2>&1 &!
+    _CMUX_GIT_HEAD_WATCH_PID=$!
 }
 
 _cmux_preexec() {
@@ -198,18 +192,23 @@ _cmux_preexec() {
 
     _CMUX_CMD_START=$EPOCHSECONDS
 
-    # Heuristic: git commands can change branch/dirty state without changing $PWD.
+    # Heuristic: commands that may change git branch/dirty state without changing $PWD.
     local cmd="${1## }"
-    if [[ "$cmd" == git\ * || "$cmd" == git ]]; then
-        _CMUX_GIT_FORCE=1
-    fi
+    case "$cmd" in
+        git\ *|git|gh\ *|lazygit|lazygit\ *|tig|tig\ *|gitui|gitui\ *|stg\ *|jj\ *)
+            _CMUX_GIT_FORCE=1
+            _CMUX_PR_FORCE=1 ;;
+    esac
 
-    # Ports can change due to long-running foreground commands (servers), so start
-    # a short scan burst after command launch.
+    # Register TTY + kick batched port scan for foreground commands (servers).
+    _cmux_report_tty_once
     _cmux_ports_kick
+    _cmux_start_git_head_watch
 }
 
 _cmux_precmd() {
+    _cmux_stop_git_head_watch
+
     # Skip if socket doesn't exist yet
     [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
     [[ -n "$CMUX_TAB_ID" ]] || return 0
@@ -222,10 +221,36 @@ _cmux_precmd() {
         [[ -n "$t" && "$t" != "not a tty" ]] && _CMUX_TTY_NAME="$t"
     fi
 
+    _cmux_report_tty_once
+
     local now=$EPOCHSECONDS
     local pwd="$PWD"
     local cmd_start="$_CMUX_CMD_START"
     _CMUX_CMD_START=0
+
+    # Post-wake socket writes can occasionally leave a probe process wedged.
+    # If one probe is stale, clear the guard so fresh async probes can resume.
+    if [[ -n "$_CMUX_GIT_JOB_PID" ]]; then
+        if ! kill -0 "$_CMUX_GIT_JOB_PID" 2>/dev/null; then
+            _CMUX_GIT_JOB_PID=""
+            _CMUX_GIT_JOB_STARTED_AT=0
+        elif (( _CMUX_GIT_JOB_STARTED_AT > 0 )) && (( now - _CMUX_GIT_JOB_STARTED_AT >= _CMUX_ASYNC_JOB_TIMEOUT )); then
+            _CMUX_GIT_JOB_PID=""
+            _CMUX_GIT_JOB_STARTED_AT=0
+            _CMUX_GIT_FORCE=1
+        fi
+    fi
+
+    if [[ -n "$_CMUX_PR_JOB_PID" ]]; then
+        if ! kill -0 "$_CMUX_PR_JOB_PID" 2>/dev/null; then
+            _CMUX_PR_JOB_PID=""
+            _CMUX_PR_JOB_STARTED_AT=0
+        elif (( _CMUX_PR_JOB_STARTED_AT > 0 )) && (( now - _CMUX_PR_JOB_STARTED_AT >= _CMUX_ASYNC_JOB_TIMEOUT )); then
+            _CMUX_PR_JOB_PID=""
+            _CMUX_PR_JOB_STARTED_AT=0
+            _CMUX_PR_FORCE=1
+        fi
+    fi
 
     # CWD: keep the app in sync with the actual shell directory.
     # This is also the simplest way to test sidebar directory behavior end-to-end.
@@ -239,6 +264,8 @@ _cmux_precmd() {
     fi
 
     # Git branch/dirty: update immediately on directory change, otherwise every ~3s.
+    # While a foreground command is running, _cmux_start_git_head_watch probes HEAD
+    # once per second so agent-initiated git checkouts still surface quickly.
     local should_git=0
 
     # Git branch can change without a `git ...`-prefixed command (aliases like `gco`,
@@ -246,13 +273,17 @@ _cmux_precmd() {
     if [[ "$pwd" != "$_CMUX_GIT_HEAD_LAST_PWD" ]]; then
         _CMUX_GIT_HEAD_LAST_PWD="$pwd"
         _CMUX_GIT_HEAD_PATH="$(_cmux_git_resolve_head_path 2>/dev/null || true)"
-        _CMUX_GIT_HEAD_MTIME=0
+        _CMUX_GIT_HEAD_SIGNATURE=""
     fi
     if [[ -n "$_CMUX_GIT_HEAD_PATH" ]]; then
-        local head_mtime
-        head_mtime="$(_cmux_git_head_mtime "$_CMUX_GIT_HEAD_PATH" 2>/dev/null || echo 0)"
-        if [[ -n "$head_mtime" && "$head_mtime" != 0 && "$head_mtime" != "$_CMUX_GIT_HEAD_MTIME" ]]; then
-            _CMUX_GIT_HEAD_MTIME="$head_mtime"
+        local head_signature
+        head_signature="$(_cmux_git_head_signature "$_CMUX_GIT_HEAD_PATH" 2>/dev/null || true)"
+        if [[ -n "$head_signature" && "$head_signature" != "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
+            _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
+            # Treat HEAD file change like a git command — force-replace any
+            # running probe so the sidebar picks up the new branch immediately.
+            _CMUX_GIT_FORCE=1
+            _CMUX_PR_FORCE=1
             should_git=1
         fi
     fi
@@ -266,29 +297,95 @@ _cmux_precmd() {
     fi
 
     if (( should_git )); then
+        local can_launch_git=1
         if [[ -n "$_CMUX_GIT_JOB_PID" ]] && kill -0 "$_CMUX_GIT_JOB_PID" 2>/dev/null; then
-            : # previous update still running
-        else
+            # If a stale probe is still running but the cwd changed (or we just ran
+            # a git command), restart immediately so branch state isn't delayed
+            # until the next user command/prompt.
+            # Note: this repeats the cwd check above on purpose. The first check
+            # decides whether we should refresh at all; this one decides whether
+            # an in-flight older probe can be reused vs. replaced.
+            if [[ "$pwd" != "$_CMUX_GIT_LAST_PWD" ]] || (( _CMUX_GIT_FORCE )); then
+                kill "$_CMUX_GIT_JOB_PID" >/dev/null 2>&1 || true
+                _CMUX_GIT_JOB_PID=""
+                _CMUX_GIT_JOB_STARTED_AT=0
+            else
+                can_launch_git=0
+            fi
+        fi
+
+        if (( can_launch_git )); then
             _CMUX_GIT_FORCE=0
             _CMUX_GIT_LAST_PWD="$pwd"
             _CMUX_GIT_LAST_RUN=$now
             {
-                local branch dirty_opt=""
-                branch=$(git branch --show-current 2>/dev/null)
-                if [[ -n "$branch" ]]; then
-                    local first
-                    first=$(git status --porcelain -uno 2>/dev/null | head -1)
-                    [[ -n "$first" ]] && dirty_opt="--status=dirty"
-                    _cmux_send "report_git_branch $branch $dirty_opt --tab=$CMUX_TAB_ID"
-                else
-                    _cmux_send "clear_git_branch --tab=$CMUX_TAB_ID"
-                fi
+                _cmux_report_git_branch_for_path "$pwd"
             } >/dev/null 2>&1 &!
             _CMUX_GIT_JOB_PID=$!
+            _CMUX_GIT_JOB_STARTED_AT=$now
         fi
     fi
 
-    # Ports:
+    # Pull request metadata (number/state/url):
+    # - refresh on cwd change, explicit git/gh commands, and occasionally for status drift
+    # - keep this independent from the git probe cadence to avoid hitting GitHub too often
+    local should_pr=0
+    if [[ "$pwd" != "$_CMUX_PR_LAST_PWD" ]]; then
+        should_pr=1
+    elif (( _CMUX_PR_FORCE )); then
+        should_pr=1
+    elif (( now - _CMUX_PR_LAST_RUN >= 60 )); then
+        should_pr=1
+    fi
+
+    if (( should_pr )); then
+        local can_launch_pr=1
+        if [[ -n "$_CMUX_PR_JOB_PID" ]] && kill -0 "$_CMUX_PR_JOB_PID" 2>/dev/null; then
+            if [[ "$pwd" != "$_CMUX_PR_LAST_PWD" ]] || (( _CMUX_PR_FORCE )); then
+                kill "$_CMUX_PR_JOB_PID" >/dev/null 2>&1 || true
+                _CMUX_PR_JOB_PID=""
+                _CMUX_PR_JOB_STARTED_AT=0
+            else
+                can_launch_pr=0
+            fi
+        fi
+
+        if (( can_launch_pr )); then
+            _CMUX_PR_FORCE=0
+            _CMUX_PR_LAST_PWD="$pwd"
+            _CMUX_PR_LAST_RUN=$now
+            {
+                local branch pr_tsv number state url status_opt=""
+                branch=$(git branch --show-current 2>/dev/null)
+                if [[ -z "$branch" ]] || ! command -v gh >/dev/null 2>&1; then
+                    _cmux_send "clear_pr --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+                else
+                    pr_tsv="$(gh pr view --json number,state,url --jq '[.number, .state, .url] | @tsv' 2>/dev/null || true)"
+                    if [[ -z "$pr_tsv" ]]; then
+                        _cmux_send "clear_pr --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+                    else
+                        local IFS=$'\t'
+                        read -r number state url <<< "$pr_tsv"
+                        if [[ -z "$number" ]] || [[ -z "$url" ]]; then
+                            _cmux_send "clear_pr --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+                        else
+                            case "$state" in
+                                MERGED) status_opt="--state=merged" ;;
+                                OPEN) status_opt="--state=open" ;;
+                                CLOSED) status_opt="--state=closed" ;;
+                                *) status_opt="" ;;
+                            esac
+                            _cmux_send "report_pr $number $url $status_opt --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+                        fi
+                    fi
+                fi
+            } >/dev/null 2>&1 &!
+            _CMUX_PR_JOB_PID=$!
+            _CMUX_PR_JOB_STARTED_AT=$now
+        fi
+    fi
+
+    # Ports: lightweight kick to the app's batched scanner.
     # - Periodic scan to avoid stale values.
     # - Forced scan when a long-running command returns to the prompt (common when stopping a server).
     local cmd_dur=0
@@ -301,6 +398,31 @@ _cmux_precmd() {
     fi
 }
 
+# Ensure Resources/bin is at the front of PATH, and remove the app's
+# Contents/MacOS entry so the GUI cmux binary cannot shadow the CLI cmux.
+# Shell init (.zprofile/.zshrc) may prepend other dirs after launch.
+# We fix this once on first prompt (after all init files have run).
+_cmux_fix_path() {
+    if [[ -n "${GHOSTTY_BIN_DIR:-}" ]]; then
+        local gui_dir="${GHOSTTY_BIN_DIR%/}"
+        local bin_dir="${gui_dir%/MacOS}/Resources/bin"
+        if [[ -d "$bin_dir" ]]; then
+            # Remove existing entries and re-prepend the CLI bin dir.
+            local -a parts=("${(@s/:/)PATH}")
+            parts=("${(@)parts:#$bin_dir}")
+            parts=("${(@)parts:#$gui_dir}")
+            PATH="${bin_dir}:${(j/:/)parts}"
+        fi
+    fi
+    add-zsh-hook -d precmd _cmux_fix_path
+}
+
+_cmux_zshexit() {
+    _cmux_stop_git_head_watch
+}
+
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec _cmux_preexec
 add-zsh-hook precmd _cmux_precmd
+add-zsh-hook precmd _cmux_fix_path
+add-zsh-hook zshexit _cmux_zshexit

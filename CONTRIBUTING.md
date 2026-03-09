@@ -59,7 +59,7 @@ ssh cmux-vm 'cd /Users/cmux/GhosttyTabs && xcodebuild -project GhosttyTabs.xcode
 ### UI tests (run on VM)
 
 ```bash
-ssh cmux-vm 'cd /Users/cmux/GhosttyTabs && xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug -destination "platform=macOS" -only-testing:GhosttyTabsUITests test'
+ssh cmux-vm 'cd /Users/cmux/GhosttyTabs && xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug -destination "platform=macOS" -only-testing:cmuxUITests test'
 ```
 
 ## Ghostty Submodule
@@ -96,3 +96,7 @@ git commit -m "Update ghostty submodule"
 ```
 
 See `docs/ghostty-fork.md` for details on fork changes and conflict notes.
+
+## License
+
+By contributing to this repository, you agree that your contributions are licensed under the project's GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`).
