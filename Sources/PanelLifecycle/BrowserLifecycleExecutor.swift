@@ -205,6 +205,14 @@ struct BrowserLifecycleExecutorVisibleApplicationPlan: Sendable {
 }
 
 enum BrowserLifecycleExecutor {
+    private static func bindingMatchesWindow(
+        _ binding: BrowserLifecycleExecutorBindingSnapshot,
+        windowNumber: Int?
+    ) -> Bool {
+        guard let windowNumber else { return false }
+        return binding.windowNumber == windowNumber || binding.anchorWindowNumber == windowNumber
+    }
+
     static func currentRecord(
         _ current: PanelLifecycleRecordSnapshot,
         applying binding: BrowserLifecycleExecutorBindingSnapshot?,
@@ -213,7 +221,7 @@ enum BrowserLifecycleExecutor {
         guard current.panelType == .browser, let binding else { return current }
 
         let visibleInActiveWindow =
-            binding.windowNumber == activeWindowNumber &&
+            bindingMatchesWindow(binding, windowNumber: activeWindowNumber) &&
             binding.visibleInUI &&
             !binding.containerHidden &&
             binding.attachedToPortalHost
@@ -459,7 +467,7 @@ enum BrowserLifecycleExecutor {
     ) -> Bool {
         guard let binding else { return false }
         if desired.targetVisible {
-            return binding.windowNumber == desired.targetWindowNumber &&
+            return bindingMatchesWindow(binding, windowNumber: desired.targetWindowNumber) &&
                 binding.anchorId == desired.targetAnchorId &&
                 binding.visibleInUI &&
                 !binding.containerHidden &&
@@ -473,7 +481,7 @@ enum BrowserLifecycleExecutor {
         case .detachedRetained, .destroyed:
             return false
         case .visibleInActiveWindow:
-            return binding.windowNumber == desired.targetWindowNumber &&
+            return bindingMatchesWindow(binding, windowNumber: desired.targetWindowNumber) &&
                 binding.visibleInUI &&
                 !binding.containerHidden &&
                 binding.attachedToPortalHost

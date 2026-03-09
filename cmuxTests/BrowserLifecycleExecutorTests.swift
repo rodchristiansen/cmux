@@ -39,6 +39,38 @@ final class BrowserLifecycleExecutorTests: XCTestCase {
         XCTAssertTrue(overlaid.accessibilityParticipation)
     }
 
+    func testCurrentRecordUsesAnchorWindowForActiveWindowMembership() {
+        let current = makeCurrentBrowserRecord(
+            state: .awaitingAnchor,
+            residency: .detachedRetained,
+            activeWindowMembership: false,
+            desiredActive: true,
+            responderEligible: false,
+            accessibilityParticipation: false
+        )
+        let binding = BrowserLifecycleExecutorBindingSnapshot(
+            panelId: current.panelId,
+            anchorId: UUID(),
+            windowNumber: nil,
+            anchorWindowNumber: 41,
+            visibleInUI: true,
+            containerHidden: false,
+            attachedToPortalHost: true,
+            zPriority: 0,
+            guardGeneration: 5
+        )
+
+        let overlaid = BrowserLifecycleExecutor.currentRecord(
+            current,
+            applying: binding,
+            activeWindowNumber: 41
+        )
+
+        XCTAssertEqual(overlaid.state, .boundVisible)
+        XCTAssertEqual(overlaid.residency, .visibleInActiveWindow)
+        XCTAssertTrue(overlaid.activeWindowMembership)
+    }
+
     func testCurrentRecordUsesHiddenPortalBindingForParkedBrowserResidency() {
         let current = makeCurrentBrowserRecord(
             state: .boundVisible,
@@ -128,6 +160,50 @@ final class BrowserLifecycleExecutorTests: XCTestCase {
             visibleInUI: true,
             containerHidden: false,
             attachedToPortalHost: true,
+            guardGeneration: 5
+        )
+
+        let plan = BrowserLifecycleExecutor.makePlan(
+            currentRecords: [current],
+            desiredRecords: [desired],
+            currentBindings: [binding]
+        )
+
+        XCTAssertEqual(plan.counts.noopCount, 1)
+        XCTAssertEqual(plan.records.first?.action, .noop)
+        XCTAssertEqual(plan.records.first?.bindingSatisfied, true)
+    }
+
+    func testSatisfiedVisibleBrowserBindingPlansNoopWhenAnchorWindowMatchesTarget() {
+        let current = makeCurrentBrowserRecord(
+            state: .boundVisible,
+            residency: .visibleInActiveWindow,
+            activeWindowMembership: true,
+            desiredActive: true,
+            responderEligible: true,
+            accessibilityParticipation: true
+        )
+        let desired = makeDesiredBrowserRecord(
+            panelId: current.panelId,
+            workspaceId: current.workspaceId,
+            targetState: .boundVisible,
+            targetResidency: .visibleInActiveWindow,
+            targetVisible: true,
+            targetActive: true,
+            targetResponderEligible: true,
+            targetAccessibilityParticipation: true,
+            requiresCurrentGenerationAnchor: true,
+            anchorReadyForVisibility: true
+        )
+        let binding = BrowserLifecycleExecutorBindingSnapshot(
+            panelId: current.panelId,
+            anchorId: desired.targetAnchorId,
+            windowNumber: nil,
+            anchorWindowNumber: 41,
+            visibleInUI: true,
+            containerHidden: false,
+            attachedToPortalHost: true,
+            zPriority: 0,
             guardGeneration: 5
         )
 
