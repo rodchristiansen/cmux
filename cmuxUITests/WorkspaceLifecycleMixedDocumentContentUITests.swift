@@ -102,6 +102,7 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
             "window_id": currentWindowId,
             "workspace_id": visibleWorkspaceId,
             "surface_id": currentSurfaceId,
+            "focus": false,
         ])
         let createdResult = created?["result"] as? [String: Any]
         guard let hiddenWorkspaceId = createdResult?["workspace_id"] as? String,
