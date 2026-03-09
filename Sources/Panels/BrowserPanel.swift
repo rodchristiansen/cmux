@@ -2899,19 +2899,24 @@ extension BrowserPanel {
         }
     }
 
-    /// Test seam for portal-triggered DevTools restores. The initial regression-test
-    /// commit keeps the pre-fix behavior so CI proves the tests fail without the fix.
+    /// Stable portal updates should respect a manual close; only portal mutations that
+    /// were preceded by a visible inspector should try to restore it afterward.
     func reconcileDeveloperToolsAfterPortalUpdate(
         inspectorWasVisibleBeforeUpdate: Bool,
         didReattach: Bool,
         didChangeVisibility: Bool,
-        didChangeZPriority: Bool
+        didChangeZPriority _: Bool
     ) {
-        _ = inspectorWasVisibleBeforeUpdate
-        _ = didReattach
-        _ = didChangeVisibility
-        _ = didChangeZPriority
-        restoreDeveloperToolsAfterAttachIfNeeded()
+        let shouldRestore =
+            hasPendingDeveloperToolsRefreshAfterAttach() ||
+            (didChangeVisibility && preferredDeveloperToolsVisible) ||
+            (didReattach && inspectorWasVisibleBeforeUpdate)
+
+        if shouldRestore {
+            restoreDeveloperToolsAfterAttachIfNeeded()
+        } else {
+            syncDeveloperToolsPreferenceFromInspector()
+        }
     }
 
     @discardableResult
