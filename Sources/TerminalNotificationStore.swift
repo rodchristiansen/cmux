@@ -827,6 +827,41 @@ final class TerminalNotificationStore: ObservableObject {
     }
 
     func addNotification(tabId: UUID, surfaceId: UUID?, title: String, subtitle: String, body: String) {
+        addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: title,
+            subtitle: subtitle,
+            body: body,
+            allowFocusedDelivery: false
+        )
+    }
+
+    func addTerminalEscapeNotification(
+        tabId: UUID,
+        surfaceId: UUID?,
+        title: String,
+        subtitle: String,
+        body: String
+    ) {
+        addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: title,
+            subtitle: subtitle,
+            body: body,
+            allowFocusedDelivery: true
+        )
+    }
+
+    private func addNotification(
+        tabId: UUID,
+        surfaceId: UUID?,
+        title: String,
+        subtitle: String,
+        body: String,
+        allowFocusedDelivery: Bool
+    ) {
         var updated = notifications
         var idsToClear: [String] = []
         updated.removeAll { existing in
@@ -840,7 +875,8 @@ final class TerminalNotificationStore: ObservableObject {
         let isFocusedSurface = surfaceId == nil || focusedSurfaceId == surfaceId
         let isFocusedPanel = isActiveTab && isFocusedSurface
         let isAppFocused = AppFocusState.isAppFocused()
-        if isAppFocused && isFocusedPanel {
+        let isFocusedDeliveryTarget = isAppFocused && isFocusedPanel
+        if isFocusedDeliveryTarget && !allowFocusedDelivery {
             if !idsToClear.isEmpty {
                 notifications = updated
                 center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -861,7 +897,7 @@ final class TerminalNotificationStore: ObservableObject {
             subtitle: subtitle,
             body: body,
             createdAt: Date(),
-            isRead: false
+            isRead: isFocusedDeliveryTarget
         )
         updated.insert(notification, at: 0)
         notifications = updated
@@ -1070,7 +1106,16 @@ final class TerminalNotificationStore: ObservableObject {
                 case .requestAuthorization:
                     self.requestAuthorizationIfNeeded(origin: origin, completion)
                 case .denySilently:
-                    self.logAuthorization("ensure unknown status origin=\(origin.rawValue)")
+                    switch settings.authorizationStatus {
+                    case .denied:
+                        self.logAuthorization("ensure denied origin=\(origin.rawValue) skipping_prompt")
+                    case .notDetermined:
+                        self.logAuthorization("ensure notDetermined origin=\(origin.rawValue) skipping_request")
+                    case .authorized, .provisional, .ephemeral:
+                        self.logAuthorization("ensure status origin=\(origin.rawValue) skipping_delivery")
+                    @unknown default:
+                        self.logAuthorization("ensure unknown status origin=\(origin.rawValue)")
+                    }
                     completion(false)
                 }
             }
@@ -1086,8 +1131,14 @@ final class TerminalNotificationStore: ObservableObject {
         case .authorized, .provisional, .ephemeral:
             return .allowDelivery
         case .denied:
+            if origin == .notificationDelivery {
+                return .denySilently
+            }
             return .promptSettingsAndDeny
         case .notDetermined:
+            if origin == .notificationDelivery {
+                return .denySilently
+            }
             if shouldDeferAutomaticAuthorizationRequest(
                 origin: origin,
                 status: status,
