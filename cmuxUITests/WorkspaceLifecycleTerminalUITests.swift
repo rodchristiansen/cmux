@@ -119,7 +119,38 @@ final class WorkspaceLifecycleTerminalUITests: XCTestCase {
             }
             return visibleCurrent != nil && hiddenCurrent != nil && visibleDesired != nil && hiddenDesired != nil
         }
-        XCTAssertTrue(snapshotReady, "Expected lifecycle snapshot to contain visible and hidden terminal rows")
+        let debugSnapshot = latestLifecycleSnapshot()
+        let debugVisibleCurrent = debugSnapshot?.records.first {
+            $0.panelType == "terminal" &&
+                $0.workspaceId == visibleWorkspaceId &&
+                $0.selectedWorkspace &&
+                $0.activeWindowMembership
+        }
+        let debugHiddenCurrent = debugSnapshot?.records.first {
+            $0.panelType == "terminal" &&
+                $0.workspaceId == hiddenWorkspaceId &&
+                !$0.selectedWorkspace &&
+                !$0.activeWindowMembership
+        }
+        let debugVisibleDesired = debugSnapshot?.desiredRecords.first {
+            $0.panelType == "terminal" &&
+                $0.workspaceId == visibleWorkspaceId &&
+                $0.targetVisible
+        }
+        let debugHiddenDesired = debugSnapshot?.desiredRecords.first {
+            $0.panelType == "terminal" &&
+                $0.workspaceId == hiddenWorkspaceId &&
+                !$0.targetVisible
+        }
+        XCTAssertTrue(
+            snapshotReady,
+            "Expected lifecycle snapshot to contain visible and hidden terminal rows. " +
+                "snapshot=\(debugSnapshot?.debugSummary ?? "nil") " +
+                "visibleCurrent=\(debugVisibleCurrent?.debugSummary ?? "nil") " +
+                "hiddenCurrent=\(debugHiddenCurrent?.debugSummary ?? "nil") " +
+                "visibleDesired=\(debugVisibleDesired?.debugSummary ?? "nil") " +
+                "hiddenDesired=\(debugHiddenDesired?.debugSummary ?? "nil")"
+        )
 
         guard let snapshot = latestLifecycleSnapshot() else {
             XCTFail("Missing panel lifecycle snapshot")
@@ -272,6 +303,8 @@ final class WorkspaceLifecycleTerminalUITests: XCTestCase {
 private struct LifecycleRecord {
     let panelType: String
     let workspaceId: String
+    let state: String
+    let residency: String
     let selectedWorkspace: Bool
     let activeWindowMembership: Bool
     let responderEligible: Bool
@@ -281,17 +314,24 @@ private struct LifecycleRecord {
 private struct DesiredLifecycleRecord {
     let panelType: String
     let workspaceId: String
+    let targetState: String
     let targetVisible: Bool
+    let targetActive: Bool
     let targetResidency: String
+    let targetWindowNumber: Int
     let requiresCurrentGenerationAnchor: Bool
 }
 
 private struct LifecycleSnapshot {
+    let activeWindowNumber: Int
+    let selectedWorkspaceId: String
     let records: [LifecycleRecord]
     let desiredRecords: [DesiredLifecycleRecord]
     let visibleInActiveWindowCount: Int
 
     init?(result: [String: Any]) {
+        activeWindowNumber = result["activeWindowNumber"] as? Int ?? 0
+        selectedWorkspaceId = result["selectedWorkspaceId"] as? String ?? ""
         let rawRecords = result["records"] as? [[String: Any]] ?? []
         let desiredContainer = result["desired"] as? [String: Any] ?? [:]
         let rawDesired = desiredContainer["records"] as? [[String: Any]] ?? []
@@ -301,6 +341,8 @@ private struct LifecycleSnapshot {
             LifecycleRecord(
                 panelType: $0["panelType"] as? String ?? "",
                 workspaceId: $0["workspaceId"] as? String ?? "",
+                state: $0["state"] as? String ?? "",
+                residency: $0["residency"] as? String ?? "",
                 selectedWorkspace: $0["selectedWorkspace"] as? Bool ?? false,
                 activeWindowMembership: $0["activeWindowMembership"] as? Bool ?? false,
                 responderEligible: $0["responderEligible"] as? Bool ?? false,
@@ -311,12 +353,40 @@ private struct LifecycleSnapshot {
             DesiredLifecycleRecord(
                 panelType: $0["panelType"] as? String ?? "",
                 workspaceId: $0["workspaceId"] as? String ?? "",
+                targetState: $0["targetState"] as? String ?? "",
                 targetVisible: $0["targetVisible"] as? Bool ?? false,
+                targetActive: $0["targetActive"] as? Bool ?? false,
                 targetResidency: $0["targetResidency"] as? String ?? "",
+                targetWindowNumber: $0["targetWindowNumber"] as? Int ?? 0,
                 requiresCurrentGenerationAnchor: $0["requiresCurrentGenerationAnchor"] as? Bool ?? false
             )
         }
         visibleInActiveWindowCount = counts["visibleInActiveWindowCount"] as? Int ?? 0
+    }
+}
+
+extension LifecycleRecord {
+    var debugSummary: String {
+        "panelType=\(panelType) workspaceId=\(workspaceId) state=\(state) residency=\(residency) " +
+            "selectedWorkspace=\(selectedWorkspace) activeWindowMembership=\(activeWindowMembership) " +
+            "responderEligible=\(responderEligible) accessibilityParticipation=\(accessibilityParticipation)"
+    }
+}
+
+extension DesiredLifecycleRecord {
+    var debugSummary: String {
+        "panelType=\(panelType) workspaceId=\(workspaceId) targetState=\(targetState) " +
+            "targetVisible=\(targetVisible) targetActive=\(targetActive) " +
+            "targetResidency=\(targetResidency) targetWindowNumber=\(targetWindowNumber) " +
+            "requiresCurrentGenerationAnchor=\(requiresCurrentGenerationAnchor)"
+    }
+}
+
+extension LifecycleSnapshot {
+    var debugSummary: String {
+        "activeWindowNumber=\(activeWindowNumber) selectedWorkspaceId=\(selectedWorkspaceId) " +
+            "records=\(records.count) desiredRecords=\(desiredRecords.count) " +
+            "visibleInActiveWindowCount=\(visibleInActiveWindowCount)"
     }
 }
 
