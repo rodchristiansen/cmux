@@ -97,6 +97,7 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             "window_id": currentWindowId,
             "workspace_id": originalWorkspaceId,
             "surface_id": currentSurfaceId,
+            "focus": false,
         ])
         let createdResult = created?["result"] as? [String: Any]
         guard let destinationWorkspaceId = createdResult?["workspace_id"] as? String,
