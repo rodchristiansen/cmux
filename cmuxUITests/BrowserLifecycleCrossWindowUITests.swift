@@ -62,21 +62,38 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
         XCTAssertEqual(socketState["mutationReady"], "1", "Expected lifecycle mutation routing to be ready. state=\(socketState)")
         XCTAssertEqual(socketState["socketPingResponse"], "PONG", "Expected healthy socket ping. state=\(socketState)")
 
-        guard let workspaceId = waitForCurrentWorkspaceId(timeout: 20.0) else {
-            XCTFail("Missing current workspace result")
-            return
-        }
         guard let currentSurfaceId = socketState["currentSurfaceId"],
               !currentSurfaceId.isEmpty else {
             XCTFail("Socket sanity did not publish currentSurfaceId. state=\(socketState)")
             return
         }
 
+        guard let sourceWindowId = socketState["currentWindowId"],
+              !sourceWindowId.isEmpty else {
+            XCTFail("Socket sanity did not publish currentWindowId. state=\(socketState)")
+            return
+        }
+
+        guard let sourceWorkspaceId = createWorkspace(
+            windowId: sourceWindowId,
+            workspaceId: socketState["currentWorkspaceId"],
+            surfaceId: currentSurfaceId,
+            focus: true
+        ) else {
+            XCTFail("workspace.create did not return workspace_id for fresh source workspace")
+            return
+        }
+        XCTAssertEqual(
+            waitForCurrentWorkspaceId(timeout: 8.0),
+            sourceWorkspaceId,
+            "Expected fresh source workspace to be current before opening browser"
+        )
+
         let opened = v2Call(
             "browser.open_split",
             params: [
                 "url": "https://example.com/browser-cross-window",
-                "workspace_id": workspaceId,
+                "workspace_id": sourceWorkspaceId,
                 "surface_id": currentSurfaceId,
             ]
         )
@@ -86,24 +103,28 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
             XCTFail("browser.open_split did not return surface_id. payload=\(String(describing: opened))")
             return
         }
+        guard v2Call(
+            "surface.focus",
+            params: [
+                "surface_id": browserPanelId,
+                "workspace_id": sourceWorkspaceId,
+            ]
+        ) != nil else {
+            XCTFail("surface.focus failed for opened browser")
+            return
+        }
         XCTAssertTrue(
             waitForLifecycleSnapshot(timeout: 8.0) { snapshot in
                 guard let browser = snapshot.records.first(where: { $0.panelId == browserPanelId }) else {
                     return false
                 }
-                return browser.workspaceId == workspaceId &&
+                return browser.workspaceId == sourceWorkspaceId &&
                     browser.selectedWorkspace &&
                     browser.activeWindowMembership &&
                     browser.targetResidency == "visibleInActiveWindow"
             },
             "Expected browser to converge before cross-window workspace move"
         )
-
-        guard let sourceWindowId = socketState["currentWindowId"],
-              !sourceWindowId.isEmpty else {
-            XCTFail("Socket sanity did not publish currentWindowId. state=\(socketState)")
-            return
-        }
 
         guard let createdWindow = v2Call("window.create"),
               let createdWindowResult = createdWindow["result"] as? [String: Any],
@@ -126,7 +147,7 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
         guard v2Call(
             "workspace.move_to_window",
             params: [
-                "workspace_id": workspaceId,
+                "workspace_id": sourceWorkspaceId,
                 "window_id": destinationWindowId,
                 "focus": true,
             ]
@@ -137,7 +158,7 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
 
         XCTAssertEqual(
             waitForCurrentWorkspaceId(timeout: 8.0),
-            workspaceId,
+            sourceWorkspaceId,
             "Expected focused workspace.move_to_window to converge workspace selection before lifecycle assertion"
         )
         XCTAssertEqual(
@@ -329,6 +350,25 @@ final class BrowserLifecycleCrossWindowUITests: XCTestCase {
             return windowId
         }
         return nil
+    }
+
+    private func createWorkspace(
+        windowId: String,
+        workspaceId: String?,
+        surfaceId: String,
+        focus: Bool
+    ) -> String? {
+        var params: [String: Any] = [
+            "window_id": windowId,
+            "surface_id": surfaceId,
+            "focus": focus,
+        ]
+        if let workspaceId, !workspaceId.isEmpty {
+            params["workspace_id"] = workspaceId
+        }
+        let created = v2Call("workspace.create", params: params)
+        let result = created?["result"] as? [String: Any]
+        return result?["workspace_id"] as? String
     }
 
     private func v2Call(_ method: String, params: [String: Any] = [:]) -> [String: Any]? {

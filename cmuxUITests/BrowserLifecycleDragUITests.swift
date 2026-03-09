@@ -62,10 +62,6 @@ final class BrowserLifecycleDragUITests: XCTestCase {
         XCTAssertEqual(socketState["mutationReady"], "1", "Expected lifecycle mutation routing to be ready. state=\(socketState)")
         XCTAssertEqual(socketState["socketPingResponse"], "PONG", "Expected healthy socket ping. state=\(socketState)")
 
-        guard let originalWorkspaceId = waitForCurrentWorkspaceId(timeout: 20.0) else {
-            XCTFail("Missing current workspace result")
-            return
-        }
         guard let currentSurfaceId = socketState["currentSurfaceId"],
               !currentSurfaceId.isEmpty else {
             XCTFail("Socket sanity did not publish currentSurfaceId. state=\(socketState)")
@@ -78,11 +74,26 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             return
         }
 
+        guard let sourceWorkspaceId = createWorkspace(
+            windowId: currentWindowId,
+            workspaceId: socketState["currentWorkspaceId"],
+            surfaceId: currentSurfaceId,
+            focus: true
+        ) else {
+            XCTFail("workspace.create did not return workspace_id for fresh source workspace")
+            return
+        }
+        XCTAssertEqual(
+            waitForCurrentWorkspaceId(timeout: 8.0),
+            sourceWorkspaceId,
+            "Expected fresh source workspace to be current before opening browser"
+        )
+
         let opened = v2Call(
             "browser.open_split",
             params: [
                 "url": "https://example.com/browser-drag",
-                "workspace_id": originalWorkspaceId,
+                "workspace_id": sourceWorkspaceId,
                 "surface_id": currentSurfaceId,
             ]
         )
@@ -92,12 +103,22 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             XCTFail("browser.open_split did not return surface_id. payload=\(String(describing: opened))")
             return
         }
+        guard v2Call(
+            "surface.focus",
+            params: [
+                "surface_id": browserPanelId,
+                "workspace_id": sourceWorkspaceId,
+            ]
+        ) != nil else {
+            XCTFail("surface.focus failed for opened browser")
+            return
+        }
         XCTAssertTrue(
             waitForLifecycleSnapshot(timeout: 8.0) { snapshot in
                 guard let browser = snapshot.records.first(where: { $0.panelId == browserPanelId }) else {
                     return false
                 }
-                return browser.workspaceId == originalWorkspaceId &&
+                return browser.workspaceId == sourceWorkspaceId &&
                     browser.selectedWorkspace &&
                     browser.activeWindowMembership &&
                     browser.targetResidency == "visibleInActiveWindow"
@@ -107,7 +128,7 @@ final class BrowserLifecycleDragUITests: XCTestCase {
 
         let created = v2Call("workspace.create", params: [
             "window_id": currentWindowId,
-            "workspace_id": originalWorkspaceId,
+            "workspace_id": sourceWorkspaceId,
             "surface_id": currentSurfaceId,
             "focus": false,
         ])
@@ -169,7 +190,7 @@ final class BrowserLifecycleDragUITests: XCTestCase {
         XCTAssertFalse(
             snapshot.records.contains(where: {
                 $0.panelId == browserPanelId &&
-                    $0.workspaceId == originalWorkspaceId &&
+                    $0.workspaceId == sourceWorkspaceId &&
                     $0.activeWindowMembership
             })
         )
@@ -277,6 +298,25 @@ final class BrowserLifecycleDragUITests: XCTestCase {
             return workspaceId
         }
         return nil
+    }
+
+    private func createWorkspace(
+        windowId: String,
+        workspaceId: String?,
+        surfaceId: String,
+        focus: Bool
+    ) -> String? {
+        var params: [String: Any] = [
+            "window_id": windowId,
+            "surface_id": surfaceId,
+            "focus": focus,
+        ]
+        if let workspaceId, !workspaceId.isEmpty {
+            params["workspace_id"] = workspaceId
+        }
+        let created = v2Call("workspace.create", params: params)
+        let result = created?["result"] as? [String: Any]
+        return result?["workspace_id"] as? String
     }
 
     private func v2Call(_ method: String, params: [String: Any] = [:]) -> [String: Any]? {
