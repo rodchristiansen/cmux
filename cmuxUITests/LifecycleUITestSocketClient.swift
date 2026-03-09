@@ -40,6 +40,12 @@ final class LifecycleUITestSocketClient {
         try? fileManager.setAttributes([.posixPermissions: 0o777], ofItemAtPath: trimmed)
     }
 
+    static func sharedFileBridgeDirectory(for launchTag: String) -> String {
+        let base = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches/cmux-ui-v2-bridge", isDirectory: true)
+        return base.appendingPathComponent(launchTag, isDirectory: true).path
+    }
+
     func call(method: String, params: [String: Any] = [:]) -> [String: Any]? {
         if method != "system.ping" {
             _ = warmSocket()

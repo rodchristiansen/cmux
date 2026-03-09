@@ -14,7 +14,7 @@ final class WorkspaceLifecycleMixedDocumentContentUITests: XCTestCase {
         launchTag = "ui-tests-mixed-document-\(UUID().uuidString.prefix(8))"
         socketPath = "/tmp/cmux-debug-\(launchTag).sock"
         dataPath = "/tmp/cmux-ui-socket-sanity-\(launchTag).json"
-        bridgeDir = "/tmp/cmux-ui-v2-bridge-\(launchTag)"
+        bridgeDir = LifecycleUITestSocketClient.sharedFileBridgeDirectory(for: launchTag)
         LifecycleUITestSocketClient.setBundledCLIPathOverride(nil)
         LifecycleUITestSocketClient.setFileBridgeDirectoryOverride(bridgeDir)
         try? FileManager.default.removeItem(atPath: socketPath)
