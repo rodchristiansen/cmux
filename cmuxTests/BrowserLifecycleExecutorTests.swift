@@ -418,6 +418,94 @@ final class BrowserLifecycleExecutorTests: XCTestCase {
         XCTAssertFalse(plan.shouldRefreshHostedPresentation)
     }
 
+    func testVisibleApplicationPlanCarriesTransientRecoveryAndSuppressesRefreshWhenPreservingVisible() {
+        let presentation = BrowserLifecycleExecutorPresentationApplicationPlan(
+            shouldHideContainer: true,
+            shouldRevealContainer: false,
+            paneTopChromeHeight: 0,
+            shouldShowSearchOverlay: false,
+            shouldShowDropZone: false,
+            shouldRefreshForReveal: false
+        )
+        let transient = BrowserLifecycleExecutorTransientRecoveryPlan(
+            shouldPreserveVisible: true,
+            shouldHideContainer: false,
+            shouldClearPaneTopChrome: false,
+            shouldClearSearchOverlay: false,
+            shouldClearDropZone: false,
+            shouldResetRecoveryState: false,
+            shouldScheduleDeferredFullSynchronize: true
+        )
+        let frame = BrowserLifecycleExecutor.frameApplicationPlan(
+            oldFrame: CGRect(x: 0, y: 0, width: 100, height: 80),
+            currentBounds: CGRect(x: 0, y: 0, width: 100, height: 80),
+            targetFrame: CGRect(x: 0, y: 0, width: 100, height: 80)
+        )
+        let webFrame = BrowserLifecycleExecutor.webFrameNormalizationPlan(
+            currentWebFrame: CGRect(x: 0, y: 0, width: 100, height: 80),
+            containerBounds: CGRect(x: 0, y: 0, width: 100, height: 80)
+        )
+
+        let plan = BrowserLifecycleExecutor.visibleApplicationPlan(
+            presentationApplicationPlan: presentation,
+            transientRecoveryPlan: transient,
+            transientRecoveryReason: .outsideHostBounds,
+            forcePresentationRefresh: false,
+            hasPendingRefreshReasons: true,
+            geometryStateShouldHideContainer: true,
+            frameApplicationPlan: frame,
+            webFrameNormalizationPlan: webFrame
+        )
+
+        XCTAssertTrue(plan.shouldPreserveVisibleOnTransientGeometry)
+        XCTAssertFalse(plan.shouldApplyPresentationApplicationPlan)
+        XCTAssertEqual(plan.transientRecoveryReason, .outsideHostBounds)
+        XCTAssertEqual(plan.transientRecoveryPlan?.shouldScheduleDeferredFullSynchronize, true)
+        XCTAssertFalse(plan.shouldTrackVisibleEntry)
+        XCTAssertFalse(plan.hostedRefreshPlan.shouldRefreshHostedPresentation)
+    }
+
+    func testVisibleApplicationPlanTracksEntryAndRefreshesWhenVisibleGeometrySucceeds() {
+        let presentation = BrowserLifecycleExecutorPresentationApplicationPlan(
+            shouldHideContainer: false,
+            shouldRevealContainer: true,
+            paneTopChromeHeight: 28,
+            shouldShowSearchOverlay: true,
+            shouldShowDropZone: true,
+            shouldRefreshForReveal: true
+        )
+        let frame = BrowserLifecycleExecutor.frameApplicationPlan(
+            oldFrame: CGRect(x: 0, y: 0, width: 60, height: 40),
+            currentBounds: CGRect(x: 0, y: 0, width: 60, height: 40),
+            targetFrame: CGRect(x: 10, y: 10, width: 100, height: 80)
+        )
+        let webFrame = BrowserLifecycleExecutor.webFrameNormalizationPlan(
+            currentWebFrame: CGRect(x: 0, y: 0, width: 120, height: 90),
+            containerBounds: CGRect(x: 0, y: 0, width: 100, height: 80)
+        )
+
+        let plan = BrowserLifecycleExecutor.visibleApplicationPlan(
+            presentationApplicationPlan: presentation,
+            transientRecoveryPlan: nil,
+            transientRecoveryReason: nil,
+            forcePresentationRefresh: true,
+            hasPendingRefreshReasons: true,
+            geometryStateShouldHideContainer: false,
+            frameApplicationPlan: frame,
+            webFrameNormalizationPlan: webFrame
+        )
+
+        XCTAssertFalse(plan.shouldPreserveVisibleOnTransientGeometry)
+        XCTAssertTrue(plan.shouldApplyPresentationApplicationPlan)
+        XCTAssertNil(plan.transientRecoveryPlan)
+        XCTAssertNil(plan.transientRecoveryReason)
+        XCTAssertTrue(plan.shouldTrackVisibleEntry)
+        XCTAssertEqual(
+            plan.hostedRefreshPlan.reasons,
+            [.frame, .bounds, .webFrame, .reveal, .anchor]
+        )
+    }
+
     func testVisibleSyncPlanRefreshesVisibleHostedPresentationForAnchorDelta() {
         let presentation = BrowserLifecycleExecutorPresentationApplicationPlan(
             shouldHideContainer: false,

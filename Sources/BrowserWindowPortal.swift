@@ -2523,22 +2523,6 @@ final class WindowBrowserPortal: NSObject {
             )
         }
 #endif
-        let visibleSyncPlan = BrowserLifecycleExecutor.visibleSyncPlan(
-            presentationApplicationPlan: presentationApplicationPlan,
-            transientRecoveryPlan: transientRecoveryPlan,
-            transientRecoveryReason: transientRecoveryReason,
-            forcePresentationRefresh: forcePresentationRefresh,
-            hasPendingRefreshReasons: !refreshReasons.isEmpty,
-            geometryStateShouldHideContainer: geometryState.shouldHideContainer
-        )
-        if visibleSyncPlan.shouldPreserveVisibleOnTransientGeometry {
-#if DEBUG
-            dlog(
-                "browser.portal.hidden.deferKeep web=\(browserPortalDebugToken(webView)) " +
-                    "reason=\(transientRecoveryReason?.rawValue ?? "unknown") frame=\(browserPortalDebugFrame(containerView.frame))"
-            )
-#endif
-        }
         let frameApplicationPlan = BrowserLifecycleExecutor.frameApplicationPlan(
             oldFrame: oldFrame,
             currentBounds: containerView.bounds,
@@ -2578,6 +2562,24 @@ final class WindowBrowserPortal: NSObject {
 #if DEBUG
         let inspectorSubviews = Self.inspectorSubviewCount(in: containerView)
 #endif
+        let visibleApplicationPlan = BrowserLifecycleExecutor.visibleApplicationPlan(
+            presentationApplicationPlan: presentationApplicationPlan,
+            transientRecoveryPlan: transientRecoveryPlan,
+            transientRecoveryReason: transientRecoveryReason,
+            forcePresentationRefresh: forcePresentationRefresh,
+            hasPendingRefreshReasons: !refreshReasons.isEmpty,
+            geometryStateShouldHideContainer: geometryState.shouldHideContainer,
+            frameApplicationPlan: frameApplicationPlan,
+            webFrameNormalizationPlan: webFrameNormalizationPlan
+        )
+        if visibleApplicationPlan.shouldPreserveVisibleOnTransientGeometry {
+#if DEBUG
+            dlog(
+                "browser.portal.hidden.deferKeep web=\(browserPortalDebugToken(webView)) " +
+                    "reason=\(transientRecoveryReason?.rawValue ?? "unknown") frame=\(browserPortalDebugFrame(containerView.frame))"
+            )
+#endif
+        }
         if webFrameNormalizationPlan.shouldNormalizeWebFrame {
             let oldWebFrame = preNormalizeWebFrame
             CATransaction.begin()
@@ -2598,7 +2600,7 @@ final class WindowBrowserPortal: NSObject {
 #endif
         }
 
-        if visibleSyncPlan.shouldApplyPresentationApplicationPlan {
+        if visibleApplicationPlan.shouldApplyPresentationApplicationPlan {
             applyPresentationApplicationPlan(
                 presentationApplicationPlan,
                 entry: entry,
@@ -2612,32 +2614,25 @@ final class WindowBrowserPortal: NSObject {
                 outsideHostBounds: geometryState.outsideHostBounds
             )
         }
-        let hostedRefreshPlan = BrowserLifecycleExecutor.hostedRefreshPlan(
-            visibleSyncPlan: visibleSyncPlan,
-            frameApplicationPlan: frameApplicationPlan,
-            webFrameNormalizationPlan: webFrameNormalizationPlan,
-            presentationApplicationPlan: presentationApplicationPlan
-        )
-        if visibleSyncPlan.shouldApplyTransientRecoveryPlan,
-           let transientRecoveryPlan,
-           let transientRecoveryReason {
+        if let transientRecoveryPlan = visibleApplicationPlan.transientRecoveryPlan,
+           let transientRecoveryReason = visibleApplicationPlan.transientRecoveryReason {
             applyTransientRecoveryPlan(
                 transientRecoveryPlan,
                 reason: transientRecoveryReason,
                 preserveVisibleLog:
-                    visibleSyncPlan.shouldPreserveVisibleOnTransientGeometry
+                    visibleApplicationPlan.shouldPreserveVisibleOnTransientGeometry
                     ? "browser.portal.hidden.deferKeep web=\(browserPortalDebugToken(webView)) " +
                         "reason=\(transientRecoveryReason.rawValue) frame=\(browserPortalDebugFrame(containerView.frame))"
                     : nil
             )
-        } else if visibleSyncPlan.shouldTrackVisibleEntry {
+        } else if visibleApplicationPlan.shouldTrackVisibleEntry {
             entriesByWebViewId[webViewId] = entry
         }
-        if hostedRefreshPlan.shouldRefreshHostedPresentation {
+        if visibleApplicationPlan.hostedRefreshPlan.shouldRefreshHostedPresentation {
             refreshHostedWebViewPresentation(
                 webView,
                 in: containerView,
-                reason: "\(source):" + hostedRefreshPlan.reasons.map(\.rawValue).joined(separator: ",")
+                reason: "\(source):" + visibleApplicationPlan.hostedRefreshPlan.reasons.map(\.rawValue).joined(separator: ",")
             )
         }
         hostView.reapplyHostedInspectorDividerIfNeeded(in: containerView, reason: "portal.sync")

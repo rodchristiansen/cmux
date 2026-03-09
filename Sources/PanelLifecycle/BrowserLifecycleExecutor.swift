@@ -195,6 +195,15 @@ struct BrowserLifecycleExecutorHostedRefreshPlan: Sendable {
     }
 }
 
+struct BrowserLifecycleExecutorVisibleApplicationPlan: Sendable {
+    let shouldPreserveVisibleOnTransientGeometry: Bool
+    let shouldApplyPresentationApplicationPlan: Bool
+    let transientRecoveryPlan: BrowserLifecycleExecutorTransientRecoveryPlan?
+    let transientRecoveryReason: BrowserLifecycleExecutorTransientRecoveryReason?
+    let shouldTrackVisibleEntry: Bool
+    let hostedRefreshPlan: BrowserLifecycleExecutorHostedRefreshPlan
+}
+
 enum BrowserLifecycleExecutor {
     static func isCurrentGenerationBoundVisibleReadyForWorkspaceHandoff(
         currentRecord: PanelLifecycleRecordSnapshot,
@@ -715,6 +724,44 @@ enum BrowserLifecycleExecutor {
             reasons.append(.anchor)
         }
         return BrowserLifecycleExecutorHostedRefreshPlan(reasons: reasons)
+    }
+
+    static func visibleApplicationPlan(
+        presentationApplicationPlan: BrowserLifecycleExecutorPresentationApplicationPlan,
+        transientRecoveryPlan: BrowserLifecycleExecutorTransientRecoveryPlan?,
+        transientRecoveryReason: BrowserLifecycleExecutorTransientRecoveryReason?,
+        forcePresentationRefresh: Bool,
+        hasPendingRefreshReasons: Bool,
+        geometryStateShouldHideContainer: Bool,
+        frameApplicationPlan: BrowserLifecycleExecutorFrameApplicationPlan,
+        webFrameNormalizationPlan: BrowserLifecycleExecutorWebFrameNormalizationPlan
+    ) -> BrowserLifecycleExecutorVisibleApplicationPlan {
+        let visibleSyncPlan = visibleSyncPlan(
+            presentationApplicationPlan: presentationApplicationPlan,
+            transientRecoveryPlan: transientRecoveryPlan,
+            transientRecoveryReason: transientRecoveryReason,
+            forcePresentationRefresh: forcePresentationRefresh,
+            hasPendingRefreshReasons: hasPendingRefreshReasons,
+            geometryStateShouldHideContainer: geometryStateShouldHideContainer
+        )
+        let hostedRefreshPlan = hostedRefreshPlan(
+            visibleSyncPlan: visibleSyncPlan,
+            frameApplicationPlan: frameApplicationPlan,
+            webFrameNormalizationPlan: webFrameNormalizationPlan,
+            presentationApplicationPlan: presentationApplicationPlan
+        )
+        let effectiveTransientRecoveryPlan =
+            visibleSyncPlan.shouldApplyTransientRecoveryPlan ? transientRecoveryPlan : nil
+        let effectiveTransientRecoveryReason =
+            visibleSyncPlan.shouldApplyTransientRecoveryPlan ? transientRecoveryReason : nil
+        return BrowserLifecycleExecutorVisibleApplicationPlan(
+            shouldPreserveVisibleOnTransientGeometry: visibleSyncPlan.shouldPreserveVisibleOnTransientGeometry,
+            shouldApplyPresentationApplicationPlan: visibleSyncPlan.shouldApplyPresentationApplicationPlan,
+            transientRecoveryPlan: effectiveTransientRecoveryPlan,
+            transientRecoveryReason: effectiveTransientRecoveryReason,
+            shouldTrackVisibleEntry: visibleSyncPlan.shouldTrackVisibleEntry,
+            hostedRefreshPlan: hostedRefreshPlan
+        )
     }
 
     private static func rectApproximatelyEqual(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 0.5) -> Bool {
