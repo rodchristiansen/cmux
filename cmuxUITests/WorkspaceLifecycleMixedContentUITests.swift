@@ -323,7 +323,11 @@ private final class MixedV2SocketClient {
         for _ in 0..<Self.readinessAttempts {
             if let response = callOnce(method: "system.ping"),
                let result = response["result"] as? [String: Any],
-               result["pong"] as? Bool == true {
+               result["pong"] as? Bool == true,
+               let window = callOnce(method: "window.current"),
+               let windowResult = window["result"] as? [String: Any],
+               let windowId = windowResult["window_id"] as? String,
+               !windowId.isEmpty {
                 return true
             }
             Thread.sleep(forTimeInterval: Self.readinessDelay)
