@@ -7532,6 +7532,7 @@ final class TerminalNotificationDirectInteractionTests: XCTestCase {
             return
         }
 
+        GhosttySurfaceScrollView.resetFlashCounts()
         AppFocusState.overrideIsFocused = true
         XCTAssertTrue(window.makeFirstResponder(surfaceView))
 
@@ -7548,8 +7549,12 @@ final class TerminalNotificationDirectInteractionTests: XCTestCase {
         let pointInWindow = surfaceView.convert(NSPoint(x: 20, y: 20), to: nil)
         let event = makeMouseEvent(type: .leftMouseDown, location: pointInWindow, window: window)
         surfaceView.mouseDown(with: event)
+        let drained = expectation(description: "flash drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 1.0)
 
         XCTAssertFalse(store.hasUnreadNotification(forTabId: workspace.id, surfaceId: terminalPanel.id))
+        XCTAssertEqual(GhosttySurfaceScrollView.flashCount(for: terminalPanel.id), 1)
     }
 }
 
