@@ -2845,6 +2845,7 @@ extension BrowserPanel {
             return
         }
         preferredDeveloperToolsVisible = false
+        forceDeveloperToolsRefreshOnNextAttach = false
         cancelDeveloperToolsRestoreRetry()
     }
 
@@ -2907,10 +2908,14 @@ extension BrowserPanel {
         didChangeVisibility: Bool,
         didChangeZPriority _: Bool
     ) {
+        let didPortalMutation = didReattach || didChangeVisibility
         let shouldRestore =
-            hasPendingDeveloperToolsRefreshAfterAttach() ||
-            (didChangeVisibility && preferredDeveloperToolsVisible) ||
-            (didReattach && inspectorWasVisibleBeforeUpdate)
+            didPortalMutation &&
+            (
+                hasPendingDeveloperToolsRefreshAfterAttach() ||
+                (didChangeVisibility && preferredDeveloperToolsVisible) ||
+                (didReattach && inspectorWasVisibleBeforeUpdate)
+            )
 
         if shouldRestore {
             restoreDeveloperToolsAfterAttachIfNeeded()

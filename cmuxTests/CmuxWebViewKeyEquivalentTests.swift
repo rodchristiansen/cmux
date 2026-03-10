@@ -2560,6 +2560,69 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
         XCTAssertEqual(inspector.showCount, 2)
     }
 
+    func testPortalUpdateWithoutMutationKeepsPendingRefreshQueued() {
+        let (panel, inspector) = makePanelWithInspector()
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        panel.requestDeveloperToolsRefreshAfterNextAttach(reason: "unit-test")
+        XCTAssertTrue(panel.hasPendingDeveloperToolsRefreshAfterAttach())
+
+        panel.reconcileDeveloperToolsAfterPortalUpdate(
+            inspectorWasVisibleBeforeUpdate: true,
+            didReattach: false,
+            didChangeVisibility: false,
+            didChangeZPriority: false
+        )
+
+        XCTAssertTrue(panel.isDeveloperToolsVisible())
+        XCTAssertEqual(inspector.showCount, 1)
+        XCTAssertTrue(panel.hasPendingDeveloperToolsRefreshAfterAttach())
+    }
+
+    func testPortalUpdateWithoutMutationCancelsPendingRefreshAfterManualClose() {
+        let (panel, inspector) = makePanelWithInspector()
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        panel.requestDeveloperToolsRefreshAfterNextAttach(reason: "unit-test")
+        XCTAssertTrue(panel.hasPendingDeveloperToolsRefreshAfterAttach())
+
+        inspector.close()
+        XCTAssertFalse(panel.isDeveloperToolsVisible())
+
+        panel.reconcileDeveloperToolsAfterPortalUpdate(
+            inspectorWasVisibleBeforeUpdate: false,
+            didReattach: false,
+            didChangeVisibility: false,
+            didChangeZPriority: false
+        )
+
+        XCTAssertFalse(panel.isDeveloperToolsVisible())
+        XCTAssertEqual(inspector.showCount, 1)
+        XCTAssertFalse(panel.hasPendingDeveloperToolsRefreshAfterAttach())
+    }
+
+    func testPortalUpdatePendingRefreshRestoresInspectorOnReattach() {
+        let (panel, inspector) = makePanelWithInspector()
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        panel.requestDeveloperToolsRefreshAfterNextAttach(reason: "unit-test")
+        XCTAssertTrue(panel.hasPendingDeveloperToolsRefreshAfterAttach())
+
+        inspector.close()
+        XCTAssertFalse(panel.isDeveloperToolsVisible())
+
+        panel.reconcileDeveloperToolsAfterPortalUpdate(
+            inspectorWasVisibleBeforeUpdate: false,
+            didReattach: true,
+            didChangeVisibility: false,
+            didChangeZPriority: false
+        )
+
+        XCTAssertTrue(panel.isDeveloperToolsVisible())
+        XCTAssertEqual(inspector.showCount, 2)
+        XCTAssertFalse(panel.hasPendingDeveloperToolsRefreshAfterAttach())
+    }
+
     func testForcedRefreshAfterAttachKeepsVisibleInspectorState() {
         let (panel, inspector) = makePanelWithInspector()
 
