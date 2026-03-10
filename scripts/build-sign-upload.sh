@@ -68,6 +68,12 @@ else
   echo "GhosttyKit.xcframework exists, skipping build"
 fi
 
+GHOSTTYKIT_BINARY="GhosttyKit.xcframework/macos-arm64_x86_64/libghostty.a"
+test -f "$GHOSTTYKIT_BINARY"
+GHOSTTYKIT_ARCHS="$(lipo -archs "$GHOSTTYKIT_BINARY")"
+echo "GhosttyKit architectures: $GHOSTTYKIT_ARCHS"
+[[ "$GHOSTTYKIT_ARCHS" == *arm64* && "$GHOSTTYKIT_ARCHS" == *x86_64* ]]
+
 # --- Build app (Release, unsigned) ---
 echo "Building app..."
 rm -rf build/
