@@ -5023,6 +5023,16 @@ private final class GhosttyPassthroughVisualEffectView: NSVisualEffectView {
 }
 
 final class GhosttySurfaceScrollView: NSView {
+    enum FlashStyle {
+        case standardFocus
+        case notificationDismiss
+    }
+
+    private enum NotificationRingMetrics {
+        static let inset: CGFloat = 2
+        static let cornerRadius: CGFloat = 6
+    }
+
     private let backgroundView: NSView
     private let scrollView: GhosttyScrollView
     private let documentView: NSView
@@ -5463,7 +5473,7 @@ final class GhosttySurfaceScrollView: NSView {
         _ = setFrameIfNeeded(notificationRingOverlayView, to: bounds)
         _ = setFrameIfNeeded(flashOverlayView, to: bounds)
         updateNotificationRingPath()
-        updateFlashPath()
+        updateFlashPath(style: .standardFocus)
         synchronizeScrollView()
         synchronizeSurfaceView()
         let didCoreSurfaceChange = synchronizeCoreSurface()
@@ -5898,7 +5908,7 @@ final class GhosttySurfaceScrollView: NSView {
     }
 #endif
 
-    func triggerFlash() {
+    func triggerFlash(style: FlashStyle = .standardFocus) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
 #if DEBUG
@@ -5906,7 +5916,7 @@ final class GhosttySurfaceScrollView: NSView {
                 Self.recordFlash(for: surfaceId)
             }
 #endif
-            self.updateFlashPath()
+            self.updateFlashPath(style: style)
             self.flashLayer.removeAllAnimations()
             self.flashLayer.opacity = 0
             let animation = CAKeyframeAnimation(keyPath: "opacity")
@@ -6648,17 +6658,27 @@ final class GhosttySurfaceScrollView: NSView {
         updateOverlayRingPath(
             layer: notificationRingLayer,
             bounds: notificationRingOverlayView.bounds,
-            inset: 2,
-            radius: 6
+            inset: NotificationRingMetrics.inset,
+            radius: NotificationRingMetrics.cornerRadius
         )
     }
 
-    private func updateFlashPath() {
+    private func updateFlashPath(style: FlashStyle) {
+        let inset: CGFloat
+        let radius: CGFloat
+        switch style {
+        case .standardFocus:
+            inset = CGFloat(FocusFlashPattern.ringInset)
+            radius = CGFloat(FocusFlashPattern.ringCornerRadius)
+        case .notificationDismiss:
+            inset = NotificationRingMetrics.inset
+            radius = NotificationRingMetrics.cornerRadius
+        }
         updateOverlayRingPath(
             layer: flashLayer,
             bounds: flashOverlayView.bounds,
-            inset: CGFloat(FocusFlashPattern.ringInset),
-            radius: CGFloat(FocusFlashPattern.ringCornerRadius)
+            inset: inset,
+            radius: radius
         )
     }
 
