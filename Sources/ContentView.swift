@@ -9840,7 +9840,7 @@ private struct TabItemView: View {
         lastSidebarSelectionIndex = index
         tabManager.selectTab(tab)
         if wasSelected, !isCommand, !isShift {
-            notificationStore.dismissUnreadNotificationIfActive(
+            tabManager.dismissNotificationOnDirectInteraction(
                 tabId: tab.id,
                 surfaceId: tabManager.focusedSurfaceId(for: tab.id)
             )

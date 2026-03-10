@@ -4548,7 +4548,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         #endif
         window?.makeFirstResponder(self)
         if let terminalSurface {
-            TerminalNotificationStore.shared.dismissUnreadNotificationIfActive(
+            AppDelegate.shared?.tabManager?.dismissNotificationOnDirectInteraction(
                 tabId: terminalSurface.tabId,
                 surfaceId: terminalSurface.id
             )
