@@ -7427,8 +7427,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
-        // Safari defaults:
-        // - Option+Command+I => Show/Toggle Web Inspector
+        // Browser shortcuts:
+        // - Command+I => Show/Toggle Developer Tools
         // - Option+Command+C => Show JavaScript Console
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleBrowserDeveloperTools)) {
 #if DEBUG
@@ -7965,10 +7965,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let chars = (event.charactersIgnoringModifiers ?? "").lowercased()
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags == [.command, .option] {
+        if flags == [.command] {
             if chars == "i" || event.keyCode == 34 {
                 return "toggle.literal"
             }
+        }
+        if flags == [.command, .option] {
             if chars == "c" || event.keyCode == 8 {
                 return "console.literal"
             }

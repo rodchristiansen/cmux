@@ -358,7 +358,10 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
             return
         }
 
-        withTemporaryShortcut(action: .showNotifications) {
+        withTemporaryShortcut(
+            action: .showNotifications,
+            shortcut: StoredShortcut(key: "i", command: true, shift: false, option: false, control: false)
+        ) {
             // Dvorak: physical ANSI "I" key can produce the character "c".
             // This should behave like Cmd+C (copy), not match the Cmd+I app shortcut.
             guard let event = NSEvent.keyEvent(
@@ -772,7 +775,7 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertEqual(workspace.panels.count, panelCountBefore)
     }
 
-    func testCmdIStillTriggersShowNotificationsShortcut() {
+    func testCmdShiftIStillTriggersShowNotificationsShortcut() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
             return
@@ -790,7 +793,7 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
             guard let event = NSEvent.keyEvent(
                 with: .keyDown,
                 location: .zero,
-                modifierFlags: [.command],
+                modifierFlags: [.command, .shift],
                 timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber,
                 context: nil,
@@ -799,7 +802,7 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
                 isARepeat: false,
                 keyCode: 34 // kVK_ANSI_I
             ) else {
-                XCTFail("Failed to construct Cmd+I event")
+                XCTFail("Failed to construct Cmd+Shift+I event")
                 return
             }
 

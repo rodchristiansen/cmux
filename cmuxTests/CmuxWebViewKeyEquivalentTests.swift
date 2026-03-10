@@ -1244,16 +1244,25 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
     }
 }
 final class BrowserDeveloperToolsShortcutDefaultsTests: XCTestCase {
-    func testSafariDefaultShortcutForToggleDeveloperTools() {
+    func testDefaultShortcutForShowNotifications() {
+        let shortcut = KeyboardShortcutSettings.Action.showNotifications.defaultShortcut
+        XCTAssertEqual(shortcut.key, "i")
+        XCTAssertTrue(shortcut.command)
+        XCTAssertTrue(shortcut.shift)
+        XCTAssertFalse(shortcut.option)
+        XCTAssertFalse(shortcut.control)
+    }
+
+    func testDefaultShortcutForToggleDeveloperTools() {
         let shortcut = KeyboardShortcutSettings.Action.toggleBrowserDeveloperTools.defaultShortcut
         XCTAssertEqual(shortcut.key, "i")
         XCTAssertTrue(shortcut.command)
-        XCTAssertTrue(shortcut.option)
+        XCTAssertFalse(shortcut.option)
         XCTAssertFalse(shortcut.shift)
         XCTAssertFalse(shortcut.control)
     }
 
-    func testSafariDefaultShortcutForShowJavaScriptConsole() {
+    func testDefaultShortcutForShowJavaScriptConsole() {
         let shortcut = KeyboardShortcutSettings.Action.showBrowserJavaScriptConsole.defaultShortcut
         XCTAssertEqual(shortcut.key, "c")
         XCTAssertTrue(shortcut.command)
