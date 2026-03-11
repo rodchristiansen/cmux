@@ -602,6 +602,13 @@ struct BrowserPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)) { _ in
             ghosttyBackgroundGeneration &+= 1
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)
+                .compactMap { $0.object as? NSWindow }
+        ) { window in
+            guard window === panel.webView.window else { return }
+            requestVisibleLocalInlineRefreshIfNeeded(reason: "window.didBecomeKey")
+        }
     }
 
     private var addressBar: some View {
@@ -1233,6 +1240,18 @@ struct BrowserPanelView: View {
             browserThemeModeRaw = mode.rawValue
         }
         panel.setBrowserThemeMode(mode)
+    }
+
+    private func requestVisibleLocalInlineRefreshIfNeeded(reason: String) {
+        guard isFocused else { return }
+        guard panel.shouldUseLocalInlineDeveloperToolsHosting() else { return }
+#if DEBUG
+        dlog(
+            "browser.localHost.keyRefresh.request panel=\(panel.id.uuidString.prefix(5)) " +
+            "reason=\(reason) focused=\(isFocused ? 1 : 0)"
+        )
+#endif
+        panel.requestViewReattach()
     }
 
     private func handleOmnibarTap() {
@@ -3629,6 +3648,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         var lastSynchronizedHostGeometryRevision: UInt64 = 0
         var lastLocalInlinePanelFocused: Bool?
         var lastLocalInlineWebResponder: Bool?
+        var lastLocalInlineRefreshToken: UInt64?
         var localInlineDidReparent: Bool = false
     }
 
@@ -4625,7 +4645,35 @@ struct WebViewRepresentable: NSViewRepresentable {
         coordinator.localInlineSlotView = nil
         coordinator.lastLocalInlinePanelFocused = nil
         coordinator.lastLocalInlineWebResponder = nil
+        coordinator.lastLocalInlineRefreshToken = nil
         coordinator.localInlineDidReparent = false
+    }
+
+    static func refreshLocalInlineHostedWebViewPresentationIfRequested(
+        _ webView: WKWebView,
+        in container: WindowBrowserSlotView,
+        coordinator: Coordinator,
+        refreshToken: UInt64,
+        reason: String
+    ) {
+        defer { coordinator.lastLocalInlineRefreshToken = refreshToken }
+
+        guard !container.isHidden, container.window != nil else { return }
+        guard let lastRefreshToken = coordinator.lastLocalInlineRefreshToken else { return }
+        guard lastRefreshToken != refreshToken else { return }
+
+#if DEBUG
+        dlog(
+            "browser.localHost.tokenRefresh web=\(ObjectIdentifier(webView)) " +
+            "container=\(Self.objectID(container)) reason=\(reason) " +
+            "oldToken=\(lastRefreshToken) newToken=\(refreshToken)"
+        )
+#endif
+        refreshLocalInlineHostedWebViewPresentation(
+            webView,
+            in: container,
+            reason: reason
+        )
     }
 
     static func refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
@@ -4710,10 +4758,6 @@ struct WebViewRepresentable: NSViewRepresentable {
         let retryDeferredAttachIfNeeded: (String) -> Void = { [weak host, weak webView, weak coordinator, weak slotView, weak browserPanel = panel] reason in
             guard let host, let webView, let coordinator, let slotView, let browserPanel else { return }
             guard coordinator.attachGeneration == generation else { return }
-            if let currentPaneId = currentPaneDropContext()?.paneId.id,
-               currentPaneId != paneId.id {
-                return
-            }
             guard browserPanel.claimLocalInlineHost(
                 hostId: ObjectIdentifier(host),
                 paneId: paneId,
@@ -4725,6 +4769,10 @@ struct WebViewRepresentable: NSViewRepresentable {
                 host.releaseHostedWebViewConstraints()
                 return
             }
+            // During move churn the visible replacement host can join a window before
+            // workspace pane mapping converges to the destination pane. Once this host
+            // successfully owns the local inline lease, trust that lease instead of
+            // re-checking the potentially stale pane mapping here.
             guard host.window != nil else { return }
             guard webView.superview !== slotView else { return }
 
@@ -5126,6 +5174,13 @@ struct WebViewRepresentable: NSViewRepresentable {
                 isPanelFocused: resolvedPanelFocused,
                 isWebViewFirstResponder: Self.responderChainContains(window.firstResponder, target: webView),
                 reason: "localHost.focusChange"
+            )
+            Self.refreshLocalInlineHostedWebViewPresentationIfRequested(
+                webView,
+                in: slotView,
+                coordinator: coordinator,
+                refreshToken: reattachToken,
+                reason: "localHost.reattachToken"
             )
         } else {
             Self.resetLocalInlineFocusRefreshState(coordinator)

@@ -4671,6 +4671,10 @@ extension Workspace: BonsplitDelegate {
         let movedPanelIdAfter = panelIdFromSurfaceId(tab.id)
 #endif
         if let movedPanelId = panelIdFromSurfaceId(tab.id) {
+            browserPanel(for: movedPanelId)?.prepareLocalInlineHostReplacementForNextDistinctClaim(
+                inPane: destination,
+                reason: "workspace.didMoveTab"
+            )
             scheduleMovedTerminalRefresh(panelId: movedPanelId)
             scheduleMovedBrowserRefresh(panelId: movedPanelId)
         }

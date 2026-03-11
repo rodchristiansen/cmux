@@ -2069,6 +2069,81 @@ final class BrowserDeveloperToolsConfigurationTests: XCTestCase {
         XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.005)
         XCTAssertEqual(actual.alphaComponent, expected.alphaComponent, accuracy: 0.005)
     }
+
+    func testLocalInlineHostKeepsUsableOwnerUntilDistinctHandoffIsPrepared() {
+        let panel = BrowserPanel(workspaceId: UUID())
+        let ownerPaneId = PaneID(id: UUID())
+        let contenderPaneId = PaneID(id: UUID())
+        let ownerHost = NSView()
+        let contenderHost = NSView()
+        let ownerHostId = ObjectIdentifier(ownerHost)
+        let contenderHostId = ObjectIdentifier(contenderHost)
+        let ownerBounds = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let contenderBounds = CGRect(x: 0, y: 0, width: 900, height: 400)
+
+        XCTAssertTrue(
+            panel.claimLocalInlineHost(
+                hostId: ownerHostId,
+                paneId: ownerPaneId,
+                inWindow: true,
+                bounds: ownerBounds,
+                reason: "test"
+            )
+        )
+
+        XCTAssertFalse(
+            panel.claimLocalInlineHost(
+                hostId: contenderHostId,
+                paneId: contenderPaneId,
+                inWindow: true,
+                bounds: contenderBounds,
+                reason: "test"
+            )
+        )
+
+        XCTAssertFalse(panel.releaseLocalInlineHostIfOwned(hostId: contenderHostId, reason: "test"))
+        XCTAssertTrue(panel.releaseLocalInlineHostIfOwned(hostId: ownerHostId, reason: "test"))
+    }
+
+    func testPreparedDistinctLocalInlineHandoffAllowsDestinationPaneToClaim() {
+        let panel = BrowserPanel(workspaceId: UUID())
+        let sourcePaneId = PaneID(id: UUID())
+        let destinationPaneId = PaneID(id: UUID())
+        let sourceHost = NSView()
+        let destinationHost = NSView()
+        let sourceHostId = ObjectIdentifier(sourceHost)
+        let destinationHostId = ObjectIdentifier(destinationHost)
+        let sourceBounds = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let destinationBounds = CGRect(x: 0, y: 0, width: 400, height: 400)
+
+        XCTAssertTrue(
+            panel.claimLocalInlineHost(
+                hostId: sourceHostId,
+                paneId: sourcePaneId,
+                inWindow: true,
+                bounds: sourceBounds,
+                reason: "test"
+            )
+        )
+
+        panel.prepareLocalInlineHostReplacementForNextDistinctClaim(
+            inPane: destinationPaneId,
+            reason: "test"
+        )
+
+        XCTAssertTrue(
+            panel.claimLocalInlineHost(
+                hostId: destinationHostId,
+                paneId: destinationPaneId,
+                inWindow: true,
+                bounds: destinationBounds,
+                reason: "test"
+            )
+        )
+
+        XCTAssertFalse(panel.releaseLocalInlineHostIfOwned(hostId: sourceHostId, reason: "test"))
+        XCTAssertTrue(panel.releaseLocalInlineHostIfOwned(hostId: destinationHostId, reason: "test"))
+    }
 }
 
 final class GhosttyBackgroundThemeTests: XCTestCase {
@@ -9875,6 +9950,76 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.06))
 
         XCTAssertEqual(webView.firedSelectors.count, 9)
+    }
+
+    func testLocalInlineHostedRefreshReattachesAfterRefreshTokenChangeWithoutFocusTransition() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let slot = WindowBrowserSlotView(frame: NSRect(x: 40, y: 24, width: 240, height: 180))
+        contentView.addSubview(slot)
+
+        let webView = ReattachProbeWebView(
+            frame: slot.bounds,
+            configuration: WKWebViewConfiguration()
+        )
+        slot.addSubview(webView)
+        slot.pinHostedWebView(webView)
+        contentView.layoutSubtreeIfNeeded()
+        slot.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+
+        let coordinator = WebViewRepresentable.Coordinator()
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentationIfRequested(
+            webView,
+            in: slot,
+            coordinator: coordinator,
+            refreshToken: 0,
+            reason: "test"
+        )
+
+        XCTAssertTrue(webView.firedSelectors.isEmpty)
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentationIfRequested(
+            webView,
+            in: slot,
+            coordinator: coordinator,
+            refreshToken: 1,
+            reason: "test"
+        )
+
+        XCTAssertEqual(
+            webView.firedSelectors,
+            ["viewDidUnhide", "_enterInWindow", "_endDeferringViewInWindowChangesSync"]
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+
+        let refreshedSelectorCount = webView.firedSelectors.count
+        XCTAssertGreaterThanOrEqual(refreshedSelectorCount, 6)
+        XCTAssertEqual(coordinator.lastLocalInlineRefreshToken, 1)
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentationIfRequested(
+            webView,
+            in: slot,
+            coordinator: coordinator,
+            refreshToken: 1,
+            reason: "test"
+        )
+
+        XCTAssertEqual(webView.firedSelectors.count, refreshedSelectorCount)
+        XCTAssertEqual(coordinator.lastLocalInlineRefreshToken, 1)
     }
 
     func testWindowBrowserSlotReattachesPlainWebViewAtFullBoundsAfterHiddenHostResize() {
