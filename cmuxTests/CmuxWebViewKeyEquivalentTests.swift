@@ -9535,6 +9535,78 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         XCTAssertEqual(webView.firedSelectors.count, 9)
     }
 
+    func testLocalInlineHostedRefreshReattachesAfterFocusTransitionWithoutReparent() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let slot = WindowBrowserSlotView(frame: NSRect(x: 40, y: 24, width: 240, height: 180))
+        contentView.addSubview(slot)
+
+        let webView = ReattachProbeWebView(
+            frame: slot.bounds,
+            configuration: WKWebViewConfiguration()
+        )
+        slot.addSubview(webView)
+        slot.pinHostedWebView(webView)
+        contentView.layoutSubtreeIfNeeded()
+        slot.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+
+        let coordinator = WebViewRepresentable.Coordinator()
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
+            webView,
+            in: slot,
+            coordinator: coordinator,
+            isPanelFocused: true,
+            isWebViewFirstResponder: true,
+            reason: "test"
+        )
+
+        XCTAssertTrue(webView.firedSelectors.isEmpty)
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
+            webView,
+            in: slot,
+            coordinator: coordinator,
+            isPanelFocused: false,
+            isWebViewFirstResponder: false,
+            reason: "test"
+        )
+
+        XCTAssertEqual(
+            webView.firedSelectors,
+            ["viewDidUnhide", "_enterInWindow", "_endDeferringViewInWindowChangesSync"]
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+
+        XCTAssertEqual(webView.firedSelectors.count, 9)
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
+            webView,
+            in: slot,
+            coordinator: coordinator,
+            isPanelFocused: false,
+            isWebViewFirstResponder: false,
+            reason: "test"
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+
+        XCTAssertEqual(webView.firedSelectors.count, 9)
+    }
+
     func testWindowBrowserSlotReattachesPlainWebViewAtFullBoundsAfterHiddenHostResize() {
         let slot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 400, height: 180))
         let webView = WKWebView(frame: .zero)

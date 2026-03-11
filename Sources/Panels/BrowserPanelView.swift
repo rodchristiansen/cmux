@@ -3619,11 +3619,15 @@ struct WebViewRepresentable: NSViewRepresentable {
     final class Coordinator {
         weak var panel: BrowserPanel?
         weak var webView: WKWebView?
+        weak var localInlineSlotView: WindowBrowserSlotView?
         var attachGeneration: Int = 0
         var desiredPortalVisibleInUI: Bool = true
         var desiredPortalZPriority: Int = 0
         var lastPortalHostId: ObjectIdentifier?
         var lastSynchronizedHostGeometryRevision: UInt64 = 0
+        var lastLocalInlinePanelFocused: Bool?
+        var lastLocalInlineWebResponder: Bool?
+        var localInlineDidReparent: Bool = false
     }
 
     final class HostContainerView: NSView {
@@ -4552,6 +4556,52 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
     }
 
+    private static func resetLocalInlineFocusRefreshState(_ coordinator: Coordinator) {
+        coordinator.localInlineSlotView = nil
+        coordinator.lastLocalInlinePanelFocused = nil
+        coordinator.lastLocalInlineWebResponder = nil
+        coordinator.localInlineDidReparent = false
+    }
+
+    static func refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
+        _ webView: WKWebView,
+        in container: WindowBrowserSlotView,
+        coordinator: Coordinator,
+        isPanelFocused: Bool,
+        isWebViewFirstResponder: Bool,
+        reason: String
+    ) {
+        defer {
+            coordinator.lastLocalInlinePanelFocused = isPanelFocused
+            coordinator.lastLocalInlineWebResponder = isWebViewFirstResponder
+            coordinator.localInlineDidReparent = false
+        }
+
+        guard !container.isHidden, container.window != nil else { return }
+        guard !coordinator.localInlineDidReparent else { return }
+        guard let lastPanelFocused = coordinator.lastLocalInlinePanelFocused,
+              let lastWebResponder = coordinator.lastLocalInlineWebResponder else {
+            return
+        }
+        guard lastPanelFocused != isPanelFocused || lastWebResponder != isWebViewFirstResponder else {
+            return
+        }
+
+#if DEBUG
+        dlog(
+            "browser.localHost.focusRefresh web=\(ObjectIdentifier(webView)) " +
+            "container=\(Self.objectID(container)) reason=\(reason) " +
+            "oldPanelFocused=\(lastPanelFocused ? 1 : 0) newPanelFocused=\(isPanelFocused ? 1 : 0) " +
+            "oldWebResponder=\(lastWebResponder ? 1 : 0) newWebResponder=\(isWebViewFirstResponder ? 1 : 0)"
+        )
+#endif
+        refreshLocalInlineHostedWebViewPresentation(
+            webView,
+            in: container,
+            reason: reason
+        )
+    }
+
     private static func installPortalAnchorView(_ anchorView: NSView, in host: NSView) {
         // SwiftUI can keep transient replacement hosts alive off-window during split
         // reparenting. Never let those hosts steal the shared portal anchor, or the
@@ -4585,6 +4635,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         let slotView = host.ensureLocalInlineSlotView()
 
         let coordinator = context.coordinator
+        coordinator.localInlineSlotView = slotView
         coordinator.desiredPortalVisibleInUI = false
         coordinator.desiredPortalZPriority = 0
         coordinator.attachGeneration += 1
@@ -4628,6 +4679,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
 
         let didReparentIntoLocalHost = webView.superview !== slotView
+        coordinator.localInlineDidReparent = didReparentIntoLocalHost
         if webView.superview !== slotView {
             if let sourceSuperview = webView.superview {
                 Self.moveWebKitRelatedSubviewsIntoHostIfNeeded(
@@ -4678,6 +4730,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         host.releaseHostedWebViewConstraints()
 
         let coordinator = context.coordinator
+        Self.resetLocalInlineFocusRefreshState(coordinator)
         let paneDropContext = currentPaneDropContext()
         let isCurrentPaneOwner = paneDropContext?.paneId.id == paneId.id
         let hostId = ObjectIdentifier(host)
@@ -4882,27 +4935,46 @@ struct WebViewRepresentable: NSViewRepresentable {
             BrowserWindowPortalRegistry.detach(webView: previousWebView)
             coordinator.lastPortalHostId = nil
             coordinator.lastSynchronizedHostGeometryRevision = 0
+            Self.resetLocalInlineFocusRefreshState(coordinator)
         }
         coordinator.panel = panel
         coordinator.webView = webView
 
         Self.clearPortalCallbacks(for: nsView)
+        let resolvedPanelFocused = isPanelFocused && isCurrentPaneOwner
+        let resolvedShouldFocusWebView = shouldFocusWebView && isCurrentPaneOwner
         let hostOwnsPortal = useLocalInlineHosting
             ? updateUsingLocalInlineHosting(nsView, context: context, webView: webView)
             : updateUsingWindowPortal(nsView, context: context, webView: webView)
         Self.applyWebViewFirstResponderPolicy(
             panel: panel,
             webView: webView,
-            isPanelFocused: isPanelFocused && isCurrentPaneOwner && hostOwnsPortal
+            isPanelFocused: resolvedPanelFocused && hostOwnsPortal
         )
 
         Self.applyFocus(
             panel: panel,
             webView: webView,
             nsView: nsView,
-            shouldFocusWebView: shouldFocusWebView && isCurrentPaneOwner && hostOwnsPortal,
-            isPanelFocused: isPanelFocused && isCurrentPaneOwner && hostOwnsPortal
+            shouldFocusWebView: resolvedShouldFocusWebView && hostOwnsPortal,
+            isPanelFocused: resolvedPanelFocused && hostOwnsPortal
         )
+
+        if useLocalInlineHosting,
+           hostOwnsPortal,
+           let slotView = coordinator.localInlineSlotView,
+           let window = nsView.window ?? webView.window {
+            Self.refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
+                webView,
+                in: slotView,
+                coordinator: coordinator,
+                isPanelFocused: resolvedPanelFocused,
+                isWebViewFirstResponder: Self.responderChainContains(window.firstResponder, target: webView),
+                reason: "localHost.focusChange"
+            )
+        } else {
+            Self.resetLocalInlineFocusRefreshState(coordinator)
+        }
     }
 
     private static func applyFocus(
