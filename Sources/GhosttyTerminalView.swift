@@ -7518,6 +7518,15 @@ final class GhosttySurfaceScrollView: NSView {
         }()
 
         guard ownsSurfaceResponder || isCurrentSurfaceSearchResponder(firstResponder) else { return }
+        if ownsSurfaceResponder && surfaceView.suppressingReparentFocus {
+#if DEBUG
+            dlog(
+                "focus.surface.resign.defer surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+                "reason=\(reason) \(debugWorkspaceFocusSuffix())"
+            )
+#endif
+            return
+        }
 
 #if DEBUG
         dlog(
