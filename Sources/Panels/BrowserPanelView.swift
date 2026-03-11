@@ -4489,6 +4489,10 @@ struct WebViewRepresentable: NSViewRepresentable {
         let relatedSubviews: [NSView]
         if let sourceSlot = sourceSuperview as? WindowBrowserSlotView {
             relatedSubviews = sourceSlot.localInlineHostedContentSubviews(primaryWebView: primaryWebView)
+            container.prepareHostedContentLayoutSnapshot(
+                from: sourceSlot,
+                hostedSubviews: relatedSubviews
+            )
         } else {
             relatedSubviews = sourceSuperview.subviews.filter { view in
                 if view === primaryWebView { return true }
@@ -4563,6 +4567,9 @@ struct WebViewRepresentable: NSViewRepresentable {
         webView.needsLayout = true
         webView.layoutSubtreeIfNeeded()
         slotView.layoutSubtreeIfNeeded()
+        slotView.applyHostedContentLayoutSnapshotIfNeeded(
+            to: slotView.localInlineHostedContentSubviews(primaryWebView: webView)
+        )
         host.displayIfNeeded()
         slotView.displayIfNeeded()
         webView.displayIfNeeded()
@@ -4583,6 +4590,10 @@ struct WebViewRepresentable: NSViewRepresentable {
         phase: String
     ) {
         guard !container.isHidden else { return }
+
+        container.applyHostedContentLayoutSnapshotIfNeeded(
+            to: container.localInlineHostedContentSubviews(primaryWebView: webView)
+        )
 
         webView.needsLayout = true
         webView.needsDisplay = true

@@ -1488,6 +1488,10 @@ final class BrowserPaneDropTargetView: NSView {
 }
 
 final class WindowBrowserSlotView: NSView {
+    struct HostedContentLayoutSnapshot {
+        let normalizedFrames: [ObjectIdentifier: CGRect]
+    }
+
     override var isOpaque: Bool { false }
     override var isHidden: Bool {
         didSet {
@@ -1506,6 +1510,7 @@ final class WindowBrowserSlotView: NSView {
     private var dropZoneOverlayAnimationGeneration: UInt64 = 0
     private var isRefreshingInteractionLayers = false
     private var paneTopChromeHeight: CGFloat = 0
+    private var pendingHostedContentLayoutSnapshot: HostedContentLayoutSnapshot?
     var preferredHostedInspectorWidth: CGFloat?
     var onHostedInspectorLayout: ((WindowBrowserSlotView) -> Void)?
     fileprivate var isApplyingHostedInspectorLayout = false
@@ -1521,6 +1526,65 @@ final class WindowBrowserSlotView: NSView {
             }
             return true
         }
+    }
+
+    func prepareHostedContentLayoutSnapshot(from sourceSlot: WindowBrowserSlotView, hostedSubviews: [NSView]) {
+        let sourceBounds = sourceSlot.bounds
+        guard sourceBounds.width > 1, sourceBounds.height > 1 else {
+            pendingHostedContentLayoutSnapshot = nil
+            return
+        }
+
+        let normalizedFrames = hostedSubviews.reduce(into: [ObjectIdentifier: CGRect]()) { result, view in
+            guard view.superview === sourceSlot else { return }
+            let frame = view.frame
+            guard frame.width > 1, frame.height > 1 else { return }
+            result[ObjectIdentifier(view)] = CGRect(
+                x: frame.minX / sourceBounds.width,
+                y: frame.minY / sourceBounds.height,
+                width: frame.width / sourceBounds.width,
+                height: frame.height / sourceBounds.height
+            )
+        }
+
+        pendingHostedContentLayoutSnapshot = normalizedFrames.isEmpty
+            ? nil
+            : HostedContentLayoutSnapshot(normalizedFrames: normalizedFrames)
+    }
+
+    func applyHostedContentLayoutSnapshotIfNeeded(to hostedSubviews: [NSView]) {
+        guard let snapshot = pendingHostedContentLayoutSnapshot else { return }
+        let targetBounds = bounds
+        guard targetBounds.width > 1, targetBounds.height > 1 else { return }
+
+        var appliedAny = false
+        for view in hostedSubviews {
+            guard view.superview === self,
+                  let normalizedFrame = snapshot.normalizedFrames[ObjectIdentifier(view)] else {
+                continue
+            }
+
+            let nextFrame = CGRect(
+                x: normalizedFrame.minX * targetBounds.width,
+                y: normalizedFrame.minY * targetBounds.height,
+                width: normalizedFrame.width * targetBounds.width,
+                height: normalizedFrame.height * targetBounds.height
+            )
+            guard nextFrame.width > 1, nextFrame.height > 1 else { continue }
+            guard !Self.rectApproximatelyEqual(view.frame, nextFrame, epsilon: 0.5) else {
+                continue
+            }
+            view.frame = nextFrame
+            view.needsLayout = true
+            view.needsDisplay = true
+            appliedAny = true
+        }
+
+        if appliedAny {
+            needsLayout = true
+            needsDisplay = true
+        }
+        pendingHostedContentLayoutSnapshot = nil
     }
 
     override init(frame frameRect: NSRect) {

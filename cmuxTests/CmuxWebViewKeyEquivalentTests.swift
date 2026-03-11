@@ -10022,6 +10022,40 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         XCTAssertEqual(coordinator.lastLocalInlineRefreshToken, 1)
     }
 
+    func testWindowBrowserSlotRestoresHostedContentFramesAfterReparentSnapshot() {
+        let sourceSlot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 1200, height: 1314))
+        let targetSlot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 589, height: 1314))
+
+        let webView = WKWebView(frame: NSRect(x: 0, y: 500, width: 1200, height: 814))
+        let inspectorView = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 500))
+        sourceSlot.addSubview(webView)
+        sourceSlot.addSubview(inspectorView)
+
+        let hostedSubviews = sourceSlot.localInlineHostedContentSubviews(primaryWebView: webView)
+        targetSlot.prepareHostedContentLayoutSnapshot(from: sourceSlot, hostedSubviews: hostedSubviews)
+
+        webView.removeFromSuperview()
+        inspectorView.removeFromSuperview()
+        targetSlot.addSubview(webView)
+        targetSlot.addSubview(inspectorView)
+        webView.frame = targetSlot.bounds
+        inspectorView.frame = targetSlot.bounds
+
+        targetSlot.applyHostedContentLayoutSnapshotIfNeeded(
+            to: targetSlot.localInlineHostedContentSubviews(primaryWebView: webView)
+        )
+
+        XCTAssertEqual(webView.frame.minX, 0, accuracy: 0.5)
+        XCTAssertEqual(webView.frame.minY, 500, accuracy: 0.5)
+        XCTAssertEqual(webView.frame.width, 589, accuracy: 0.5)
+        XCTAssertEqual(webView.frame.height, 814, accuracy: 0.5)
+
+        XCTAssertEqual(inspectorView.frame.minX, 0, accuracy: 0.5)
+        XCTAssertEqual(inspectorView.frame.minY, 0, accuracy: 0.5)
+        XCTAssertEqual(inspectorView.frame.width, 589, accuracy: 0.5)
+        XCTAssertEqual(inspectorView.frame.height, 500, accuracy: 0.5)
+    }
+
     func testWindowBrowserSlotReattachesPlainWebViewAtFullBoundsAfterHiddenHostResize() {
         let slot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 400, height: 180))
         let webView = WKWebView(frame: .zero)
