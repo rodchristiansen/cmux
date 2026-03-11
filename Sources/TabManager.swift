@@ -427,6 +427,7 @@ fileprivate final class VsyncIOSurfaceTimelineState {
 
     let frameCount: Int
     let closeFrame: Int
+    let detectAnySizeMismatch: Bool
     let lock = NSLock()
 
     var framesWritten = 0
@@ -446,9 +447,10 @@ fileprivate final class VsyncIOSurfaceTimelineState {
     var link: CVDisplayLink?
     var continuation: CheckedContinuation<Void, Never>?
 
-    init(frameCount: Int, closeFrame: Int) {
+    init(frameCount: Int, closeFrame: Int, detectAnySizeMismatch: Bool = false) {
         self.frameCount = frameCount
         self.closeFrame = closeFrame
+        self.detectAnySizeMismatch = detectAnySizeMismatch
     }
 
     func tryBeginCapture() -> Bool {
@@ -525,10 +527,13 @@ fileprivate func cmuxVsyncIOSurfaceTimelineCallback(
                 st.firstBlank = (label: t.label, frame: st.framesWritten)
             }
 
+            let shouldReportSizeMismatch = hasSizeMismatch && (
+                st.detectAnySizeMismatch || stretchRisk
+            )
+
             if st.firstSizeMismatch == nil,
                st.framesWritten >= st.closeFrame,
-               stretchRisk,
-               hasSizeMismatch {
+               shouldReportSizeMismatch {
                 st.firstSizeMismatch = (
                     label: t.label,
                     frame: st.framesWritten,
@@ -657,6 +662,7 @@ class TabManager: ObservableObject {
 
 #if DEBUG
     private var didSetupSplitCloseRightUITest = false
+    private var didSetupSplitCreateRightUITest = false
     private var didSetupUITestFocusShortcuts = false
     private var didSetupChildExitSplitUITest = false
     private var didSetupChildExitKeyboardUITest = false
@@ -698,6 +704,7 @@ class TabManager: ObservableObject {
 #if DEBUG
         setupUITestFocusShortcutsIfNeeded()
         setupSplitCloseRightUITestIfNeeded()
+        setupSplitCreateRightUITestIfNeeded()
         setupChildExitSplitUITestIfNeeded()
         setupChildExitKeyboardUITestIfNeeded()
 #endif
@@ -3250,11 +3257,16 @@ class TabManager: ObservableObject {
 	        closeFrame: Int,
 	        crop: CGRect,
 	        targets: [(label: String, view: GhosttySurfaceScrollView)],
-	        actions: [(frame: Int, action: () -> Void)] = []
+	        actions: [(frame: Int, action: () -> Void)] = [],
+            detectAnySizeMismatch: Bool = false
 	    ) async -> (firstBlank: (label: String, frame: Int)?, firstSizeMismatch: (label: String, frame: Int, ios: String, expected: String)?, trace: [String]) {
 	        guard frameCount > 0 else { return (nil, nil, []) }
 
-	        let st = VsyncIOSurfaceTimelineState(frameCount: frameCount, closeFrame: closeFrame)
+	        let st = VsyncIOSurfaceTimelineState(
+                frameCount: frameCount,
+                closeFrame: closeFrame,
+                detectAnySizeMismatch: detectAnySizeMismatch
+            )
 	        st.scheduledActions = actions.sorted(by: { $0.frame < $1.frame })
 	        st.nextActionIndex = 0
 	        st.targets = targets.map { t in
@@ -3294,6 +3306,190 @@ class TabManager: ObservableObject {
     }
 
     private func loadSplitCloseRightTestData(at path: String) -> [String: String] {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return object
+    }
+
+    private func setupSplitCreateRightUITestIfNeeded() {
+        guard !didSetupSplitCreateRightUITest else { return }
+        didSetupSplitCreateRightUITest = true
+
+        let env = ProcessInfo.processInfo.environment
+        guard env["CMUX_UI_TEST_SPLIT_CREATE_RIGHT_SETUP"] == "1" else { return }
+        guard let path = env["CMUX_UI_TEST_SPLIT_CREATE_RIGHT_PATH"], !path.isEmpty else { return }
+        let visualMode = env["CMUX_UI_TEST_SPLIT_CREATE_RIGHT_VISUAL"] == "1"
+        let visualIterations = Int(
+            (env["CMUX_UI_TEST_SPLIT_CREATE_RIGHT_ITERATIONS"] ?? "16")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        ) ?? 16
+        let burstFrames = Int(
+            (env["CMUX_UI_TEST_SPLIT_CREATE_RIGHT_BURST_FRAMES"] ?? "28")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        ) ?? 28
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard let tab = self.selectedWorkspace else {
+                    self.writeSplitCreateRightTestData(["setupError": "Missing selected workspace"], at: path)
+                    return
+                }
+
+                guard let sourcePanelId = tab.focusedPanelId else {
+                    self.writeSplitCreateRightTestData(["setupError": "Missing initial focused panel"], at: path)
+                    return
+                }
+
+                let initialReadiness = await self.waitForTerminalPanelReadyForUITest(
+                    tab: tab,
+                    panelId: sourcePanelId
+                )
+                guard initialReadiness.attached,
+                      initialReadiness.hasSurface,
+                      tab.terminalPanel(for: sourcePanelId) != nil else {
+                    self.writeSplitCreateRightTestData([
+                        "preTerminalAttached": initialReadiness.attached ? "1" : "0",
+                        "preTerminalSurfaceNil": initialReadiness.hasSurface ? "0" : "1",
+                        "setupError": "Initial terminal not ready (not attached or surface nil)"
+                    ], at: path)
+                    return
+                }
+
+                self.writeSplitCreateRightTestData([
+                    "preTerminalAttached": initialReadiness.attached ? "1" : "0",
+                    "preTerminalSurfaceNil": initialReadiness.hasSurface ? "0" : "1",
+                    "initialPanelId": sourcePanelId.uuidString,
+                    "initialPaneCount": String(tab.bonsplitController.allPaneIds.count)
+                ], at: path)
+
+                if visualMode {
+                    await self.runSplitCreateRightVisualRepro(
+                        tab: tab,
+                        sourcePanelId: sourcePanelId,
+                        path: path,
+                        iterations: visualIterations,
+                        burstFrames: burstFrames
+                    )
+                    self.writeSplitCreateRightTestData(["visualDone": "1"], at: path)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func runSplitCreateRightVisualRepro(
+        tab: Workspace,
+        sourcePanelId: UUID,
+        path: String,
+        iterations: Int,
+        burstFrames: Int
+    ) async {
+        func sendText(_ panelId: UUID, _ text: String) {
+            guard let tp = tab.terminalPanel(for: panelId) else { return }
+            tp.surface.sendText(text)
+        }
+
+        let sampleCrop = CGRect(x: 0.04, y: 0.01, width: 0.92, height: 0.08)
+
+        for i in 1...iterations {
+            tab.focusPanel(sourcePanelId)
+            let toClose = Array(tab.panels.keys).filter { $0 != sourcePanelId }
+            for pid in toClose {
+                tab.closePanel(pid, force: true)
+            }
+
+            let readiness = await waitForTerminalPanelReadyForUITest(
+                tab: tab,
+                panelId: sourcePanelId
+            )
+            guard readiness.attached,
+                  readiness.hasSurface,
+                  let sourcePanel = tab.terminalPanel(for: sourcePanelId) else {
+                writeSplitCreateRightTestData([
+                    "setupError": "Source terminal not ready before split create (iteration \(i))"
+                ], at: path)
+                return
+            }
+
+            sourcePanel.hostedView.reconcileGeometryNow()
+            sourcePanel.hostedView.refreshSurfaceNow(reason: "tabManager.splitCreateRight.beforeIteration")
+
+            sendText(
+                sourcePanelId,
+                "printf '\\033[2J\\033[H'; for i in {1..220}; do echo CMUX_SPLIT_CREATE_LEFT_$i; done; printf '\\033[HCMUX_MARKER_SPLIT_CREATE_LEFT\\n'\r"
+            )
+            try? await Task.sleep(nanoseconds: 180_000_000)
+
+            let desiredFrames = max(18, min(burstFrames, 48))
+            let splitFrame = min(6, max(1, desiredFrames / 4))
+            var createdPanelId: UUID?
+
+            let result = await captureVsyncIOSurfaceTimeline(
+                frameCount: desiredFrames,
+                closeFrame: splitFrame,
+                crop: sampleCrop,
+                targets: [
+                    ("TL", sourcePanel.surface.hostedView),
+                ],
+                actions: [
+                    (frame: splitFrame, action: {
+                        tab.focusPanel(sourcePanelId)
+                        createdPanelId = tab.newTerminalSplit(
+                            from: sourcePanelId,
+                            orientation: .horizontal
+                        )?.id
+                    }),
+                ],
+                detectAnySizeMismatch: true
+            )
+
+            writeSplitCreateRightTestData([
+                "iteration": String(i),
+                "timelineFrameCount": String(desiredFrames),
+                "timelineSplitFrame": String(splitFrame),
+                "timelineCreatedPanelId": createdPanelId?.uuidString ?? "",
+                "timelineFirstBlank": result.firstBlank.map { "\($0.label)@\($0.frame)" } ?? "",
+                "timelineFirstSizeMismatch": result.firstSizeMismatch.map {
+                    "\($0.label)@\($0.frame):ios=\($0.ios):exp=\($0.expected)"
+                } ?? "",
+                "timelineTrace": result.trace.joined(separator: "|"),
+                "visualLastIteration": String(i)
+            ], at: path)
+
+            if let firstBlank = result.firstBlank {
+                writeSplitCreateRightTestData([
+                    "blankFrameSeen": "1",
+                    "blankObservedIteration": String(i),
+                    "blankObservedAt": "\(firstBlank.label)@\(firstBlank.frame)"
+                ], at: path)
+                return
+            }
+
+            if let firstMismatch = result.firstSizeMismatch {
+                writeSplitCreateRightTestData([
+                    "sizeMismatchSeen": "1",
+                    "sizeMismatchObservedIteration": String(i),
+                    "sizeMismatchObservedAt": "\(firstMismatch.label)@\(firstMismatch.frame):ios=\(firstMismatch.ios):exp=\(firstMismatch.expected)"
+                ], at: path)
+                return
+            }
+        }
+    }
+
+    private func writeSplitCreateRightTestData(_ updates: [String: String], at path: String) {
+        var payload = loadSplitCreateRightTestData(at: path)
+        for (key, value) in updates {
+            payload[key] = value
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    private func loadSplitCreateRightTestData(at path: String) -> [String: String] {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             return [:]
