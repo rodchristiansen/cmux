@@ -9525,12 +9525,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         #endif
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.prepareFocusedBrowserDevToolsForSplit(directionLabel: directionLabel)
-            self.tabManager?.createSplit(direction: direction)
+        let shouldDeferSplitMutation = {
+            guard let keyWindow = NSApp.keyWindow else { return false }
+            return isLikelyWebInspectorResponder(keyWindow.firstResponder)
+        }()
+
+        func runSplitMutation(appDelegate: AppDelegate) {
+            appDelegate.prepareFocusedBrowserDevToolsForSplit(directionLabel: directionLabel)
+            appDelegate.tabManager?.createSplit(direction: direction)
 #if DEBUG
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak appDelegate] in
                 let keyWindow = NSApp.keyWindow
                 let firstResponder = keyWindow?.firstResponder
                 let firstResponderType = firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
@@ -9545,7 +9549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     return -1
                 }()
                 let splitContext = "keyWin=\(keyWindow?.windowNumber ?? -1) mainWin=\(NSApp.mainWindow?.windowNumber ?? -1) fr=\(firstResponderType)@\(firstResponderPtr) frWin=\(firstResponderWindow)"
-                if let browser = self?.tabManager?.focusedBrowserPanel {
+                if let browser = appDelegate?.tabManager?.focusedBrowserPanel {
                     let webWindow = browser.webView.window?.windowNumber ?? -1
                     let webSuperview = browser.webView.superview.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
                     dlog("split.shortcut dir=\(directionLabel) post panel=\(browser.id.uuidString.prefix(5)) \(browser.debugDeveloperToolsStateSummary()) webWin=\(webWindow) webSuper=\(webSuperview) \(splitContext)")
@@ -9553,8 +9557,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     dlog("split.shortcut dir=\(directionLabel) post panel=nil \(splitContext)")
                 }
             }
-            self.recordGotoSplitSplitIfNeeded(direction: direction)
+            appDelegate.recordGotoSplitSplitIfNeeded(direction: direction)
 #endif
+        }
+
+        if shouldDeferSplitMutation {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                runSplitMutation(appDelegate: self)
+            }
+        } else if Thread.isMainThread {
+            runSplitMutation(appDelegate: self)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                runSplitMutation(appDelegate: self)
+            }
         }
         return true
     }

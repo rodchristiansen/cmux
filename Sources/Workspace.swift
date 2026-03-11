@@ -2079,6 +2079,7 @@ final class Workspace: Identifiable, ObservableObject {
         // Capture the source terminal's hosted view before bonsplit mutates focusedPaneId,
         // so we can hand it to focusPanel as the "move focus FROM" view.
         let previousHostedView = focusedTerminalPanel?.hostedView
+        let activeWindow = previousHostedView?.window ?? NSApp.keyWindow ?? NSApp.mainWindow
         preserveVisibleTerminalFramesDuringSplitMutation(reason: "workspace.newTerminalSplit")
 
         // Create the split with the new tab already present in the new pane.
@@ -2113,7 +2114,10 @@ final class Workspace: Identifiable, ObservableObject {
             )
         }
 
-        refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: "workspace.newTerminalSplit")
+        refreshSurvivingTerminalSurfacesAfterSplitMutation(
+            reason: "workspace.newTerminalSplit",
+            in: activeWindow
+        )
         markGraphStateChanged(reason: "newTerminalSplit")
 
         return newPanel
@@ -2215,6 +2219,8 @@ final class Workspace: Identifiable, ObservableObject {
         )
         surfaceIdToPanelId[newTab.id] = browserPanel.id
         let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
+        let activeWindow = previousHostedView?.window ?? NSApp.keyWindow ?? NSApp.mainWindow
         preserveVisibleTerminalFramesDuringSplitMutation(reason: "workspace.newBrowserSplit")
 
         // Create the split with the browser tab already present.
@@ -2227,9 +2233,7 @@ final class Workspace: Identifiable, ObservableObject {
             panelTitles.removeValue(forKey: browserPanel.id)
             return nil
         }
-
         // See newTerminalSplit: suppress old view's becomeFirstResponder during reparenting.
-        let previousHostedView = focusedTerminalPanel?.hostedView
         if focus {
             previousHostedView?.suppressReparentFocus()
             focusPanel(browserPanel.id)
@@ -2245,7 +2249,10 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         installBrowserPanelSubscription(browserPanel)
-        refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: "workspace.newBrowserSplit")
+        refreshSurvivingTerminalSurfacesAfterSplitMutation(
+            reason: "workspace.newBrowserSplit",
+            in: activeWindow
+        )
         markGraphStateChanged(reason: "newBrowserSplit")
 
         return browserPanel
@@ -2348,6 +2355,8 @@ final class Workspace: Identifiable, ObservableObject {
         )
         surfaceIdToPanelId[newTab.id] = markdownPanel.id
         let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
+        let activeWindow = previousHostedView?.window ?? NSApp.keyWindow ?? NSApp.mainWindow
         preserveVisibleTerminalFramesDuringSplitMutation(reason: "workspace.newMarkdownSplit")
 
         // Create the split with the markdown tab already present in the new pane.
@@ -2360,9 +2369,7 @@ final class Workspace: Identifiable, ObservableObject {
             panelTitles.removeValue(forKey: markdownPanel.id)
             return nil
         }
-
         // Suppress old view's becomeFirstResponder during reparenting.
-        let previousHostedView = focusedTerminalPanel?.hostedView
         if focus {
             previousHostedView?.suppressReparentFocus()
             focusPanel(markdownPanel.id)
@@ -2378,7 +2385,10 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         installMarkdownPanelSubscription(markdownPanel)
-        refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: "workspace.newMarkdownSplit")
+        refreshSurvivingTerminalSurfacesAfterSplitMutation(
+            reason: "workspace.newMarkdownSplit",
+            in: activeWindow
+        )
         markGraphStateChanged(reason: "newMarkdownSplit")
 
         return markdownPanel
@@ -3959,14 +3969,17 @@ final class Workspace: Identifiable, ObservableObject {
         }
     }
 
-    private func refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: String) {
-        for window in NSApp.windows {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.contentView?.displayIfNeeded()
-        }
+    private func refreshSurvivingTerminalSurfacesAfterSplitMutation(
+        reason: String,
+        in activeWindow: NSWindow?
+    ) {
+        let visibleTerminalPanels = renderedVisiblePanelIdsForCurrentLayout()
+            .compactMap { terminalPanel(for: $0) }
+        guard !visibleTerminalPanels.isEmpty else { return }
 
-        for panel in panels.values {
-            guard let terminalPanel = panel as? TerminalPanel else { continue }
+        activeWindow?.contentView?.layoutSubtreeIfNeeded()
+
+        for terminalPanel in visibleTerminalPanels {
 
             let hostedView = terminalPanel.hostedView
             let isAttached = hostedView.window != nil && hostedView.superview != nil
@@ -4797,7 +4810,10 @@ extension Workspace: BonsplitDelegate {
         if bonsplitController.allPaneIds.contains(pane) {
             normalizePinnedTabs(in: pane)
         }
-        refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: "workspace.didCloseTab")
+        refreshSurvivingTerminalSurfacesAfterSplitMutation(
+            reason: "workspace.didCloseTab",
+            in: NSApp.keyWindow ?? NSApp.mainWindow
+        )
 #if DEBUG
         let focusedPaneAfter = bonsplitController.focusedPaneId?.id.uuidString.prefix(5) ?? "nil"
         let focusedPanelAfter = focusedPanelId?.uuidString.prefix(5) ?? "nil"
