@@ -4853,6 +4853,69 @@ final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
             "Expected the clicked split pane to become first responder"
         )
     }
+
+    func testProgrammaticSplitKeepsSourceFirstResponderUntilNewTerminalCanTakeFocus() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePanel = workspace.terminalPanel(for: sourcePanelId) else {
+            XCTFail("Expected initial focused terminal panel")
+            return
+        }
+
+        let window = makeWindow()
+        defer { window.orderOut(nil) }
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        sourcePanel.hostedView.frame = contentView.bounds
+        sourcePanel.hostedView.autoresizingMask = [.width, .height]
+        contentView.addSubview(sourcePanel.hostedView)
+        sourcePanel.hostedView.setVisibleInUI(true)
+        sourcePanel.hostedView.setFocusHandler {
+            workspace.focusPanel(sourcePanel.id, trigger: .terminalFirstResponder)
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        sourcePanel.focus()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let sourceSurfaceView = surfaceView(in: sourcePanel.hostedView) else {
+            XCTFail("Expected source terminal surface view")
+            return
+        }
+
+        XCTAssertTrue(
+            window.firstResponder === sourceSurfaceView,
+            "Expected source terminal to start as first responder"
+        )
+
+        guard let splitPanel = workspace.newTerminalSplit(
+            from: sourcePanelId,
+            orientation: .vertical
+        ) else {
+            XCTFail("Expected terminal split panel")
+            return
+        }
+
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            splitPanel.id,
+            "Expected the new split panel to become the selected model focus target"
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+
+        XCTAssertTrue(
+            window.firstResponder === sourceSurfaceView,
+            "Expected the source terminal to keep first responder until the new split terminal is attached"
+        )
+    }
 }
 
 @MainActor
