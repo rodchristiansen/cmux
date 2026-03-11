@@ -1904,6 +1904,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var browserOmnibarRepeatDelta: Int = 0
     private var browserAddressBarFocusObserver: NSObjectProtocol?
     private var browserAddressBarBlurObserver: NSObjectProtocol?
+    private var browserWebViewFocusObserver: NSObjectProtocol?
+    private weak var browserFirstResponderWindow: NSWindow?
     private let updateController = UpdateController()
     private lazy var titlebarAccessoryController = UpdateTitlebarAccessoryController(viewModel: updateViewModel)
     private let windowDecorationsController = WindowDecorationsController()
@@ -4774,9 +4776,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
     private func mainWindowForShortcutEvent(_ event: NSEvent) -> NSWindow? {
-        if let overrideWindow = browserSurfaceShortcutTargetWindow,
-           isMainTerminalWindow(overrideWindow) {
-            return overrideWindow
+        if let browserSurfaceWindow = preferredBrowserSurfaceShortcutWindow() {
+            return browserSurfaceWindow
         }
         if let window = event.window, isMainTerminalWindow(window) {
             return window
@@ -4794,6 +4795,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return mainWindow
         }
         return nil
+    }
+
+    private func preferredBrowserSurfaceShortcutWindow() -> NSWindow? {
+        if let overrideWindow = browserSurfaceShortcutTargetWindow,
+           isMainTerminalWindow(overrideWindow) {
+            return overrideWindow
+        }
+        guard let context = contextForFocusedBrowserSurfaceWindow() else {
+            return nil
+        }
+        return context.window ?? windowForMainWindowId(context.windowId)
+    }
+
+    private func preferredBrowserSurfaceShortcutContext() -> MainWindowContext? {
+        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+            return context
+        }
+        return contextForFocusedBrowserSurfaceWindow()
+    }
+
+    private func contextForFocusedBrowserSurfaceWindow() -> MainWindowContext? {
+        guard let window = browserFirstResponderWindow,
+              isMainTerminalWindow(window),
+              let context = contextForMainTerminalWindow(window),
+              let focusedBrowser = context.tabManager.focusedBrowserPanel,
+              responderChainContains(window.firstResponder, target: focusedBrowser.webView) else {
+            browserFirstResponderWindow = nil
+            return nil
+        }
+        return context
+    }
+
+    private func responderChainContains(_ start: NSResponder?, target: NSResponder) -> Bool {
+        var responder = start
+        var hops = 0
+        while let current = responder, hops < 64 {
+            if current === target {
+                return true
+            }
+            responder = current.nextResponder
+            hops += 1
+        }
+        return false
+    }
+
+    private func preferredWindowForPanelCloseShortcut(event: NSEvent) -> NSWindow? {
+        preferredBrowserSurfaceShortcutWindow() ?? event.window ?? NSApp.keyWindow ?? NSApp.mainWindow
     }
 
     /// Re-sync app-level active window pointers from the currently focused main terminal window.
@@ -4854,7 +4902,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func preferredMainWindowContextForShortcuts(event: NSEvent) -> MainWindowContext? {
-        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+        if let context = preferredBrowserSurfaceShortcutContext() {
             return context
         }
         if let context = contextForMainWindow(event.window) {
@@ -5092,11 +5140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         event: NSEvent? = nil,
         debugSource: String = "unspecified"
     ) -> MainWindowContext? {
-        if let context = mainWindowContext(forShortcutEvent: event, debugSource: debugSource) {
-            return context
-        }
-
-        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+        if let context = preferredBrowserSurfaceShortcutContext() {
 #if DEBUG
             logWorkspaceCreationRouting(
                 phase: "choose",
@@ -5106,6 +5150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 chosenContext: context
             )
 #endif
+            return context
+        }
+
+        if let context = mainWindowContext(forShortcutEvent: event, debugSource: debugSource) {
             return context
         }
 
@@ -5267,7 +5315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func preferredMainWindowContextForShortcutRouting(event: NSEvent) -> MainWindowContext? {
-        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+        if let context = preferredBrowserSurfaceShortcutContext() {
             return context
         }
 
@@ -8563,13 +8611,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             event: event,
             shortcut: StoredShortcut(key: "t", command: true, shift: false, option: true, control: false)
         ) {
-            if let targetWindow = event.window ?? NSApp.keyWindow ?? NSApp.mainWindow,
+            if let targetWindow = preferredWindowForPanelCloseShortcut(event: event),
                targetWindow.identifier?.rawValue == "cmux.settings" {
                 targetWindow.performClose(nil)
             } else {
-                let responder = event.window?.firstResponder
-                    ?? NSApp.keyWindow?.firstResponder
-                    ?? NSApp.mainWindow?.firstResponder
+                let responder = preferredWindowForPanelCloseShortcut(event: event)?.firstResponder
                 if let ghosttyView = cmuxOwningGhosttyView(for: responder),
                    let workspaceId = ghosttyView.tabId,
                    let manager = tabManagerFor(tabId: workspaceId) ?? tabManager {
@@ -8587,13 +8633,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             event: event,
             shortcut: StoredShortcut(key: "w", command: true, shift: false, option: false, control: false)
         ) {
-            if let targetWindow = event.window ?? NSApp.keyWindow ?? NSApp.mainWindow,
+            if let targetWindow = preferredWindowForPanelCloseShortcut(event: event),
                targetWindow.identifier?.rawValue == "cmux.settings" {
                 targetWindow.performClose(nil)
             } else {
-                let responder = event.window?.firstResponder
-                    ?? NSApp.keyWindow?.firstResponder
-                    ?? NSApp.mainWindow?.firstResponder
+                let responder = preferredWindowForPanelCloseShortcut(event: event)?.firstResponder
                 if let ghosttyView = cmuxOwningGhosttyView(for: responder),
                    let workspaceId = ghosttyView.tabId,
                    let panelId = ghosttyView.terminalSurface?.id,
@@ -10041,7 +10085,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func installBrowserAddressBarFocusObservers() {
-        guard browserAddressBarFocusObserver == nil, browserAddressBarBlurObserver == nil else { return }
+        guard browserAddressBarFocusObserver == nil,
+              browserAddressBarBlurObserver == nil,
+              browserWebViewFocusObserver == nil else { return }
+
+        browserWebViewFocusObserver = NotificationCenter.default.addObserver(
+            forName: .browserDidBecomeFirstResponderWebView,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let webView = notification.object as? WKWebView,
+                  let window = webView.window,
+                  let context = self.contextForMainTerminalWindow(window),
+                  let focusedBrowser = context.tabManager.focusedBrowserPanel,
+                  focusedBrowser.webView === webView else {
+                return
+            }
+            self.browserFirstResponderWindow = window
+            if self.tabManager !== context.tabManager
+                || self.sidebarState !== context.sidebarState
+                || self.sidebarSelectionState !== context.sidebarSelectionState {
+                self.setActiveMainWindow(window)
+            }
+        }
 
         browserAddressBarFocusObserver = NotificationCenter.default.addObserver(
             forName: .browserDidFocusAddressBar,
@@ -10099,6 +10166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         tabManager = context.tabManager
         sidebarState = context.sidebarState
         sidebarSelectionState = context.sidebarSelectionState
+        browserFirstResponderWindow = window
         TerminalController.shared.setActiveTabManager(context.tabManager)
         return true
     }
