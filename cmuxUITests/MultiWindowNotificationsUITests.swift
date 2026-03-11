@@ -678,16 +678,12 @@ final class MultiWindowNotificationsUITests: XCTestCase {
             )
         }
 
-        guard let resolvedPath = resolveSocketPath(timeout: 8.0) else {
-            XCTFail(
-                "Control socket unavailable in this test environment. requested=\(socketPath) data=\(loadData() ?? [:])"
-            )
-            return app
-        }
-        socketPath = resolvedPath
-
         let pingResponse = waitForSocketPong(timeout: 8.0)
-        XCTAssertEqual(pingResponse, "PONG", "Expected control socket ping sanity check")
+        XCTAssertEqual(
+            pingResponse,
+            "PONG",
+            "Expected control socket ping sanity check at \(socketPath). data=\(loadData() ?? [:])"
+        )
         return app
     }
 
