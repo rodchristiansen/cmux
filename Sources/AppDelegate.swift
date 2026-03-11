@@ -5082,6 +5082,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return context
         }
 
+        if event == nil,
+           let activeManager = tabManager,
+           let context = mainWindowContexts.values.first(where: { $0.tabManager === activeManager }) {
+#if DEBUG
+            logWorkspaceCreationRouting(
+                phase: "choose",
+                source: debugSource,
+                reason: "active_manager_no_event",
+                event: event,
+                chosenContext: context
+            )
+#endif
+            return context
+        }
+
         // If a keyboard event identifies a specific window but that context
         // can't be resolved, do not fall back to another window.
         if shortcutEventHasAddressableWindow(event) {
@@ -9991,6 +10006,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func browserPanel(for panelId: UUID) -> BrowserPanel? {
         return tabManager?.selectedWorkspace?.browserPanel(for: panelId)
+    }
+
+    @discardableResult
+    func prepareBrowserWindowForShortcutRouting(_ window: NSWindow?) -> Bool {
+        guard let window,
+              let context = contextForMainTerminalWindow(window) else {
+            return false
+        }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        if NSApp.keyWindow !== window || NSApp.mainWindow !== window {
+            window.makeKeyAndOrderFront(nil)
+        }
+        tabManager = context.tabManager
+        sidebarState = context.sidebarState
+        sidebarSelectionState = context.sidebarSelectionState
+        TerminalController.shared.setActiveTabManager(context.tabManager)
+        return true
     }
 
     private func setActiveMainWindow(_ window: NSWindow) {
