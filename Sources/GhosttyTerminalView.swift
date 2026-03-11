@@ -6846,11 +6846,35 @@ final class GhosttySurfaceScrollView: NSView {
     }
 
     func setActive(_ active: Bool) {
-        let wasActive = isActive
-        isActive = active
+        let resolvedActive: Bool = {
+            guard let tabId = surfaceView.tabId ?? surfaceView.terminalSurface?.tabId,
+                  let panelId = surfaceView.terminalSurface?.id else {
+                return active
+            }
+            let modelTargetsThisSurface = matchesCurrentTerminalFocusTarget(tabId: tabId, surfaceId: panelId)
+            if active {
+                return modelTargetsThisSurface
+            }
+            if modelTargetsThisSurface, surfaceView.isVisibleInUI {
+                return true
+            }
+            return false
+        }()
+
 #if DEBUG
-        if wasActive != active {
-            let transition = "\(wasActive ? 1 : 0)->\(active ? 1 : 0)"
+        if active != resolvedActive {
+            dlog(
+                "focus.active.coerce surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+                "requested=\(active ? 1 : 0) resolved=\(resolvedActive ? 1 : 0) \(debugWorkspaceFocusSuffix())"
+            )
+        }
+#endif
+
+        let wasActive = isActive
+        isActive = resolvedActive
+#if DEBUG
+        if wasActive != resolvedActive {
+            let transition = "\(wasActive ? 1 : 0)->\(resolvedActive ? 1 : 0)"
             let suffix = debugVisibilityStateSuffix(transition: transition)
             debugLogWorkspaceSwitchTiming(
                 event: "ws.term.active",
@@ -6858,7 +6882,7 @@ final class GhosttySurfaceScrollView: NSView {
             )
         }
 #endif
-        if active {
+        if resolvedActive {
             applyFirstResponderIfNeeded()
         } else {
             resignOwnedFirstResponderIfNeeded(reason: "setActive(false)")
