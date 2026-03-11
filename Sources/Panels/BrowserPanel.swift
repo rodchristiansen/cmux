@@ -1714,10 +1714,10 @@ final class BrowserPanel: Panel, ObservableObject {
                     }
             } else if oldValue != nil {
                 searchNeedleCancellable = nil
+                invalidateSearchFocusRequests(reason: "searchStateCleared", force: true)
                 if preferredFocusIntent == .findField {
                     preferredFocusIntent = .webView
                 }
-                invalidateSearchFocusRequests(reason: "searchStateCleared")
                 NSLog("Find: browser search state cleared panel=%@", id.uuidString)
                 executeFindClear()
             }
@@ -3439,7 +3439,8 @@ extension BrowserPanel {
         return searchFocusRequestGeneration
     }
 
-    private func invalidateSearchFocusRequests(reason: String) {
+    private func invalidateSearchFocusRequests(reason: String, force: Bool = false) {
+        guard force || searchState != nil || preferredFocusIntent == .findField else { return }
         searchFocusRequestGeneration &+= 1
 #if DEBUG
         dlog(
