@@ -157,6 +157,45 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertTrue(destinationManager.tabs.contains(where: { $0.id == sourceWorkspaceId }))
     }
 
+    func testMoveWorkspaceToNewWindowRemovesBootstrapWorkspaceAndSelectsMovedWorkspace() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let sourceWindowId = appDelegate.createMainWindow(workspaceEngineKind: .graphV1)
+        var destinationWindowId: UUID?
+        defer {
+            closeWindow(withId: sourceWindowId)
+            if let destinationWindowId {
+                closeWindow(withId: destinationWindowId)
+            }
+        }
+
+        guard let sourceManager = appDelegate.tabManagerFor(windowId: sourceWindowId) else {
+            XCTFail("Expected graph-v1 source window context")
+            return
+        }
+
+        let sourceWorkspaceIdsBeforeMove = sourceManager.tabs.map(\.id)
+        guard sourceWorkspaceIdsBeforeMove.count == 1,
+              let sourceWorkspaceId = sourceWorkspaceIdsBeforeMove.first else {
+            XCTFail("Expected exactly one source workspace before move")
+            return
+        }
+
+        destinationWindowId = appDelegate.moveWorkspaceToNewWindow(workspaceId: sourceWorkspaceId)
+
+        guard let destinationWindowId,
+              let destinationManager = appDelegate.tabManagerFor(windowId: destinationWindowId) else {
+            XCTFail("Expected destination window after moving workspace")
+            return
+        }
+
+        XCTAssertEqual(destinationManager.tabs.map(\.id), [sourceWorkspaceId])
+        XCTAssertEqual(destinationManager.selectedTabId, sourceWorkspaceId)
+    }
+
     func testMoveWorkspaceToExistingWindowPreservesDestinationEngineKind() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

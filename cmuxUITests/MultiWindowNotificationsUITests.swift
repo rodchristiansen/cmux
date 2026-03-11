@@ -374,6 +374,99 @@ final class MultiWindowNotificationsUITests: XCTestCase {
         XCTAssertTrue(notifyStdout.contains("OK"), "Expected notify command to return OK. stdout=\(notifyStdout) stderr=\(notifyStderr)")
     }
 
+    func testGraphV1MoveWorkspaceToNewWindowKeepsDestinationFocusedAndMutable() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-socketControlMode", "allowAll"]
+        app.launchEnvironment["CMUX_WORKSPACE_ENGINE"] = "graph-v1"
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_SOCKET_MODE"] = "allowAll"
+        app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
+        app.launchEnvironment["CMUX_TAG"] = launchTag
+        app.launch()
+
+        XCTAssertTrue(
+            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            "Expected app to launch for graph-v1 workspace move test. state=\(app.state.rawValue)"
+        )
+        XCTAssertTrue(waitForWindowCount(atLeast: 1, app: app, timeout: 8.0))
+
+        guard let resolvedPath = resolveSocketPath(timeout: 8.0) else {
+            throw XCTSkip("Control socket unavailable in this test environment. requested=\(socketPath)")
+        }
+        socketPath = resolvedPath
+
+        let pingResponse = waitForSocketPong(timeout: 8.0)
+        guard pingResponse == "PONG" else {
+            throw XCTSkip("Control socket did not respond in time. path=\(socketPath) response=\(pingResponse ?? "<nil>")")
+        }
+
+        guard let sourceWindowId = socketCommand("current_window"),
+              UUID(uuidString: sourceWindowId) != nil else {
+            XCTFail("Expected current_window to return a window id")
+            return
+        }
+
+        guard let movedWorkspaceId = createdId(from: socketCommand("new_workspace")) else {
+            XCTFail("Expected new_workspace to return a workspace id")
+            return
+        }
+
+        XCTAssertTrue(
+            waitForWindowListSummary(windowId: sourceWindowId, timeout: 5.0) { summary in
+                summary.selectedWorkspaceId == movedWorkspaceId && summary.workspaceCount == 2
+            },
+            "Expected source window to select the new workspace before moving it. list=\(socketCommand("list_windows") ?? "<nil>")"
+        )
+
+        guard let destinationWindowId = createdId(
+            from: socketCommand("move_workspace_to_new_window \(movedWorkspaceId)")
+        ) else {
+            XCTFail("Expected move_workspace_to_new_window to return a destination window id")
+            return
+        }
+
+        XCTAssertTrue(waitForWindowCount(atLeast: 2, app: app, timeout: 8.0))
+        XCTAssertTrue(
+            waitForWindowListSummary(windowId: destinationWindowId, timeout: 8.0) { summary in
+                summary.isKeyWindow && summary.selectedWorkspaceId == movedWorkspaceId && summary.workspaceCount == 1
+            },
+            "Expected moved workspace to be selected in the focused destination window after bootstrap cleanup. list=\(socketCommand("list_windows") ?? "<nil>")"
+        )
+
+        XCTAssertTrue(
+            waitForSocketCommandValue("current_window", timeout: 5.0) { $0 == destinationWindowId },
+            "Expected destination window to become current after move. current=\(socketCommand("current_window") ?? "<nil>")"
+        )
+
+        XCTAssertTrue(
+            waitForWindowListSummary(windowId: sourceWindowId, timeout: 5.0) { summary in
+                summary.workspaceCount == 1 && summary.selectedWorkspaceId != movedWorkspaceId
+            },
+            "Expected source window to retain only its original workspace after move. list=\(socketCommand("list_windows") ?? "<nil>")"
+        )
+
+        guard let initialPaneCount = paneCount(from: socketCommand("list_panes")) else {
+            XCTFail("Expected list_panes to report destination workspace panes")
+            return
+        }
+
+        guard let newPanelId = createdId(from: socketCommand("new_split right")) else {
+            XCTFail("Expected new_split right to return a new panel id")
+            return
+        }
+
+        XCTAssertTrue(
+            waitForPaneCount(initialPaneCount + 1, timeout: 5.0),
+            "Expected graph-v1 destination workspace to remain mutable after move. panes=\(socketCommand("list_panes") ?? "<nil>")"
+        )
+
+        guard let surfaces = socketCommand("list_surfaces"), surfaces.contains(newPanelId) else {
+            XCTFail("Expected list_surfaces to include new split panel \(newPanelId)")
+            return
+        }
+    }
+
     private func clickNotificationPopoverRowAndWaitForFocusChange(
         button: XCUIElement,
         app: XCUIApplication,
@@ -580,6 +673,94 @@ final class MultiWindowNotificationsUITests: XCTestCase {
         return app.state != .runningForeground
     }
 
+    private struct WindowListSummary {
+        let isKeyWindow: Bool
+        let windowId: String
+        let selectedWorkspaceId: String?
+        let workspaceCount: Int
+    }
+
+    private func waitForSocketCommandValue(
+        _ command: String,
+        timeout: TimeInterval,
+        matches predicate: (String) -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let response = socketCommand(command), predicate(response) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        if let response = socketCommand(command) {
+            return predicate(response)
+        }
+        return false
+    }
+
+    private func waitForWindowListSummary(
+        windowId: String,
+        timeout: TimeInterval,
+        matches predicate: (WindowListSummary) -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let summary = listWindowSummaries().first(where: { $0.windowId == windowId }),
+               predicate(summary) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        if let summary = listWindowSummaries().first(where: { $0.windowId == windowId }) {
+            return predicate(summary)
+        }
+        return false
+    }
+
+    private func listWindowSummaries() -> [WindowListSummary] {
+        guard let response = socketCommand("list_windows"),
+              !response.isEmpty,
+              !response.hasPrefix("ERROR"),
+              response != "No windows" else {
+            return []
+        }
+
+        return response
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { parseWindowListSummary(String($0)) }
+    }
+
+    private func parseWindowListSummary(_ line: String) -> WindowListSummary? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let isKeyWindow = trimmed.first == "*"
+        let payload = isKeyWindow
+            ? String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
+            : trimmed
+        let fields = payload.split(separator: " ")
+        guard fields.count >= 4 else { return nil }
+
+        let windowId = String(fields[1])
+        let selectedWorkspaceField = fields[2].split(separator: "=", maxSplits: 1).last.map(String.init)
+        let workspaceCountField = fields[3].split(separator: "=", maxSplits: 1).last.flatMap { Int($0) }
+        guard let workspaceCount = workspaceCountField else { return nil }
+
+        let selectedWorkspaceId: String?
+        if let selectedWorkspaceField, selectedWorkspaceField != "none" {
+            selectedWorkspaceId = selectedWorkspaceField
+        } else {
+            selectedWorkspaceId = nil
+        }
+
+        return WindowListSummary(
+            isKeyWindow: isKeyWindow,
+            windowId: windowId,
+            selectedWorkspaceId: selectedWorkspaceId,
+            workspaceCount: workspaceCount
+        )
+    }
+
     private func firstSurfaceId(forWorkspaceId workspaceId: String) -> String? {
         guard let response = socketCommand("list_surfaces \(workspaceId)"),
               !response.isEmpty,
@@ -679,6 +860,39 @@ final class MultiWindowNotificationsUITests: XCTestCase {
             return String(token)
         }
         return nil
+    }
+
+    private func createdId(from response: String?) -> String? {
+        guard let response else { return nil }
+        let parts = response.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count == 2, parts[0] == "OK", UUID(uuidString: String(parts[1])) != nil else {
+            return nil
+        }
+        return String(parts[1])
+    }
+
+    private func paneCount(from response: String?) -> Int? {
+        guard let response,
+              !response.isEmpty,
+              !response.hasPrefix("ERROR"),
+              response != "No panes" else {
+            return nil
+        }
+
+        return response
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .count
+    }
+
+    private func waitForPaneCount(_ expectedCount: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if paneCount(from: socketCommand("list_panes")) == expectedCount {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return paneCount(from: socketCommand("list_panes")) == expectedCount
     }
 
     private func runCmuxNotify(
