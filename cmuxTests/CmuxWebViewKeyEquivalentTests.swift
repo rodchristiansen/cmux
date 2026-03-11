@@ -4882,8 +4882,16 @@ final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
         contentView.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
+        guard let sourceSurfaceView = surfaceView(in: sourcePanel.hostedView) else {
+            XCTFail("Expected source terminal surface view")
+            return
+        }
+
         sourcePanel.hostedView.setActive(true)
-        sourcePanel.hostedView.moveFocus()
+        XCTAssertTrue(
+            window.makeFirstResponder(sourceSurfaceView),
+            "Expected source terminal surface view to accept first responder before the split"
+        )
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
         XCTAssertTrue(
