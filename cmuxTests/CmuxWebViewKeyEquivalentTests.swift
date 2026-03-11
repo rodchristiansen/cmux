@@ -4882,16 +4882,12 @@ final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
         contentView.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
-        sourcePanel.focus()
+        sourcePanel.hostedView.setActive(true)
+        sourcePanel.hostedView.moveFocus()
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
-        guard let sourceSurfaceView = surfaceView(in: sourcePanel.hostedView) else {
-            XCTFail("Expected source terminal surface view")
-            return
-        }
-
         XCTAssertTrue(
-            window.firstResponder === sourceSurfaceView,
+            sourcePanel.hostedView.isSurfaceViewFirstResponder(),
             "Expected source terminal to start as first responder"
         )
 
@@ -4912,7 +4908,7 @@ final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.01))
 
         XCTAssertTrue(
-            window.firstResponder === sourceSurfaceView,
+            sourcePanel.hostedView.isSurfaceViewFirstResponder(),
             "Expected the source terminal to keep first responder until the new split terminal is attached"
         )
     }
