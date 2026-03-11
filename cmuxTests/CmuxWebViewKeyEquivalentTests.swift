@@ -2901,6 +2901,118 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
         )
         XCTAssertTrue(replacementSlot.window === window)
     }
+
+    func testReplacementLocalHostMovesNonWebKitDevToolsCompanionViews() {
+        let (panel, _) = makePanelWithInspector()
+        XCTAssertTrue(panel.showDeveloperTools())
+
+        let initialPaneId = PaneID(id: UUID())
+        let replacementPaneId = PaneID(id: UUID())
+        func makeRepresentable(for paneId: PaneID) -> WebViewRepresentable {
+            WebViewRepresentable(
+                panel: panel,
+                paneId: paneId,
+                reattachToken: 0,
+                shouldAttachWebView: false,
+                useLocalInlineHosting: true,
+                shouldFocusWebView: false,
+                isPanelFocused: true,
+                portalZPriority: 0,
+                paneDropZone: nil,
+                searchOverlay: nil,
+                paneTopChromeHeight: 0
+            )
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let visibleHosting = NSHostingView(rootView: makeRepresentable(for: initialPaneId))
+        visibleHosting.frame = NSRect(x: 0, y: 0, width: 210, height: contentView.bounds.height)
+        visibleHosting.autoresizingMask = [.height]
+        contentView.addSubview(visibleHosting)
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        visibleHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let visibleSlot = panel.webView.superview as? WindowBrowserSlotView else {
+            XCTFail("Expected visible local inline slot")
+            return
+        }
+
+        let inspectorView = WKInspectorProbeView(
+            frame: NSRect(x: 0, y: 0, width: visibleSlot.bounds.width, height: 72)
+        )
+        inspectorView.autoresizingMask = [.width]
+        visibleSlot.addSubview(inspectorView)
+
+        let companionToolbar = NSView(
+            frame: NSRect(x: 0, y: inspectorView.frame.maxY, width: visibleSlot.bounds.width, height: 24)
+        )
+        companionToolbar.identifier = NSUserInterfaceItemIdentifier("DevToolsCompanionToolbar")
+        companionToolbar.autoresizingMask = [.width]
+        visibleSlot.addSubview(companionToolbar)
+
+        panel.webView.frame = NSRect(
+            x: 0,
+            y: companionToolbar.frame.maxY,
+            width: visibleSlot.bounds.width,
+            height: visibleSlot.bounds.height - companionToolbar.frame.maxY
+        )
+        visibleSlot.layoutSubtreeIfNeeded()
+
+        let detachedRoot = NSView(frame: visibleHosting.frame)
+        let replacementHosting = NSHostingView(rootView: makeRepresentable(for: replacementPaneId))
+        replacementHosting.frame = detachedRoot.bounds
+        replacementHosting.autoresizingMask = [.width, .height]
+        detachedRoot.addSubview(replacementHosting)
+        detachedRoot.layoutSubtreeIfNeeded()
+        replacementHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        replacementHosting.removeFromSuperview()
+        replacementHosting.frame = NSRect(x: 210, y: 0, width: 210, height: contentView.bounds.height)
+        replacementHosting.autoresizingMask = [.minXMargin, .height]
+        contentView.addSubview(replacementHosting)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        replacementHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let replacementSlot = findWindowBrowserSlotView(in: replacementHosting) else {
+            XCTFail("Expected replacement local inline slot")
+            return
+        }
+
+        XCTAssertTrue(
+            panel.webView.superview === replacementSlot,
+            "A replacement local host should move the shared browser web view into the new pane"
+        )
+        XCTAssertTrue(
+            inspectorView.superview === replacementSlot,
+            "A replacement local host should move WKInspector companion views into the new pane"
+        )
+        XCTAssertTrue(
+            companionToolbar.superview === replacementSlot,
+            "A replacement local host should move non-WebKit DevTools companion views into the new pane so old panes do not leave stray inspector chrome behind"
+        )
+        XCTAssertFalse(
+            visibleSlot.subviews.contains(where: { $0 === companionToolbar }),
+            "The retiring pane should not keep stale DevTools companion views after local host reparent"
+        )
+    }
 }
 
 final class WorkspaceShortcutMapperTests: XCTestCase {
