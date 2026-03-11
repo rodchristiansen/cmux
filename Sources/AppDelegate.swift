@@ -6337,11 +6337,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // On the VM, launching/initializing multiple windows can occasionally take longer than a
         // few seconds; keep the deadline generous so the test doesn't flake.
         let deadline = Date().addingTimeInterval(20.0)
-        func hasMainTerminalWindow() -> Bool {
-            NSApp.windows.contains { window in
-                guard let raw = window.identifier?.rawValue else { return false }
-                return raw == "cmux.main" || raw.hasPrefix("cmux.main.")
+        func currentMainTerminalWindow() -> NSWindow? {
+            if let keyWindow = NSApp.keyWindow,
+               self.contextForMainWindow(keyWindow) != nil {
+                return keyWindow
             }
+            if let mainWindow = NSApp.mainWindow,
+               self.contextForMainWindow(mainWindow) != nil {
+                return mainWindow
+            }
+            if let context = self.mainWindowContexts.values.first,
+               let window = context.window ?? self.windowForMainWindowId(context.windowId) {
+                return window
+            }
+            return nil
         }
 
         func runSetupWhenWindowReady() {
@@ -6349,13 +6358,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 writeGotoSplitTestData(["setupError": "Timed out waiting for main window"])
                 return
             }
-            guard hasMainTerminalWindow() else {
+            guard let targetWindow = currentMainTerminalWindow() else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     runSetupWhenWindowReady()
                 }
                 return
             }
-            guard let tabManager = self.tabManager else { return }
+            self.setActiveMainWindow(targetWindow)
+            let resolvedTabManager =
+                self.contextForMainTerminalWindow(targetWindow, reindex: false)?.tabManager
+                ?? self.synchronizeActiveMainWindowContext(preferredWindow: targetWindow)
+                ?? self.tabManager
+            guard let tabManager = resolvedTabManager else {
+                self.writeGotoSplitTestData(["setupError": "Missing active tab manager"])
+                return
+            }
 
             let tab = tabManager.addTab()
             guard let initialPanelId = tab.focusedPanelId else {

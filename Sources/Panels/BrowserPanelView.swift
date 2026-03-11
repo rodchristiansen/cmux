@@ -805,6 +805,10 @@ struct BrowserPanelView: View {
                 .stroke(addressBarFocused ? cmuxAccentColor() : Color.clear, lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded {
+            handleOmnibarTap()
+        })
         .background {
             GeometryReader { geo in
                 Color.clear
@@ -1190,7 +1194,10 @@ struct BrowserPanelView: View {
 #if DEBUG
         logBrowserFocusState(event: "addressBar.tap")
 #endif
-        if !addressBarFocused {
+        if addressBarFocused {
+            _ = panel.requestAddressBarFocus()
+            applyPendingAddressBarFocusRequestIfNeeded()
+        } else {
             // Mark focused before pane selection converges so WebKit focus is not
             // briefly re-acquired during `focusPane`.
             setAddressBarFocused(true, reason: "omnibar.tap")
@@ -4791,6 +4798,15 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
 
         if host.window != nil, portalHostAccepted {
+            guard panel.ownsPortalHost(hostId: hostId) else {
+#if DEBUG
+                dlog(
+                    "browser.portal.bind.skip panel=\(panel.id.uuidString.prefix(5)) " +
+                    "reason=staleOwnership host=\(hostId)"
+                )
+#endif
+                return false
+            }
             let geometryRevision = host.geometryRevision
             let portalEntryMissing = !BrowserWindowPortalRegistry.isWebView(webView, boundTo: portalAnchorView)
             let shouldBindNow =

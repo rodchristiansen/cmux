@@ -157,4 +157,104 @@ final class WorkspaceContentViewVisibilityTests: XCTestCase {
         XCTAssertTrue(secondClaim.didAcquireOwnership)
         XCTAssertEqual(secondClaim.activeLease?.hostId, ObjectIdentifier(secondHost))
     }
+
+    func testPortalHostLeasingStateDoesNotForceReplacementForNilContext() {
+        var leasing = PortalHostLeasingState()
+        let firstHost = NSObject()
+        let secondHost = NSObject()
+
+        let firstClaim = leasing.claim(
+            hostId: ObjectIdentifier(firstHost),
+            contextId: nil,
+            inWindow: true,
+            bounds: CGRect(x: 0, y: 0, width: 200, height: 200)
+        )
+        XCTAssertTrue(firstClaim.accepted)
+
+        let secondClaim = leasing.claim(
+            hostId: ObjectIdentifier(secondHost),
+            contextId: nil,
+            inWindow: true,
+            bounds: CGRect(x: 0, y: 0, width: 80, height: 80)
+        )
+
+        XCTAssertFalse(secondClaim.accepted)
+        XCTAssertFalse(secondClaim.forcedDistinctReplacement)
+        XCTAssertFalse(secondClaim.blockedByLock)
+        XCTAssertEqual(secondClaim.activeLease?.hostId, ObjectIdentifier(firstHost))
+    }
+
+    func testPortalHostLeasingStatePreservesUsableLeaseWhenSameHostTemporarilyLeavesWindow() {
+        var leasing = PortalHostLeasingState()
+        let host = NSObject()
+        let contextId = UUID()
+
+        let initialClaim = leasing.claim(
+            hostId: ObjectIdentifier(host),
+            contextId: contextId,
+            inWindow: true,
+            bounds: CGRect(x: 0, y: 0, width: 200, height: 200)
+        )
+        XCTAssertTrue(initialClaim.accepted)
+        XCTAssertEqual(initialClaim.activeLease?.hostId, ObjectIdentifier(host))
+        XCTAssertTrue(initialClaim.activeLease?.inWindow == true)
+        XCTAssertEqual(initialClaim.activeLease?.area, 40000)
+
+        let transientClaim = leasing.claim(
+            hostId: ObjectIdentifier(host),
+            contextId: contextId,
+            inWindow: false,
+            bounds: .zero
+        )
+
+        XCTAssertTrue(transientClaim.accepted)
+        XCTAssertEqual(transientClaim.activeLease?.hostId, ObjectIdentifier(host))
+        XCTAssertTrue(transientClaim.activeLease?.inWindow == true)
+        XCTAssertEqual(transientClaim.activeLease?.area, 40000)
+    }
+
+    func testPortalHostLeasingStateDoesNotLetOldHostReclaimAfterForcedReplacementTransientlyLeavesWindow() {
+        var leasing = PortalHostLeasingState()
+        let contextId = UUID()
+        let oldHost = NSObject()
+        let newHost = NSObject()
+
+        _ = leasing.claim(
+            hostId: ObjectIdentifier(oldHost),
+            contextId: contextId,
+            inWindow: true,
+            bounds: CGRect(x: 0, y: 0, width: 137, height: 134)
+        )
+        leasing.prepareForNextDistinctReplacement(contextId: contextId)
+
+        let replacementClaim = leasing.claim(
+            hostId: ObjectIdentifier(newHost),
+            contextId: contextId,
+            inWindow: true,
+            bounds: CGRect(x: 0, y: 0, width: 274, height: 134)
+        )
+        XCTAssertTrue(replacementClaim.accepted)
+        XCTAssertEqual(replacementClaim.activeLease?.hostId, ObjectIdentifier(newHost))
+
+        let transientClaim = leasing.claim(
+            hostId: ObjectIdentifier(newHost),
+            contextId: contextId,
+            inWindow: false,
+            bounds: .zero
+        )
+        XCTAssertTrue(transientClaim.accepted)
+        XCTAssertEqual(transientClaim.activeLease?.hostId, ObjectIdentifier(newHost))
+        XCTAssertTrue(transientClaim.activeLease?.inWindow == true)
+
+        let reclaimAttempt = leasing.claim(
+            hostId: ObjectIdentifier(oldHost),
+            contextId: contextId,
+            inWindow: true,
+            bounds: CGRect(x: 0, y: 0, width: 137, height: 134)
+        )
+
+        XCTAssertFalse(reclaimAttempt.accepted)
+        XCTAssertTrue(reclaimAttempt.blockedByLock)
+        XCTAssertEqual(reclaimAttempt.activeLease?.hostId, ObjectIdentifier(newHost))
+    }
 }

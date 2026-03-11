@@ -15,75 +15,11 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     }
 
     func testCmdCtrlHMovesLeftWhenWebViewFocused() {
-        let app = XCUIApplication()
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
-        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        launchAndEnsureForeground(app)
-
-        XCTAssertTrue(
-            waitForData(keys: ["terminalPaneId", "browserPaneId", "webViewFocused"], timeout: 10.0),
-            "Expected goto_split setup data to be written"
-        )
-
-        guard let setup = loadData() else {
-            XCTFail("Missing goto_split setup data")
-            return
-        }
-
-        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
-
-        guard let expectedTerminalPaneId = setup["terminalPaneId"] else {
-            XCTFail("Missing terminalPaneId in goto_split setup data")
-            return
-        }
-
-        // Trigger pane navigation via the actual key event path (while WebKit is first responder).
-        app.typeKey("h", modifierFlags: [.command, .control])
-
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 5.0) { data in
-                data["lastMoveDirection"] == "left" && data["focusedPaneId"] == expectedTerminalPaneId
-            },
-            "Expected Cmd+Ctrl+H to move focus to left pane (terminal)"
-        )
+        runCmdCtrlHMovesLeftWhenWebViewFocused(useGraphV1: false)
     }
 
     func testGraphV1CmdCtrlHMovesLeftWhenWebViewFocused() {
-        let app = XCUIApplication()
-        app.launchEnvironment["CMUX_WORKSPACE_ENGINE"] = "graph-v1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
-        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        launchAndEnsureForeground(app)
-
-        XCTAssertTrue(
-            waitForData(keys: ["terminalPaneId", "browserPaneId", "webViewFocused"], timeout: 10.0),
-            "Expected goto_split setup data to be written"
-        )
-
-        guard let setup = loadData() else {
-            XCTFail("Missing goto_split setup data")
-            return
-        }
-
-        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
-
-        guard let expectedTerminalPaneId = setup["terminalPaneId"] else {
-            XCTFail("Missing terminalPaneId in goto_split setup data")
-            return
-        }
-
-        app.typeKey("h", modifierFlags: [.command, .control])
-
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 5.0) { data in
-                data["lastMoveDirection"] == "left" && data["focusedPaneId"] == expectedTerminalPaneId
-            },
-            "Expected Cmd+Ctrl+H to move focus to left pane (terminal)"
-        )
+        runCmdCtrlHMovesLeftWhenWebViewFocused(useGraphV1: true)
     }
 
     func testCmdCtrlHMovesLeftWhenWebViewFocusedUsingGhosttyConfigKeybind() {
@@ -503,9 +439,12 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             "Expected Cmd+R to open the rename command palette while terminal is focused"
         )
 
-        let browserPane = app.otherElements["BrowserPanelContent.\(expectedBrowserPanelId)"].firstMatch
-        XCTAssertTrue(browserPane.waitForExistence(timeout: 5.0), "Expected browser pane content for click target")
-        browserPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        clickBrowserContent(
+            app,
+            panelId: expectedBrowserPanelId,
+            timeout: 5.0,
+            failureMessage: "Expected browser pane content for click target"
+        )
         XCTAssertTrue(
             waitForNonExistence(renameField, timeout: 5.0),
             "Expected clicking the browser pane to dismiss the command palette"
@@ -525,213 +464,35 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     }
 
     func testCmdDSplitsRightWhenWebViewFocused() {
-        let app = XCUIApplication()
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
-        launchAndEnsureForeground(app)
+        runCmdDSplitsRightWhenWebViewFocused(useGraphV1: false)
+    }
 
-        XCTAssertTrue(
-            waitForData(keys: ["webViewFocused", "initialPaneCount"], timeout: 10.0),
-            "Expected goto_split setup data to be written"
-        )
-
-        guard let setup = loadData() else {
-            XCTFail("Missing goto_split setup data")
-            return
-        }
-
-        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
-        let initialPaneCount = Int(setup["initialPaneCount"] ?? "") ?? 0
-        XCTAssertGreaterThanOrEqual(initialPaneCount, 2, "Expected at least two panes before split. data=\(setup)")
-
-        app.typeKey("d", modifierFlags: [.command])
-
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 5.0) { data in
-                guard data["lastSplitDirection"] == "right" else { return false }
-                guard let paneCountAfter = Int(data["paneCountAfterSplit"] ?? "") else { return false }
-                return paneCountAfter == initialPaneCount + 1
-            },
-            "Expected Cmd+D to split right while WKWebView is first responder"
-        )
+    func testGraphV1CmdDSplitsRightWhenWebViewFocused() {
+        runCmdDSplitsRightWhenWebViewFocused(useGraphV1: true)
     }
 
     func testCmdShiftDSplitsDownWhenWebViewFocused() {
-        let app = XCUIApplication()
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
-        launchAndEnsureForeground(app)
+        runCmdShiftDSplitsDownWhenWebViewFocused(useGraphV1: false)
+    }
 
-        XCTAssertTrue(
-            waitForData(keys: ["webViewFocused", "initialPaneCount"], timeout: 10.0),
-            "Expected goto_split setup data to be written"
-        )
-
-        guard let setup = loadData() else {
-            XCTFail("Missing goto_split setup data")
-            return
-        }
-
-        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
-        let initialPaneCount = Int(setup["initialPaneCount"] ?? "") ?? 0
-        XCTAssertGreaterThanOrEqual(initialPaneCount, 2, "Expected at least two panes before split. data=\(setup)")
-
-        app.typeKey("d", modifierFlags: [.command, .shift])
-
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 5.0) { data in
-                guard data["lastSplitDirection"] == "down" else { return false }
-                guard let paneCountAfter = Int(data["paneCountAfterSplit"] ?? "") else { return false }
-                return paneCountAfter == initialPaneCount + 1
-            },
-            "Expected Cmd+Shift+D to split down while WKWebView is first responder"
-        )
+    func testGraphV1CmdShiftDSplitsDownWhenWebViewFocused() {
+        runCmdShiftDSplitsDownWhenWebViewFocused(useGraphV1: true)
     }
 
     func testCmdShiftEnterKeepsBrowserOmnibarHittableAcrossZoomRoundTripWhenWebViewFocused() {
-        let app = XCUIApplication()
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
-        launchAndEnsureForeground(app)
+        runCmdShiftEnterKeepsBrowserOmnibarHittableAcrossZoomRoundTripWhenWebViewFocused(useGraphV1: false)
+    }
 
-        XCTAssertTrue(
-            waitForData(keys: ["browserPanelId", "webViewFocused"], timeout: 10.0),
-            "Expected goto_split setup data to be written"
-        )
-
-        guard let setup = loadData() else {
-            XCTFail("Missing goto_split setup data")
-            return
-        }
-
-        guard let browserPanelId = setup["browserPanelId"] else {
-            XCTFail("Missing browserPanelId in goto_split setup data")
-            return
-        }
-
-        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
-
-        let omnibar = app.textFields["BrowserOmnibarTextField"].firstMatch
-        let pill = app.descendants(matching: .any).matching(identifier: "BrowserOmnibarPill").firstMatch
-        XCTAssertTrue(omnibar.waitForExistence(timeout: 6.0), "Expected browser omnibar text field before zoom")
-        XCTAssertTrue(pill.waitForExistence(timeout: 6.0), "Expected browser omnibar pill before zoom")
-
-        // Reproduce the loaded-page state from the bug report before toggling zoom.
-        app.typeKey("l", modifierFlags: [.command])
-        XCTAssertTrue(waitForElementToBecomeHittable(pill, timeout: 6.0), "Expected browser omnibar pill before navigation")
-        pill.click()
-        app.typeKey("a", modifierFlags: [.command])
-        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
-        app.typeText(zoomRoundTripPageURL)
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
-
-        XCTAssertTrue(
-            waitForOmnibarToContain(omnibar, value: "data:text/html", timeout: 8.0),
-            "Expected browser to finish navigating to the regression page before zoom. value=\(String(describing: omnibar.value))"
-        )
-
-        let browserPane = app.otherElements["BrowserPanelContent.\(browserPanelId)"].firstMatch
-        XCTAssertTrue(browserPane.waitForExistence(timeout: 6.0), "Expected browser pane content before zoom")
-        browserPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 8.0) { data in
-                data["splitZoomedAfterToggle"] == "true" &&
-                    data["otherTerminalHostHiddenAfterToggle"] == "true" &&
-                    data["otherTerminalVisibleFlagAfterToggle"] == "false"
-            },
-            "Expected Cmd+Shift+Enter zoom-in to hide the non-browser terminal portal. data=\(loadData() ?? [:])"
-        )
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 8.0) { data in
-                data["splitZoomedAfterToggle"] == "false" &&
-                    data["otherTerminalHostHiddenAfterToggle"] == "false" &&
-                    data["otherTerminalVisibleFlagAfterToggle"] == "true"
-            },
-            "Expected Cmd+Shift+Enter zoom-out to restore the non-browser terminal portal. data=\(loadData() ?? [:])"
-        )
-
-        XCTAssertTrue(omnibar.waitForExistence(timeout: 6.0), "Expected browser omnibar text field after Cmd+Shift+Enter zoom round-trip")
-        XCTAssertTrue(pill.waitForExistence(timeout: 6.0), "Expected browser omnibar pill after Cmd+Shift+Enter zoom round-trip")
-        XCTAssertTrue(
-            waitForElementToBecomeHittable(pill, timeout: 6.0),
-            "Expected browser omnibar to stay hittable after Cmd+Shift+Enter zoom round-trip"
-        )
-        let page = app.webViews.firstMatch
-        XCTAssertTrue(page.waitForExistence(timeout: 6.0), "Expected browser web area after Cmd+Shift+Enter")
-        XCTAssertLessThanOrEqual(
-            pill.frame.maxY,
-            page.frame.minY + 12,
-            "Expected browser omnibar to remain above the web content after Cmd+Shift+Enter. pill=\(pill.frame) page=\(page.frame)"
-        )
-
-        pill.click()
-        app.typeKey("a", modifierFlags: [.command])
-        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
-        app.typeText("issue1144")
-
-        XCTAssertTrue(
-            waitForOmnibarToContain(omnibar, value: "issue1144", timeout: 4.0),
-            "Expected browser omnibar to stay editable after Cmd+Shift+Enter. value=\(String(describing: omnibar.value))"
-        )
+    func testGraphV1CmdShiftEnterKeepsBrowserOmnibarHittableAcrossZoomRoundTripWhenWebViewFocused() {
+        runCmdShiftEnterKeepsBrowserOmnibarHittableAcrossZoomRoundTripWhenWebViewFocused(useGraphV1: true)
     }
 
     func testCmdShiftEnterHidesBrowserPortalWhenTerminalPaneZooms() {
-        let app = XCUIApplication()
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
-        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
-        launchAndEnsureForeground(app)
+        runCmdShiftEnterHidesBrowserPortalWhenTerminalPaneZooms(useGraphV1: false)
+    }
 
-        XCTAssertTrue(
-            waitForData(keys: ["terminalPaneId", "browserPanelId", "webViewFocused"], timeout: 10.0),
-            "Expected goto_split setup data to be written"
-        )
-
-        guard let setup = loadData() else {
-            XCTFail("Missing goto_split setup data")
-            return
-        }
-
-        guard let expectedTerminalPaneId = setup["terminalPaneId"] else {
-            XCTFail("Missing terminalPaneId in goto_split setup data")
-            return
-        }
-
-        app.typeKey("h", modifierFlags: [.command, .control])
-
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 5.0) { data in
-                data["focusedPaneId"] == expectedTerminalPaneId && data["focusedPanelKind"] == "terminal"
-            },
-            "Expected Cmd+Ctrl+H to focus the terminal pane before zoom. data=\(loadData() ?? [:])"
-        )
-
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 8.0) { data in
-                data["splitZoomedAfterToggle"] == "true" &&
-                    data["browserContainerHiddenAfterToggle"] == "true" &&
-                    data["browserVisibleFlagAfterToggle"] == "false"
-            },
-            "Expected Cmd+Shift+Enter zoom-in on the terminal pane to hide the browser portal. data=\(loadData() ?? [:])"
-        )
-
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
-        XCTAssertTrue(
-            waitForDataMatch(timeout: 8.0) { data in
-                data["splitZoomedAfterToggle"] == "false" &&
-                    data["browserContainerHiddenAfterToggle"] == "false" &&
-                    data["browserVisibleFlagAfterToggle"] == "true"
-            },
-            "Expected Cmd+Shift+Enter zoom-out from the terminal pane to restore the browser portal. data=\(loadData() ?? [:])"
-        )
+    func testGraphV1CmdShiftEnterHidesBrowserPortalWhenTerminalPaneZooms() {
+        runCmdShiftEnterHidesBrowserPortalWhenTerminalPaneZooms(useGraphV1: true)
     }
 
     func testCmdDSplitsRightWhenOmnibarFocused() {
@@ -1003,6 +764,281 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 
     private var zoomRoundTripPageURL: String {
         "data:text/html,%3Ctitle%3EIssue%201144%3C/title%3E%3Cbody%20style%3D%22margin:0;background:%231d1f24;color:white;font-family:system-ui;height:2200px%22%3E%3Cmain%20style%3D%22padding:32px%22%3E%3Ch1%3EIssue%201144%20Regression%20Page%3C/h1%3E%3Cp%3EZoom%20should%20not%20leave%20stale%20split%20chrome%20above%20the%20browser%20omnibar.%3C/p%3E%3C/main%3E%3C/body%3E"
+    }
+
+    private func configuredApp(useGraphV1: Bool) -> XCUIApplication {
+        let app = XCUIApplication()
+        if useGraphV1 {
+            app.launchEnvironment["CMUX_WORKSPACE_ENGINE"] = "graph-v1"
+        }
+        return app
+    }
+
+    private func runCmdCtrlHMovesLeftWhenWebViewFocused(useGraphV1: Bool) {
+        let app = configuredApp(useGraphV1: useGraphV1)
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(keys: ["terminalPaneId", "browserPaneId", "webViewFocused"], timeout: 10.0),
+            "Expected goto_split setup data to be written"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
+
+        guard let expectedTerminalPaneId = setup["terminalPaneId"] else {
+            XCTFail("Missing terminalPaneId in goto_split setup data")
+            return
+        }
+
+        app.typeKey("h", modifierFlags: [.command, .control])
+
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                data["lastMoveDirection"] == "left" && data["focusedPaneId"] == expectedTerminalPaneId
+            },
+            "Expected Cmd+Ctrl+H to move focus to left pane (terminal)"
+        )
+    }
+
+    private func runCmdDSplitsRightWhenWebViewFocused(useGraphV1: Bool) {
+        let app = configuredApp(useGraphV1: useGraphV1)
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(keys: ["webViewFocused", "initialPaneCount"], timeout: 10.0),
+            "Expected goto_split setup data to be written"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
+        let initialPaneCount = Int(setup["initialPaneCount"] ?? "") ?? 0
+        XCTAssertGreaterThanOrEqual(initialPaneCount, 2, "Expected at least two panes before split. data=\(setup)")
+
+        app.typeKey("d", modifierFlags: [.command])
+
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                guard data["lastSplitDirection"] == "right" else { return false }
+                guard let paneCountAfter = Int(data["paneCountAfterSplit"] ?? "") else { return false }
+                return paneCountAfter == initialPaneCount + 1
+            },
+            "Expected Cmd+D to split right while WKWebView is first responder"
+        )
+    }
+
+    private func runCmdShiftDSplitsDownWhenWebViewFocused(useGraphV1: Bool) {
+        let app = configuredApp(useGraphV1: useGraphV1)
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(keys: ["webViewFocused", "initialPaneCount"], timeout: 10.0),
+            "Expected goto_split setup data to be written"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
+        let initialPaneCount = Int(setup["initialPaneCount"] ?? "") ?? 0
+        XCTAssertGreaterThanOrEqual(initialPaneCount, 2, "Expected at least two panes before split. data=\(setup)")
+
+        app.typeKey("d", modifierFlags: [.command, .shift])
+
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                guard data["lastSplitDirection"] == "down" else { return false }
+                guard let paneCountAfter = Int(data["paneCountAfterSplit"] ?? "") else { return false }
+                return paneCountAfter == initialPaneCount + 1
+            },
+            "Expected Cmd+Shift+D to split down while WKWebView is first responder"
+        )
+    }
+
+    private func runCmdShiftEnterKeepsBrowserOmnibarHittableAcrossZoomRoundTripWhenWebViewFocused(useGraphV1: Bool) {
+        let app = configuredApp(useGraphV1: useGraphV1)
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(keys: ["browserPanelId", "webViewFocused"], timeout: 10.0),
+            "Expected goto_split setup data to be written"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        guard let browserPanelId = setup["browserPanelId"] else {
+            XCTFail("Missing browserPanelId in goto_split setup data")
+            return
+        }
+
+        XCTAssertEqual(setup["webViewFocused"], "true", "Expected WKWebView to be first responder for this test")
+
+        let omnibar = app.textFields["BrowserOmnibarTextField"].firstMatch
+        let pill = app.descendants(matching: .any).matching(identifier: "BrowserOmnibarPill").firstMatch
+        XCTAssertTrue(omnibar.waitForExistence(timeout: 6.0), "Expected browser omnibar text field before zoom")
+        XCTAssertTrue(pill.waitForExistence(timeout: 6.0), "Expected browser omnibar pill before zoom")
+
+        app.typeKey("l", modifierFlags: [.command])
+        XCTAssertTrue(waitForElementToBecomeHittable(pill, timeout: 6.0), "Expected browser omnibar pill before navigation")
+        pill.click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
+        app.typeText(zoomRoundTripPageURL)
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
+
+        XCTAssertTrue(
+            waitForOmnibarToContain(omnibar, value: "data:text/html", timeout: 8.0),
+            "Expected browser to finish navigating to the regression page before zoom. value=\(String(describing: omnibar.value))"
+        )
+
+        clickBrowserContent(
+            app,
+            panelId: browserPanelId,
+            timeout: 6.0,
+            failureMessage: "Expected browser pane content before zoom"
+        )
+
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 8.0) { data in
+                data["splitZoomedAfterToggle"] == "true" &&
+                    data["otherTerminalHostHiddenAfterToggle"] == "true" &&
+                    data["otherTerminalVisibleFlagAfterToggle"] == "false"
+            },
+            "Expected Cmd+Shift+Enter zoom-in to hide the non-browser terminal portal. data=\(loadData() ?? [:])"
+        )
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 8.0) { data in
+                data["splitZoomedAfterToggle"] == "false" &&
+                    data["otherTerminalHostHiddenAfterToggle"] == "false" &&
+                    data["otherTerminalVisibleFlagAfterToggle"] == "true"
+            },
+            "Expected Cmd+Shift+Enter zoom-out to restore the non-browser terminal portal. data=\(loadData() ?? [:])"
+        )
+
+        XCTAssertTrue(omnibar.waitForExistence(timeout: 6.0), "Expected browser omnibar text field after Cmd+Shift+Enter zoom round-trip")
+        XCTAssertTrue(pill.waitForExistence(timeout: 6.0), "Expected browser omnibar pill after Cmd+Shift+Enter zoom round-trip")
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(pill, timeout: 6.0),
+            "Expected browser omnibar to stay hittable after Cmd+Shift+Enter zoom round-trip"
+        )
+        let page = app.webViews.firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 6.0), "Expected browser web area after Cmd+Shift+Enter")
+        XCTAssertLessThanOrEqual(
+            pill.frame.maxY,
+            page.frame.minY + 12,
+            "Expected browser omnibar to remain above the web content after Cmd+Shift+Enter. pill=\(pill.frame) page=\(page.frame)"
+        )
+
+        pill.click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
+        app.typeText("issue1144")
+
+        XCTAssertTrue(
+            waitForOmnibarToContain(omnibar, value: "issue1144", timeout: 4.0),
+            "Expected browser omnibar to stay editable after Cmd+Shift+Enter. value=\(String(describing: omnibar.value))"
+        )
+    }
+
+    private func runCmdShiftEnterHidesBrowserPortalWhenTerminalPaneZooms(useGraphV1: Bool) {
+        let app = configuredApp(useGraphV1: useGraphV1)
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(keys: ["terminalPaneId", "browserPanelId", "webViewFocused"], timeout: 10.0),
+            "Expected goto_split setup data to be written"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        guard let expectedTerminalPaneId = setup["terminalPaneId"] else {
+            XCTFail("Missing terminalPaneId in goto_split setup data")
+            return
+        }
+
+        app.typeKey("h", modifierFlags: [.command, .control])
+
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                data["focusedPaneId"] == expectedTerminalPaneId && data["focusedPanelKind"] == "terminal"
+            },
+            "Expected Cmd+Ctrl+H to focus the terminal pane before zoom. data=\(loadData() ?? [:])"
+        )
+
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 8.0) { data in
+                data["splitZoomedAfterToggle"] == "true" &&
+                    data["browserContainerHiddenAfterToggle"] == "true" &&
+                    data["browserVisibleFlagAfterToggle"] == "false"
+            },
+            "Expected Cmd+Shift+Enter zoom-in on the terminal pane to hide the browser portal. data=\(loadData() ?? [:])"
+        )
+
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [.command, .shift])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 8.0) { data in
+                data["splitZoomedAfterToggle"] == "false" &&
+                    data["browserContainerHiddenAfterToggle"] == "false" &&
+                    data["browserVisibleFlagAfterToggle"] == "true"
+            },
+            "Expected Cmd+Shift+Enter zoom-out from the terminal pane to restore the browser portal. data=\(loadData() ?? [:])"
+        )
+    }
+
+    private func clickBrowserContent(
+        _ app: XCUIApplication,
+        panelId: String,
+        timeout: TimeInterval,
+        failureMessage: String
+    ) {
+        let browserPane = app.otherElements["BrowserPanelContent.\(panelId)"].firstMatch
+        if browserPane.waitForExistence(timeout: timeout) {
+            browserPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            return
+        }
+
+        let page = app.webViews.firstMatch
+        guard page.waitForExistence(timeout: timeout) else {
+            XCTFail(failureMessage)
+            return
+        }
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     }
 
     private func launchAndEnsureForeground(_ app: XCUIApplication, timeout: TimeInterval = 12.0) {

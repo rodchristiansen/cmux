@@ -1839,6 +1839,10 @@ final class BrowserPanel: Panel, ObservableObject {
         return true
     }
 
+    func ownsPortalHost(hostId: ObjectIdentifier) -> Bool {
+        portalHostLeasing.owns(hostId: hostId)
+    }
+
     var displayIcon: String? {
         "globe"
     }

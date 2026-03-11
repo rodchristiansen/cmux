@@ -2455,6 +2455,12 @@ final class Workspace: Identifiable, ObservableObject {
         )
 #endif
         if let tabId = surfaceIdFromPanelId(panelId) {
+            if terminalPanel(for: panelId) != nil {
+                scheduleVisibleTerminalRefreshesDuringClose(
+                    excluding: panelId,
+                    reason: "workspace.closePanel"
+                )
+            }
             if force {
                 forceCloseTabIds.insert(tabId)
             }
@@ -2490,6 +2496,12 @@ final class Workspace: Identifiable, ObservableObject {
             return false
         }
 
+        if terminalPanel(for: panelId) != nil {
+            scheduleVisibleTerminalRefreshesDuringClose(
+                excluding: panelId,
+                reason: "workspace.closePanelFallback"
+            )
+        }
         if force {
             forceCloseTabIds.insert(selected.id)
         }
@@ -3357,6 +3369,11 @@ final class Workspace: Identifiable, ObservableObject {
             if wasSplitZoomed && !bonsplitController.isSplitZoomed {
                 scheduleBrowserSplitZoomExitFocusReassert(panelId: panelId, remainingPasses: 4)
             }
+        } else if let terminalPanel = panels[panelId] as? TerminalPanel {
+            terminalPanel.preparePortalHostReplacementForNextDistinctClaim(
+                inPane: paneId,
+                reason: "workspace.toggleSplitZoom"
+            )
         }
         markGraphStateChanged(reason: "toggleSplitZoom")
         return true
@@ -3887,6 +3904,63 @@ final class Workspace: Identifiable, ObservableObject {
         // sequences still get a post-layout redraw.
         runRefreshPass(0)
         runRefreshPass(0.03)
+    }
+
+    private func scheduleVisibleTerminalRefreshesDuringClose(excluding closedPanelId: UUID, reason: String) {
+        let terminalPanels = panels.values
+            .compactMap { $0 as? TerminalPanel }
+            .filter { $0.id != closedPanelId }
+        guard !terminalPanels.isEmpty else { return }
+
+        for terminalPanel in terminalPanels {
+            terminalPanel.hostedView.preserveCurrentFrameDuringTransition(
+                reason: "\(reason).prepare"
+            )
+        }
+
+        let refreshDelays: [TimeInterval] = [0, 0.016, 0.05, 0.10]
+        for delay in refreshDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                for terminalPanel in terminalPanels {
+                    guard let liveTerminalPanel = self.terminalPanel(for: terminalPanel.id) else { continue }
+                    liveTerminalPanel.hostedView.reconcileGeometryNow()
+                    liveTerminalPanel.hostedView.refreshSurfaceNow(
+                        reason: "\(reason).delay\(String(format: "%.3f", delay))"
+                    )
+                    if liveTerminalPanel.surface.surface == nil {
+                        liveTerminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
+                    }
+                }
+            }
+        }
+    }
+
+    private func refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: String) {
+        for window in NSApp.windows {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.contentView?.displayIfNeeded()
+        }
+
+        for panel in panels.values {
+            guard let terminalPanel = panel as? TerminalPanel else { continue }
+
+            let hostedView = terminalPanel.hostedView
+            let isAttached = hostedView.window != nil && hostedView.superview != nil
+            if !isAttached {
+                terminalPanel.requestViewReattach()
+                terminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
+                continue
+            }
+
+            let geometryChanged = hostedView.reconcileGeometryNow()
+            if terminalPanel.surface.surface != nil {
+                let refreshReason = geometryChanged ? "\(reason).geometryChanged" : reason
+                terminalPanel.surface.forceRefresh(reason: refreshReason)
+            } else {
+                terminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
+            }
+        }
     }
 
     private func closeTabs(_ tabIds: [TabID], skipPinned: Bool = true) {
@@ -4564,6 +4638,10 @@ extension Workspace: BonsplitDelegate {
 
         clearStagedClosedBrowserRestoreSnapshot(for: tab.id)
         recordPostCloseSelection()
+        scheduleVisibleTerminalRefreshesDuringClose(
+            excluding: panelId,
+            reason: "workspace.shouldCloseTab"
+        )
         return true
     }
 
@@ -4695,6 +4773,7 @@ extension Workspace: BonsplitDelegate {
         if bonsplitController.allPaneIds.contains(pane) {
             normalizePinnedTabs(in: pane)
         }
+        refreshSurvivingTerminalSurfacesAfterSplitMutation(reason: "workspace.didCloseTab")
 #if DEBUG
         let focusedPaneAfter = bonsplitController.focusedPaneId?.id.uuidString.prefix(5) ?? "nil"
         let focusedPanelAfter = focusedPanelId?.uuidString.prefix(5) ?? "nil"

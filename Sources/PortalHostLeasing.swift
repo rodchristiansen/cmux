@@ -65,6 +65,19 @@ struct PortalHostLeasingState {
             }
 
             if current.hostId == hostId {
+                let currentUsable = Self.isUsable(current)
+                let nextUsable = Self.isUsable(next)
+                if currentUsable && !nextUsable {
+                    return PortalHostLeaseClaimOutcome(
+                        accepted: true,
+                        activeLease: current,
+                        replacedLease: nil,
+                        didAcquireOwnership: false,
+                        forcedDistinctReplacement: false,
+                        blockedByLock: false
+                    )
+                }
+
                 activeLease = next
                 return PortalHostLeaseClaimOutcome(
                     accepted: true,
@@ -78,10 +91,13 @@ struct PortalHostLeasingState {
 
             let currentUsable = Self.isUsable(current)
             let nextUsable = Self.isUsable(next)
-            let isSameContextReplacement = current.contextId == next.contextId
+            let sharedContextId = current.contextId.flatMap { currentContextId in
+                next.contextId == currentContextId ? currentContextId : nil
+            }
+            let isSameContextReplacement = sharedContextId != nil
             let shouldForceDistinctReplacement =
                 isSameContextReplacement &&
-                pendingDistinctReplacementContextId == next.contextId &&
+                pendingDistinctReplacementContextId == sharedContextId &&
                 inWindow
 
             if shouldForceDistinctReplacement {
@@ -156,5 +172,9 @@ struct PortalHostLeasingState {
             lockedLease = nil
         }
         return current
+    }
+
+    func owns(hostId: ObjectIdentifier) -> Bool {
+        activeLease?.hostId == hostId
     }
 }
