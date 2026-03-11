@@ -1960,6 +1960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var didSetupMultiWindowNotificationsUITest = false
     private var didSetupMovedBrowserWindowUITest = false
     private var movedBrowserWindowUITestSnapshotTimer: DispatchSourceTimer?
+    private weak var browserSurfaceShortcutTargetWindow: NSWindow?
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
     private var debugDetachedContextWindows: [NSWindow] = []
 
@@ -1969,6 +1970,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let destinationWindowId: UUID
         let movedWorkspaceId: UUID
         let browserPanelId: UUID
+        let expectedDestinationWorkspaceCount: Int
+    }
+
+    private enum MovedBrowserWindowUITestDestinationMode: String {
+        case newWindow = "new_window"
+        case existingWindow = "existing_window"
     }
 
     private func childExitKeyboardProbePath() -> String? {
@@ -4767,6 +4774,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
     private func mainWindowForShortcutEvent(_ event: NSEvent) -> NSWindow? {
+        if let overrideWindow = browserSurfaceShortcutTargetWindow,
+           isMainTerminalWindow(overrideWindow) {
+            return overrideWindow
+        }
         if let window = event.window, isMainTerminalWindow(window) {
             return window
         }
@@ -4843,6 +4854,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func preferredMainWindowContextForShortcuts(event: NSEvent) -> MainWindowContext? {
+        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+            return context
+        }
         if let context = contextForMainWindow(event.window) {
             return context
         }
@@ -5082,6 +5096,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return context
         }
 
+        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+#if DEBUG
+            logWorkspaceCreationRouting(
+                phase: "choose",
+                source: debugSource,
+                reason: "browser_surface_target_override",
+                event: event,
+                chosenContext: context
+            )
+#endif
+            return context
+        }
+
         if event == nil,
            let activeManager = tabManager,
            let context = mainWindowContexts.values.first(where: { $0.tabManager === activeManager }) {
@@ -5240,6 +5267,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func preferredMainWindowContextForShortcutRouting(event: NSEvent) -> MainWindowContext? {
+        if let context = contextForMainWindow(browserSurfaceShortcutTargetWindow) {
+            return context
+        }
+
         if let context = mainWindowContext(forShortcutEvent: event, debugSource: "shortcut.routing") {
             return context
         }
@@ -7164,6 +7195,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let env = ProcessInfo.processInfo.environment
         guard env["CMUX_UI_TEST_MOVED_BROWSER_WINDOW_SETUP"] == "1" else { return }
         guard let path = env["CMUX_UI_TEST_MOVED_BROWSER_WINDOW_PATH"], !path.isEmpty else { return }
+        let destinationMode = MovedBrowserWindowUITestDestinationMode(
+            rawValue: env["CMUX_UI_TEST_MOVED_BROWSER_WINDOW_MODE"] ?? ""
+        ) ?? .newWindow
 
         try? FileManager.default.removeItem(atPath: path)
         writeMovedBrowserWindowUITestData([
@@ -7187,11 +7221,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         waitForInitialContext { [weak self] sourceContext in
-            self?.buildMovedBrowserWindowUITestScenario(from: sourceContext, at: path)
+            self?.buildMovedBrowserWindowUITestScenario(
+                from: sourceContext,
+                at: path,
+                destinationMode: destinationMode
+            )
         }
     }
 
-    private func buildMovedBrowserWindowUITestScenario(from sourceContext: MainWindowContext, at path: String) {
+    private func buildMovedBrowserWindowUITestScenario(
+        from sourceContext: MainWindowContext,
+        at path: String,
+        destinationMode: MovedBrowserWindowUITestDestinationMode
+    ) {
         _ = focusMainWindow(windowId: sourceContext.windowId)
         TerminalController.shared.setActiveTabManager(sourceContext.tabManager)
 
@@ -7203,9 +7245,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             failMovedBrowserWindowUITest(at: path, reason: "open_browser_failed")
             return
         }
-        guard let destinationWindowId = moveWorkspaceToNewWindow(workspaceId: movedWorkspace.id) else {
-            failMovedBrowserWindowUITest(at: path, reason: "move_workspace_to_new_window_failed")
-            return
+        let destinationWindowId: UUID
+        let expectedDestinationWorkspaceCount: Int
+        switch destinationMode {
+        case .newWindow:
+            guard let movedWindowId = moveWorkspaceToNewWindow(workspaceId: movedWorkspace.id) else {
+                failMovedBrowserWindowUITest(at: path, reason: "move_workspace_to_new_window_failed")
+                return
+            }
+            destinationWindowId = movedWindowId
+            expectedDestinationWorkspaceCount = 1
+        case .existingWindow:
+            let existingWindowId = createMainWindow(workspaceEngineKind: sourceContext.tabManager.workspaceEngineKind)
+            _ = focusMainWindow(windowId: sourceContext.windowId)
+            guard moveWorkspaceToWindow(workspaceId: movedWorkspace.id, windowId: existingWindowId, focus: true) else {
+                failMovedBrowserWindowUITest(at: path, reason: "move_workspace_to_existing_window_failed")
+                return
+            }
+            destinationWindowId = existingWindowId
+            expectedDestinationWorkspaceCount = 2
         }
 
         let context = MovedBrowserWindowUITestContext(
@@ -7213,7 +7271,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             sourceWindowId: sourceContext.windowId,
             destinationWindowId: destinationWindowId,
             movedWorkspaceId: movedWorkspace.id,
-            browserPanelId: browserPanelId
+            browserPanelId: browserPanelId,
+            expectedDestinationWorkspaceCount: expectedDestinationWorkspaceCount
         )
         publishMovedBrowserWindowUITestSnapshot(context, setupReady: "pending")
         finishMovedBrowserWindowUITestSetup(context, attempt: 0)
@@ -7246,7 +7305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             destinationWindow.isKeyWindow
             && destinationManager.selectedTabId == context.movedWorkspaceId
             && sourceWorkspaceCount == 1
-            && destinationManager.tabs.count == 1
+            && destinationManager.tabs.count == context.expectedDestinationWorkspaceCount
             && isWebViewFocused(browserPanel)
 
         if isReady {
@@ -7306,6 +7365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             "browserPanelId": context.browserPanelId.uuidString,
             "sourceWorkspaceCount": sourceManager.map { String($0.tabs.count) } ?? "",
             "destinationWorkspaceCount": destinationManager.map { String($0.tabs.count) } ?? "",
+            "expectedDestinationWorkspaceCount": String(context.expectedDestinationWorkspaceCount),
             "sourceSelectedWorkspaceId": sourceManager?.selectedTabId?.uuidString ?? "",
             "destinationSelectedWorkspaceId": destinationManager?.selectedTabId?.uuidString ?? "",
             "sourceIsKeyWindow": sourceWindow?.isKeyWindow == true ? "1" : "0",
@@ -9441,8 +9501,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Allow AppKit-backed browser surfaces (WKWebView) to route non-menu shortcuts
     /// through the same app-level shortcut handler used by the local key monitor.
     @discardableResult
-    func handleBrowserSurfaceKeyEquivalent(_ event: NSEvent) -> Bool {
-        handleCustomShortcut(event: event)
+    func handleBrowserSurfaceKeyEquivalent(_ event: NSEvent, preferredWindow: NSWindow? = nil) -> Bool {
+        withBrowserSurfaceShortcutRoutingWindow(preferredWindow) {
+            handleCustomShortcut(event: event)
+        }
+    }
+
+    @discardableResult
+    func routeBrowserSurfaceCommandKeyEquivalent(_ event: NSEvent, window: NSWindow?) -> Bool {
+        withBrowserSurfaceShortcutRoutingWindow(window) {
+            _ = prepareBrowserWindowForShortcutRouting(window)
+            if handleCustomShortcut(event: event) {
+                return true
+            }
+            if let menu = NSApp.mainMenu, menu.performKeyEquivalent(with: event) {
+                return true
+            }
+            return false
+        }
     }
 
     @discardableResult
@@ -10025,6 +10101,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebarSelectionState = context.sidebarSelectionState
         TerminalController.shared.setActiveTabManager(context.tabManager)
         return true
+    }
+
+    private func withBrowserSurfaceShortcutRoutingWindow<T>(
+        _ window: NSWindow?,
+        perform work: () -> T
+    ) -> T {
+        let previousWindow = browserSurfaceShortcutTargetWindow
+        if let window, isMainTerminalWindow(window) {
+            browserSurfaceShortcutTargetWindow = window
+        }
+        defer {
+            browserSurfaceShortcutTargetWindow = previousWindow
+        }
+        return work()
     }
 
     private func setActiveMainWindow(_ window: NSWindow) {
