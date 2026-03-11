@@ -4466,9 +4466,14 @@ struct WebViewRepresentable: NSViewRepresentable {
         reason: String
     ) {
         guard sourceSuperview !== container else { return }
-        let relatedSubviews = sourceSuperview.subviews.filter { view in
-            if view === primaryWebView { return true }
-            return String(describing: type(of: view)).contains("WK")
+        let relatedSubviews: [NSView]
+        if let sourceSlot = sourceSuperview as? WindowBrowserSlotView {
+            relatedSubviews = sourceSlot.localInlineHostedContentSubviews(primaryWebView: primaryWebView)
+        } else {
+            relatedSubviews = sourceSuperview.subviews.filter { view in
+                if view === primaryWebView { return true }
+                return String(describing: type(of: view)).contains("WK")
+            }
         }
         guard !relatedSubviews.isEmpty else { return }
 #if DEBUG

@@ -1510,6 +1510,19 @@ final class WindowBrowserSlotView: NSView {
     var onHostedInspectorLayout: ((WindowBrowserSlotView) -> Void)?
     fileprivate var isApplyingHostedInspectorLayout = false
 
+    func localInlineHostedContentSubviews(primaryWebView: WKWebView) -> [NSView] {
+        let excludedHostingViews = [searchOverlayHostingView].compactMap { $0 }
+        return subviews.filter { view in
+            if view === paneDropTargetView || view === dropZoneOverlayView {
+                return false
+            }
+            if excludedHostingViews.contains(where: { $0 === view }) {
+                return false
+            }
+            return true
+        }
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
