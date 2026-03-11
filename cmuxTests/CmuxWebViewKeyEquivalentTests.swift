@@ -2481,6 +2481,18 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
         return (panel, inspector)
     }
 
+    private func findHostContainerView(in root: NSView) -> WebViewRepresentable.HostContainerView? {
+        if let host = root as? WebViewRepresentable.HostContainerView {
+            return host
+        }
+        for subview in root.subviews {
+            if let host = findHostContainerView(in: subview) {
+                return host
+            }
+        }
+        return nil
+    }
+
     func testRestoreReopensInspectorAfterAttachWhenPreferredVisible() {
         let (panel, inspector) = makePanelWithInspector()
 
@@ -2690,6 +2702,89 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
         host.addSubview(inspectorContainer)
 
         XCTAssertTrue(panel.shouldPreserveWebViewAttachmentDuringTransientHide())
+    }
+
+    func testOffWindowReplacementLocalHostDoesNotStealVisibleDevToolsWebView() {
+        let (panel, _) = makePanelWithInspector()
+        XCTAssertTrue(panel.showDeveloperTools())
+
+        let paneId = PaneID(id: UUID())
+        let representable = WebViewRepresentable(
+            panel: panel,
+            paneId: paneId,
+            shouldAttachWebView: false,
+            useLocalInlineHosting: true,
+            shouldFocusWebView: false,
+            isPanelFocused: true,
+            portalZPriority: 0,
+            paneDropZone: nil,
+            searchOverlay: nil,
+            paneTopChromeHeight: 0
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let visibleHosting = NSHostingView(rootView: representable)
+        visibleHosting.frame = contentView.bounds
+        visibleHosting.autoresizingMask = [.width, .height]
+        contentView.addSubview(visibleHosting)
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        visibleHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let visibleHost = findHostContainerView(in: visibleHosting) else {
+            XCTFail("Expected visible local host")
+            return
+        }
+        guard let visibleSlot = panel.webView.superview as? WindowBrowserSlotView else {
+            XCTFail("Expected visible local inline slot")
+            return
+        }
+
+        let inspectorView = WKInspectorProbeView(
+            frame: NSRect(x: 0, y: 0, width: visibleSlot.bounds.width, height: 72)
+        )
+        inspectorView.autoresizingMask = [.width]
+        visibleSlot.addSubview(inspectorView)
+        panel.webView.frame = NSRect(
+            x: 0,
+            y: inspectorView.frame.maxY,
+            width: visibleSlot.bounds.width,
+            height: visibleSlot.bounds.height - inspectorView.frame.height
+        )
+        visibleSlot.layoutSubtreeIfNeeded()
+
+        let detachedRoot = NSView(frame: visibleHosting.frame)
+        let offWindowHosting = NSHostingView(rootView: representable)
+        offWindowHosting.frame = detachedRoot.bounds
+        offWindowHosting.autoresizingMask = [.width, .height]
+        detachedRoot.addSubview(offWindowHosting)
+        detachedRoot.layoutSubtreeIfNeeded()
+        offWindowHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertNotNil(findHostContainerView(in: offWindowHosting), "Expected off-window replacement host")
+        XCTAssertTrue(visibleHost.window === window)
+        XCTAssertTrue(
+            panel.webView.superview === visibleSlot,
+            "An off-window replacement host should not steal a visible DevTools-hosted web view during split zoom churn"
+        )
+        XCTAssertTrue(
+            inspectorView.superview === visibleSlot,
+            "An off-window replacement host should leave DevTools companion views in the visible local host"
+        )
     }
 }
 
@@ -9370,6 +9465,33 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         XCTAssertEqual(webView.autoresizingMask, [.width, .height])
         XCTAssertEqual(webView.frame, slot.bounds)
     }
+
+    func testWindowBrowserSlotReattachesPlainWebViewAtFullBoundsAfterHiddenHostResize() {
+        let slot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 400, height: 180))
+        let webView = WKWebView(frame: .zero)
+        slot.addSubview(webView)
+        slot.pinHostedWebView(webView)
+        XCTAssertEqual(webView.frame, slot.bounds)
+
+        let externalHost = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 180))
+        webView.removeFromSuperview()
+        externalHost.addSubview(webView)
+        webView.frame = externalHost.bounds
+        webView.translatesAutoresizingMaskIntoConstraints = true
+        webView.autoresizingMask = [.width, .height]
+
+        slot.addSubview(webView)
+        slot.pinHostedWebView(webView)
+
+        slot.frame = NSRect(x: 0, y: 0, width: 300, height: 180)
+        slot.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            webView.frame,
+            slot.bounds,
+            "Reattaching a plain web view should restore full-bounds hosting instead of preserving a stale inset frame from a hidden host"
+        )
+    }
 }
 
 @MainActor
@@ -9387,6 +9509,76 @@ final class CmuxWebViewDragRoutingTests: XCTestCase {
         XCTAssertFalse(CmuxWebView.shouldRejectInternalPaneDrag([.fileURL]))
     }
 }
+
+#if compiler(>=6.2)
+@available(macOS 26.0, *)
+private struct DragConfigurationOperationsSnapshot: Equatable {
+    let allowCopy: Bool
+    let allowMove: Bool
+    let allowDelete: Bool
+    let allowAlias: Bool
+}
+
+@available(macOS 26.0, *)
+private enum DragConfigurationSnapshotError: Error {
+    case missingBoolField(primary: String, fallback: String?)
+}
+
+@available(macOS 26.0, *)
+private func dragConfigurationOperationsSnapshot<T>(from operations: T) throws -> DragConfigurationOperationsSnapshot {
+    let mirror = Mirror(reflecting: operations)
+
+    func readBool(_ primary: String, fallback: String? = nil) throws -> Bool {
+        if let value = mirror.descendant(primary) as? Bool {
+            return value
+        }
+        if let fallback, let value = mirror.descendant(fallback) as? Bool {
+            return value
+        }
+        throw DragConfigurationSnapshotError.missingBoolField(primary: primary, fallback: fallback)
+    }
+
+    return try DragConfigurationOperationsSnapshot(
+        allowCopy: readBool("allowCopy", fallback: "_allowCopy"),
+        allowMove: readBool("allowMove", fallback: "_allowMove"),
+        allowDelete: readBool("allowDelete", fallback: "_allowDelete"),
+        allowAlias: readBool("allowAlias", fallback: "_allowAlias")
+    )
+}
+
+@MainActor
+final class InternalTabDragConfigurationTests: XCTestCase {
+    func testDisablesExternalOperationsForInternalTabDrags() throws {
+        guard #available(macOS 26.0, *) else {
+            throw XCTSkip("Requires macOS 26 drag configuration APIs")
+        }
+
+        let configuration = InternalTabDragConfigurationProvider.value
+        let withinApp = try dragConfigurationOperationsSnapshot(from: configuration.operationsWithinApp)
+        let outsideApp = try dragConfigurationOperationsSnapshot(from: configuration.operationsOutsideApp)
+
+        XCTAssertEqual(
+            withinApp,
+            DragConfigurationOperationsSnapshot(
+                allowCopy: false,
+                allowMove: true,
+                allowDelete: false,
+                allowAlias: false
+            )
+        )
+
+        XCTAssertEqual(
+            outsideApp,
+            DragConfigurationOperationsSnapshot(
+                allowCopy: false,
+                allowMove: false,
+                allowDelete: false,
+                allowAlias: false
+            )
+        )
+    }
+}
+#endif
 
 @MainActor
 final class BrowserPaneDropRoutingTests: XCTestCase {
@@ -10987,6 +11179,8 @@ final class BrowserWindowPortalLifecycleTests: XCTestCase {
         }
     }
 
+    private final class WKInspectorProbeView: NSView {}
+
     private func realizeWindowLayout(_ window: NSWindow) {
         window.makeKeyAndOrderFront(nil)
         window.displayIfNeeded()
@@ -11249,6 +11443,145 @@ final class BrowserWindowPortalLifecycleTests: XCTestCase {
         XCTAssertEqual(webView.frame.origin.y, slot.bounds.origin.y, accuracy: 0.5)
         XCTAssertEqual(webView.frame.size.width, slot.bounds.size.width, accuracy: 0.5)
         XCTAssertEqual(webView.frame.size.height, slot.bounds.size.height, accuracy: 0.5)
+    }
+
+    func testPortalResizePreservesSideDockedInspectorManagedWebViewFrame() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 320),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        let portal = WindowBrowserPortal(window: window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let anchor = NSView(frame: NSRect(x: 40, y: 24, width: 260, height: 180))
+        contentView.addSubview(anchor)
+
+        let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        portal.bind(webView: webView, to: anchor, visibleInUI: true)
+        contentView.layoutSubtreeIfNeeded()
+        portal.synchronizeWebViewForAnchor(anchor)
+
+        guard let slot = webView.superview as? WindowBrowserSlotView else {
+            XCTFail("Expected browser slot")
+            return
+        }
+
+        let initialInspectorWidth: CGFloat = 110
+        let inspectorContainer = NSView(
+            frame: NSRect(
+                x: slot.bounds.width - initialInspectorWidth,
+                y: 0,
+                width: initialInspectorWidth,
+                height: slot.bounds.height
+            )
+        )
+        inspectorContainer.autoresizingMask = [.minXMargin, .height]
+        let inspectorView = WKInspectorProbeView(frame: inspectorContainer.bounds)
+        inspectorView.autoresizingMask = [.width, .height]
+        inspectorContainer.addSubview(inspectorView)
+        slot.addSubview(inspectorContainer)
+
+        webView.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: slot.bounds.width - initialInspectorWidth,
+            height: slot.bounds.height
+        )
+        webView.autoresizingMask = [.width, .height]
+        slot.layoutSubtreeIfNeeded()
+
+        anchor.frame = NSRect(x: 40, y: 24, width: 220, height: 180)
+        contentView.layoutSubtreeIfNeeded()
+        portal.synchronizeWebViewForAnchor(anchor)
+
+        XCTAssertFalse(slot.isHidden, "Resizing the browser pane should keep the hosted browser visible")
+        XCTAssertEqual(
+            webView.frame.maxX,
+            inspectorContainer.frame.minX,
+            accuracy: 0.5,
+            "Portal sync should preserve the side-docked inspector split instead of stretching the page back over the inspector"
+        )
+        XCTAssertLessThan(
+            webView.frame.width,
+            slot.bounds.width,
+            "Side-docked inspector should still own part of the slot after pane resize"
+        )
+    }
+
+    func testHiddenPortalSyncDoesNotStealLocallyHostedDevToolsWebViewDuringResize() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 320),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        let portal = WindowBrowserPortal(window: window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let anchor = NSView(frame: NSRect(x: 40, y: 24, width: 260, height: 180))
+        contentView.addSubview(anchor)
+
+        let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        portal.bind(webView: webView, to: anchor, visibleInUI: true)
+        contentView.layoutSubtreeIfNeeded()
+        portal.synchronizeWebViewForAnchor(anchor)
+        advanceAnimations()
+
+        guard let hiddenPortalSlot = webView.superview as? WindowBrowserSlotView else {
+            XCTFail("Expected browser slot")
+            return
+        }
+
+        portal.updateEntryVisibility(forWebViewId: ObjectIdentifier(webView), visibleInUI: false, zPriority: 0)
+        portal.synchronizeWebViewForAnchor(anchor)
+        advanceAnimations()
+        XCTAssertTrue(hiddenPortalSlot.isHidden, "Hidden portal entry should keep its slot hidden")
+
+        let localInlineSlot = WindowBrowserSlotView(frame: anchor.frame)
+        contentView.addSubview(localInlineSlot)
+
+        let inspectorView = WKInspectorProbeView(
+            frame: NSRect(x: 0, y: 0, width: localInlineSlot.bounds.width, height: 72)
+        )
+        inspectorView.autoresizingMask = [.width]
+        localInlineSlot.addSubview(inspectorView)
+
+        localInlineSlot.addSubview(webView)
+        webView.frame = NSRect(
+            x: 0,
+            y: inspectorView.frame.maxY,
+            width: localInlineSlot.bounds.width,
+            height: localInlineSlot.bounds.height - inspectorView.frame.height
+        )
+        localInlineSlot.layoutSubtreeIfNeeded()
+
+        anchor.frame = NSRect(x: 40, y: 24, width: 220, height: 180)
+        localInlineSlot.frame = anchor.frame
+        contentView.layoutSubtreeIfNeeded()
+        localInlineSlot.layoutSubtreeIfNeeded()
+        portal.synchronizeWebViewForAnchor(anchor)
+
+        XCTAssertTrue(
+            webView.superview === localInlineSlot,
+            "Hidden portal sync should not steal a DevTools-hosted web view back out of local inline hosting during pane resize"
+        )
+        XCTAssertTrue(
+            inspectorView.superview === localInlineSlot,
+            "Hidden portal sync should leave local DevTools companion views in the local inline host"
+        )
+        XCTAssertTrue(hiddenPortalSlot.isHidden, "The retiring hidden portal slot should stay hidden during local inline hosting")
     }
 
     func testPortalHostBoundsBecomeReadyAfterBindingInFrameDrivenHierarchy() {
