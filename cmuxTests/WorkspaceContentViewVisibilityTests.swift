@@ -337,6 +337,45 @@ final class WorkspaceContentViewVisibilityTests: XCTestCase {
         XCTAssertEqual(merged.splitZoomRenderIdentity, "zoom:\(zoomedPaneId.uuidString)")
     }
 
+    func testWorkspaceGraphSnapshotMergeDoesNotRetainZoomedPaneAfterExplicitUnzoom() {
+        let workspaceId = UUID()
+        let zoomedPaneId = UUID()
+        let panelId = UUID()
+
+        let previous = makeWorkspaceGraphSnapshot(
+            workspaceId: workspaceId,
+            panes: [
+                WorkspacePaneGraphState(
+                    paneId: zoomedPaneId,
+                    panelIds: [panelId],
+                    selectedPanelId: panelId
+                )
+            ],
+            focusedPaneId: zoomedPaneId,
+            focusedPanelId: panelId,
+            zoomedPaneId: zoomedPaneId
+        )
+
+        let live = makeWorkspaceGraphSnapshot(
+            workspaceId: workspaceId,
+            panes: [
+                WorkspacePaneGraphState(
+                    paneId: zoomedPaneId,
+                    panelIds: [panelId],
+                    selectedPanelId: panelId
+                )
+            ],
+            focusedPaneId: zoomedPaneId,
+            focusedPanelId: panelId,
+            zoomedPaneId: nil
+        )
+
+        let merged = previous.merged(with: live)
+
+        XCTAssertNil(merged.zoomedPaneId)
+        XCTAssertEqual(merged.splitZoomRenderIdentity, "unzoomed")
+    }
+
     func testWindowGraphStateKeepsSelectedAndRetiringWorkspacesMountedDuringHandoff() {
         let firstWorkspaceId = UUID()
         let secondWorkspaceId = UUID()

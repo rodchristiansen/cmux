@@ -114,6 +114,15 @@ struct WorkspaceGraphSnapshot: Equatable, Sendable {
             }
             return previousFocusedPanelId
         }()
+        let mergedZoomedPaneId = live.zoomedPaneId ?? {
+            guard live.focusedPaneId == nil,
+                  live.focusedPanelId == nil,
+                  let previousZoomedPaneId = zoomedPaneId,
+                  mergedPaneStatesById[previousZoomedPaneId] != nil else {
+                return nil
+            }
+            return previousZoomedPaneId
+        }()
 
         return WorkspaceGraphSnapshot(
             workspaceId: live.workspaceId,
@@ -122,7 +131,7 @@ struct WorkspaceGraphSnapshot: Equatable, Sendable {
             panes: mergedPanes,
             focusedPaneId: mergedFocusedPaneId,
             focusedPanelId: mergedFocusedPanelId,
-            zoomedPaneId: live.zoomedPaneId
+            zoomedPaneId: mergedZoomedPaneId
         )
     }
 }
