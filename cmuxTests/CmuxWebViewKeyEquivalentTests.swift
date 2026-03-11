@@ -10101,34 +10101,70 @@ final class CmuxWebViewDragRoutingTests: XCTestCase {
 }
 
 #if compiler(>=6.2)
-@MainActor
-final class InternalTabDragConfigurationTests: XCTestCase {
-    private func dragOperationValue<T>(_ operations: T, labels: [String]) -> Bool? {
-        let mirror = Mirror(reflecting: operations)
-        for label in labels {
-            if let value = mirror.children.first(where: { $0.label == label })?.value as? Bool {
-                return value
-            }
+@available(macOS 26.0, *)
+private struct DragConfigurationOperationsSnapshot: Equatable {
+    let allowCopy: Bool
+    let allowMove: Bool
+    let allowDelete: Bool
+    let allowAlias: Bool
+}
+
+@available(macOS 26.0, *)
+private enum DragConfigurationSnapshotError: Error {
+    case missingBoolField(primary: String, fallback: String?)
+}
+
+@available(macOS 26.0, *)
+private func dragConfigurationOperationsSnapshot<T>(from operations: T) throws -> DragConfigurationOperationsSnapshot {
+    let mirror = Mirror(reflecting: operations)
+
+    func readBool(_ primary: String, fallback: String? = nil) throws -> Bool {
+        if let value = mirror.descendant(primary) as? Bool {
+            return value
         }
-        return nil
+        if let fallback, let value = mirror.descendant(fallback) as? Bool {
+            return value
+        }
+        throw DragConfigurationSnapshotError.missingBoolField(primary: primary, fallback: fallback)
     }
 
+    return try DragConfigurationOperationsSnapshot(
+        allowCopy: readBool("allowCopy", fallback: "_allowCopy"),
+        allowMove: readBool("allowMove", fallback: "_allowMove"),
+        allowDelete: readBool("allowDelete", fallback: "_allowDelete"),
+        allowAlias: readBool("allowAlias", fallback: "_allowAlias")
+    )
+}
+
+@MainActor
+final class InternalTabDragConfigurationTests: XCTestCase {
     func testDisablesExternalOperationsForInternalTabDrags() throws {
         guard #available(macOS 26.0, *) else {
             throw XCTSkip("Requires macOS 26 drag configuration APIs")
         }
 
         let configuration = InternalTabDragConfigurationProvider.value
+        let withinApp = try dragConfigurationOperationsSnapshot(from: configuration.operationsWithinApp)
+        let outsideApp = try dragConfigurationOperationsSnapshot(from: configuration.operationsOutsideApp)
+        XCTAssertEqual(
+            withinApp,
+            DragConfigurationOperationsSnapshot(
+                allowCopy: false,
+                allowMove: true,
+                allowDelete: false,
+                allowAlias: false
+            )
+        )
 
-        XCTAssertEqual(dragOperationValue(configuration.operationsWithinApp, labels: ["allowCopy"]), false)
-        XCTAssertEqual(dragOperationValue(configuration.operationsWithinApp, labels: ["allowMove"]), true)
-        XCTAssertEqual(dragOperationValue(configuration.operationsWithinApp, labels: ["allowDelete", "_allowDelete"]), false)
-        XCTAssertEqual(dragOperationValue(configuration.operationsWithinApp, labels: ["allowAlias", "_allowAlias"]), false)
-
-        XCTAssertEqual(dragOperationValue(configuration.operationsOutsideApp, labels: ["allowCopy"]), false)
-        XCTAssertEqual(dragOperationValue(configuration.operationsOutsideApp, labels: ["allowMove"]), false)
-        XCTAssertEqual(dragOperationValue(configuration.operationsOutsideApp, labels: ["allowDelete", "_allowDelete"]), false)
-        XCTAssertEqual(dragOperationValue(configuration.operationsOutsideApp, labels: ["allowAlias", "_allowAlias"]), false)
+        XCTAssertEqual(
+            outsideApp,
+            DragConfigurationOperationsSnapshot(
+                allowCopy: false,
+                allowMove: false,
+                allowDelete: false,
+                allowAlias: false
+            )
+        )
     }
 }
 #endif
