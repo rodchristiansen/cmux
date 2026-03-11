@@ -5681,6 +5681,7 @@ final class GhosttySurfaceScrollView: NSView {
     private var framePreservationGeneration: UInt64 = 0
     private var framePreservationCapturedContentsKey: String?
     private var framePreservationCapturedSize: CGSize = .zero
+    private var onNextConfirmedSurfaceFocus: (() -> Void)?
     // Intentionally no focus retry loops: rely on AppKit first-responder and bonsplit selection.
 
     /// Tracks whether keyboard focus should go to the search field or the terminal
@@ -7140,7 +7141,7 @@ final class GhosttySurfaceScrollView: NSView {
         }
 
         let hasUsablePortalGeometry: Bool = {
-            let size = bounds.size
+            let size = frame.size
             return size.width > 1 && size.height > 1
         }()
         let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
@@ -7162,7 +7163,7 @@ final class GhosttySurfaceScrollView: NSView {
             dlog(
                 "focus.ensure.defer surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
                 "reason=hidden_or_tiny hidden=\(isHiddenForFocus ? 1 : 0) " +
-                "frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) attempts=\(attemptsRemaining)"
+                "frame=\(String(format: "%.1fx%.1f", frame.width, frame.height)) attempts=\(attemptsRemaining)"
             )
 #endif
             retry()
@@ -7256,12 +7257,32 @@ final class GhosttySurfaceScrollView: NSView {
         surfaceView.suppressingReparentFocus = false
     }
 
+    var isSuppressingReparentFocus: Bool {
+        surfaceView.suppressingReparentFocus
+    }
+
+    func requiresDeferredProgrammaticFocusCompletion() -> Bool {
+        let hasUsablePortalGeometry = frame.width > 1 && frame.height > 1
+        let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
+        return window == nil || !surfaceView.isVisibleInUI || isHiddenForFocus || !hasUsablePortalGeometry
+    }
+
+    func setOnNextConfirmedSurfaceFocus(_ handler: (() -> Void)?) {
+        onNextConfirmedSurfaceFocus = handler
+    }
+
     /// Returns true if the terminal's actual Ghostty surface view is (or contains) the window first responder.
     /// This is stricter than checking `hostedView` descendants, since the scroll view can sometimes become
     /// first responder transiently while focus is being applied.
     func isSurfaceViewFirstResponder() -> Bool {
         guard let window, let fr = window.firstResponder as? NSView else { return false }
         return fr === surfaceView || fr.isDescendant(of: surfaceView)
+    }
+
+    @discardableResult
+    func makeSurfaceViewFirstResponder() -> Bool {
+        guard let window else { return false }
+        return window.makeFirstResponder(surfaceView)
     }
 
     private func reassertTerminalSurfaceFocus(reason: String) {
@@ -7273,6 +7294,10 @@ final class GhosttySurfaceScrollView: NSView {
         )
 #endif
         terminalSurface.setFocus(true)
+        if let handler = onNextConfirmedSurfaceFocus {
+            onNextConfirmedSurfaceFocus = nil
+            handler()
+        }
         refreshSurfaceAfterFocusIfNeeded(reason: reason)
     }
 
@@ -7299,7 +7324,7 @@ final class GhosttySurfaceScrollView: NSView {
 
     private func applyFirstResponderIfNeeded() {
         let hasUsablePortalGeometry: Bool = {
-            let size = bounds.size
+            let size = frame.size
             return size.width > 1 && size.height > 1
         }()
         let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
@@ -7312,7 +7337,7 @@ final class GhosttySurfaceScrollView: NSView {
             dlog(
                 "focus.apply.skip surface=\(surfaceShort) " +
                 "reason=hidden_or_tiny hidden=\(isHiddenForFocus ? 1 : 0) " +
-                "frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) \(debugWorkspaceFocusSuffix())"
+                "frame=\(String(format: "%.1fx%.1f", frame.width, frame.height)) \(debugWorkspaceFocusSuffix())"
             )
 #endif
             return
