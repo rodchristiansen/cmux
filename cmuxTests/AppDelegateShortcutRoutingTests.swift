@@ -157,6 +157,46 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertTrue(destinationManager.tabs.contains(where: { $0.id == sourceWorkspaceId }))
     }
 
+    func testMoveWorkspaceToExistingWindowPreservesDestinationEngineKind() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let sourceWindowId = appDelegate.createMainWindow(workspaceEngineKind: .graphV1)
+        let destinationWindowId = appDelegate.createMainWindow(workspaceEngineKind: .legacy)
+        defer {
+            closeWindow(withId: sourceWindowId)
+            closeWindow(withId: destinationWindowId)
+        }
+
+        guard let sourceManager = appDelegate.tabManagerFor(windowId: sourceWindowId),
+              let destinationManager = appDelegate.tabManagerFor(windowId: destinationWindowId),
+              let sourceWorkspaceId = sourceManager.selectedTabId else {
+            XCTFail("Expected source and destination window contexts")
+            return
+        }
+
+        let destinationWorkspaceIdsBefore = Set(destinationManager.tabs.map(\.id))
+
+        XCTAssertTrue(
+            appDelegate.moveWorkspaceToWindow(
+                workspaceId: sourceWorkspaceId,
+                windowId: destinationWindowId,
+                focus: true
+            )
+        )
+
+        XCTAssertEqual(sourceManager.workspaceEngineKind, .graphV1)
+        XCTAssertEqual(destinationManager.workspaceEngineKind, .legacy)
+        XCTAssertFalse(sourceManager.tabs.contains(where: { $0.id == sourceWorkspaceId }))
+        XCTAssertTrue(destinationManager.tabs.contains(where: { $0.id == sourceWorkspaceId }))
+        XCTAssertEqual(
+            Set(destinationManager.tabs.map(\.id)),
+            destinationWorkspaceIdsBefore.union([sourceWorkspaceId])
+        )
+    }
+
     func testCmdNUsesEventWindowContextWhenActiveManagerIsStale() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
