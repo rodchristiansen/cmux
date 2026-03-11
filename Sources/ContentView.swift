@@ -8456,6 +8456,122 @@ private struct SidebarFeedbackComposerSheet: View {
     }
 }
 
+enum FeedbackComposerBridgeError: LocalizedError {
+    case invalidEmail
+    case emptyMessage
+    case messageTooLong
+    case tooManyImages
+    case invalidImagePath(String)
+    case submissionFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEmail:
+            return "Enter a valid email address."
+        case .emptyMessage:
+            return "Enter a message before sending."
+        case .messageTooLong:
+            return "Your message is too long."
+        case .tooManyImages:
+            return "You can attach up to 10 images."
+        case .invalidImagePath(let path):
+            return "Could not attach image: \(path)"
+        case .submissionFailed(let message):
+            return message
+        }
+    }
+}
+
+enum FeedbackComposerBridge {
+    static func openComposer(in window: NSWindow? = NSApp.keyWindow ?? NSApp.mainWindow) {
+        NotificationCenter.default.post(name: .feedbackComposerRequested, object: window)
+    }
+
+    static func submit(
+        email: String,
+        message: String,
+        imagePaths: [String]
+    ) async throws -> Int {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard isValidEmail(trimmedEmail) else {
+            throw FeedbackComposerBridgeError.invalidEmail
+        }
+        guard normalizedMessage.isEmpty == false else {
+            throw FeedbackComposerBridgeError.emptyMessage
+        }
+        guard message.count <= FeedbackComposerSettings.maxMessageLength else {
+            throw FeedbackComposerBridgeError.messageTooLong
+        }
+        guard imagePaths.count <= FeedbackComposerSettings.maxAttachmentCount else {
+            throw FeedbackComposerBridgeError.tooManyImages
+        }
+
+        let attachments = try imagePaths.map { rawPath in
+            let resolvedURL = URL(fileURLWithPath: rawPath).standardizedFileURL
+            do {
+                return try FeedbackComposerAttachment(url: resolvedURL)
+            } catch {
+                throw FeedbackComposerBridgeError.invalidImagePath(resolvedURL.path)
+            }
+        }
+
+        do {
+            try await FeedbackComposerClient.submit(
+                email: trimmedEmail,
+                message: normalizedMessage,
+                attachments: attachments
+            )
+        } catch {
+            throw FeedbackComposerBridgeError.submissionFailed(userFacingMessage(for: error))
+        }
+
+        UserDefaults.standard.set(trimmedEmail, forKey: FeedbackComposerSettings.storedEmailKey)
+        return attachments.count
+    }
+
+    private static func isValidEmail(_ rawValue: String) -> Bool {
+        let email = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard email.isEmpty == false else { return false }
+        let pattern = #"^[A-Z0-9a-z._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"#
+        return NSPredicate(format: "SELF MATCHES %@", pattern).evaluate(with: email)
+    }
+
+    private static func userFacingMessage(for error: Error) -> String {
+        guard let submissionError = error as? FeedbackComposerSubmissionError else {
+            return "Couldn't send feedback. Please try again."
+        }
+
+        switch submissionError {
+        case .invalidEndpoint:
+            return "Feedback is unavailable right now. Email founders@manaflow.com instead."
+        case .invalidResponse:
+            return "Couldn't send feedback. Please try again."
+        case .attachmentReadFailed:
+            return "One of the selected files could not be attached."
+        case .attachmentPreparationFailed:
+            return "These images are too large to send together. Remove a few and try again."
+        case .transport(let transportError):
+            if transportError.code == .notConnectedToInternet || transportError.code == .networkConnectionLost {
+                return "Couldn't send feedback. Check your connection and try again."
+            }
+            return "Couldn't send feedback. Please try again."
+        case .rejected(let statusCode):
+            switch statusCode {
+            case 400, 413, 415:
+                return "Check your message and attachments, then try again."
+            case 429:
+                return "Too many feedback attempts. Please try again later."
+            case 500...599:
+                return "Feedback is unavailable right now. Email founders@manaflow.com instead."
+            default:
+                return "Couldn't send feedback. Please try again."
+            }
+        }
+    }
+}
+
 private struct SidebarHelpMenuButton: View {
     private let docsURL = URL(string: "https://cmux.dev/docs")
     private let changelogURL = URL(string: "https://cmux.dev/docs/changelog")
@@ -8621,14 +8737,17 @@ private struct SidebarHelpMenuButton: View {
     private func perform(_ action: SidebarHelpMenuAction) {
         switch action {
         case .keyboardShortcuts:
-            Task { @MainActor in
-                if let appDelegate = AppDelegate.shared {
-                    appDelegate.openPreferencesWindow(
-                        debugSource: "sidebarHelpMenu.keyboardShortcuts",
-                        navigationTarget: .keyboardShortcuts
-                    )
-                } else {
-                    AppDelegate.presentPreferencesWindow(navigationTarget: .keyboardShortcuts)
+            isPopoverPresented = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                Task { @MainActor in
+                    if let appDelegate = AppDelegate.shared {
+                        appDelegate.openPreferencesWindow(
+                            debugSource: "sidebarHelpMenu.keyboardShortcuts",
+                            navigationTarget: .keyboardShortcuts
+                        )
+                    } else {
+                        AppDelegate.presentPreferencesWindow(navigationTarget: .keyboardShortcuts)
+                    }
                 }
             }
         case .docs:
@@ -8651,6 +8770,7 @@ private struct SidebarHelpMenuButton: View {
             isPopoverPresented = false
             onSendFeedback()
         case .welcome:
+            isPopoverPresented = false
             Task { @MainActor in
                 if let appDelegate = AppDelegate.shared {
                     appDelegate.openWelcomeWorkspace()
