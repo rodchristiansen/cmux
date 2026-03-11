@@ -2495,6 +2495,18 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
         return nil
     }
 
+    private func findWindowBrowserSlotView(in root: NSView) -> WindowBrowserSlotView? {
+        if let slot = root as? WindowBrowserSlotView {
+            return slot
+        }
+        for subview in root.subviews {
+            if let slot = findWindowBrowserSlotView(in: subview) {
+                return slot
+            }
+        }
+        return nil
+    }
+
     func testRestoreReopensInspectorAfterAttachWhenPreferredVisible() {
         let (panel, inspector) = makePanelWithInspector()
 
@@ -2787,6 +2799,88 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
             inspectorView.superview === visibleSlot,
             "An off-window replacement host should leave DevTools companion views in the visible local host"
         )
+    }
+
+    func testOffWindowReplacementLocalHostReattachesWhenItJoinsAWindow() {
+        let (panel, _) = makePanelWithInspector()
+        XCTAssertTrue(panel.showDeveloperTools())
+
+        let paneId = PaneID(id: UUID())
+        let representable = WebViewRepresentable(
+            panel: panel,
+            paneId: paneId,
+            shouldAttachWebView: false,
+            useLocalInlineHosting: true,
+            shouldFocusWebView: false,
+            isPanelFocused: true,
+            portalZPriority: 0,
+            paneDropZone: nil,
+            searchOverlay: nil,
+            paneTopChromeHeight: 0
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let visibleHosting = NSHostingView(rootView: representable)
+        visibleHosting.frame = contentView.bounds
+        visibleHosting.autoresizingMask = [.width, .height]
+        contentView.addSubview(visibleHosting)
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        visibleHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let visibleSlot = panel.webView.superview as? WindowBrowserSlotView else {
+            XCTFail("Expected visible local inline slot")
+            return
+        }
+
+        let detachedRoot = NSView(frame: visibleHosting.frame)
+        let replacementHosting = NSHostingView(rootView: representable)
+        replacementHosting.frame = detachedRoot.bounds
+        replacementHosting.autoresizingMask = [.width, .height]
+        detachedRoot.addSubview(replacementHosting)
+        detachedRoot.layoutSubtreeIfNeeded()
+        replacementHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard findHostContainerView(in: replacementHosting) != nil else {
+            XCTFail("Expected off-window replacement host")
+            return
+        }
+
+        visibleHosting.removeFromSuperview()
+        replacementHosting.removeFromSuperview()
+        replacementHosting.frame = contentView.bounds
+        replacementHosting.autoresizingMask = [.width, .height]
+        contentView.addSubview(replacementHosting)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        replacementHosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let replacementSlot = findWindowBrowserSlotView(in: replacementHosting) else {
+            XCTFail("Expected replacement local inline slot")
+            return
+        }
+
+        XCTAssertNil(visibleSlot.window)
+        XCTAssertTrue(
+            panel.webView.superview === replacementSlot,
+            "A replacement local host should reattach the DevTools-hosted web view once it joins a window"
+        )
+        XCTAssertTrue(replacementSlot.window === window)
     }
 }
 
