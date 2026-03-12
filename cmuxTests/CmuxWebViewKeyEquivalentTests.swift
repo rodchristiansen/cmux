@@ -10903,6 +10903,74 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         )
     }
 
+    func testRestorePanelFocusIntentDoesNotRepostSearchFocusWhenFieldAlreadyFocused() {
+        _ = NSApplication.shared
+
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        let hostedView = surface.hostedView
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+        hostedView.frame = contentView.bounds
+        hostedView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostedView)
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        hostedView.setVisibleInUI(true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        let searchState = TerminalSurface.SearchState(needle: "focus")
+        surface.searchState = searchState
+        hostedView.setSearchOverlay(searchState: searchState)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let searchField = findEditableTextField(in: hostedView) else {
+            XCTFail("Expected mounted find text field")
+            return
+        }
+        XCTAssertTrue(window.makeFirstResponder(searchField), "Expected search field to become first responder")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        var searchFocusNotificationCount = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: .ghosttySearchFocus,
+            object: surface,
+            queue: .main
+        ) { _ in
+            searchFocusNotificationCount += 1
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        XCTAssertTrue(
+            hostedView.restorePanelFocusIntent(.findField),
+            "Expected find-field focus intent to restore while search is active"
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertEqual(
+            searchFocusNotificationCount,
+            0,
+            "Already-focused terminal find field should not repost ghosttySearchFocus"
+        )
+    }
+
     @MainActor
     func testKeyboardCopyModeIndicatorMountsAndUnmounts() {
         let surface = TerminalSurface(
