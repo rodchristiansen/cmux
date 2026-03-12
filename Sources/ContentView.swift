@@ -473,6 +473,36 @@ final class FileDropOverlayView: NSView {
         }
     }
 
+    private func clearForwardedMouseDragState(reason: String) {
+#if DEBUG
+        if let forwardedMouseDragButton {
+            dlog("overlay.forwardedDrag.reset reason=\(reason) button=\(String(describing: forwardedMouseDragButton))")
+        }
+#endif
+        forwardedMouseDragTarget = nil
+        forwardedMouseDragButton = nil
+    }
+
+    private func repairForwardedMouseDragStateIfNeeded(for event: NSEvent) {
+        if forwardedMouseDragButton != nil,
+           forwardedMouseDragTarget?.window == nil {
+            clearForwardedMouseDragState(reason: "targetDetached")
+            return
+        }
+
+        if let eventButton = dragButton(for: event),
+           shouldTrackForwardedMouseDragStart(for: event.type),
+           forwardedMouseDragButton == eventButton {
+            clearForwardedMouseDragState(reason: "repeatedMouseDown")
+            return
+        }
+
+        if forwardedMouseDragButton != nil,
+           NSEvent.pressedMouseButtons == 0 {
+            clearForwardedMouseDragState(reason: "buttonsReleased")
+        }
+    }
+
     // MARK: Hit-testing — participation is routed by DragOverlayRoutingPolicy so
     // file-drop, bonsplit tab drags, and sidebar tab reorder drags cannot conflict.
 
@@ -503,6 +533,7 @@ final class FileDropOverlayView: NSView {
     private func forwardEvent(_ event: NSEvent) {
         guard !isForwardingMouseEvent else { return }
         guard let window, let contentView = window.contentView else { return }
+        repairForwardedMouseDragStateIfNeeded(for: event)
         let eventButton = dragButton(for: event)
 
         isForwardingMouseEvent = true
