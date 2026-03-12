@@ -1476,46 +1476,20 @@ final class ZshShellIntegrationHandoffTests: XCTestCase {
         XCTAssertTrue(output.contains("PREEXEC=0"), output)
     }
 
-    func testCmuxTakesOverGhosttyPromptHooksAfterDeferredInit() throws {
+    func testCmuxKeepsGhosttyPromptHooksAfterDeferredInit() throws {
         let output = try runInteractiveZsh(
             cmuxLoadGhosttyIntegration: true,
             cmuxShellIntegration: true,
             command:
                 "(( $+functions[_ghostty_deferred_init] )) && _ghostty_deferred_init >/dev/null 2>&1; " +
-                "(( $+functions[_cmux_take_over_ghostty_prompt_hooks] )) && _cmux_take_over_ghostty_prompt_hooks >/dev/null 2>&1; " +
-                "typeset -i ps1HasA=0 ps1HasB=0; " +
-                "[[ $PS1 == *$'%{\\e]133;A'* ]] && ps1HasA=1; " +
-                "[[ $PS1 == *$'%{\\e]133;B'* ]] && ps1HasB=1; " +
-                "print -r -- \"TAKEOVER=${_CMUX_GHOSTTY_PROMPT_TAKEOVER:-0} PRECMD=${+functions[_ghostty_precmd]} " +
-                "PREEXEC=${+functions[_ghostty_preexec]} PWD=${+functions[_ghostty_report_pwd]} " +
-                "PRECMDS=${(j:,:)precmd_functions} PREEXECS=${(j:,:)preexec_functions} " +
-                "PS1A=${ps1HasA} PS1B=${ps1HasB}\""
+                "print -r -- \"PRECMD=${+functions[_ghostty_precmd]} PREEXEC=${+functions[_ghostty_preexec]} " +
+                "PRECMDS=${(j:,:)precmd_functions} PREEXECS=${(j:,:)preexec_functions}\""
         )
 
-        XCTAssertTrue(output.contains("TAKEOVER=1"), output)
         XCTAssertTrue(output.contains("PRECMD=1"), output)
         XCTAssertTrue(output.contains("PREEXEC=1"), output)
-        XCTAssertTrue(output.contains("PWD=1"), output)
-        XCTAssertTrue(output.contains("PS1A=0"), output)
-        XCTAssertTrue(output.contains("PS1B=0"), output)
-        XCTAssertFalse(output.contains("_ghostty_precmd"), output)
-        XCTAssertFalse(output.contains("_ghostty_preexec"), output)
-    }
-
-    func testCmuxGhosttyPromptTakeoverEmitsSemanticPromptMarkersDirectly() throws {
-        let output = try runInteractiveZsh(
-            cmuxLoadGhosttyIntegration: true,
-            cmuxShellIntegration: true,
-            command:
-                "(( $+functions[_ghostty_deferred_init] )) && _ghostty_deferred_init >/dev/null 2>&1; " +
-                "(( $+functions[_cmux_take_over_ghostty_prompt_hooks] )) && _cmux_take_over_ghostty_prompt_hooks >/dev/null 2>&1; " +
-                "unfunction _ghostty_report_pwd >/dev/null 2>&1 || true; " +
-                "_ghostty_fd=1; _ghostty_state=0; " +
-                "_cmux_ghostty_precmd 0; _cmux_ghostty_preexec 'echo hi'"
-        )
-
-        XCTAssertTrue(output.contains("\u{001B}]133;A;cl=line\u{0007}"), output)
-        XCTAssertTrue(output.contains("\u{001B}]133;C\u{0007}"), output)
+        XCTAssertTrue(output.contains("_ghostty_precmd"), output)
+        XCTAssertTrue(output.contains("_ghostty_preexec"), output)
     }
 
     func testCmuxPromptMarkerFollowsLaterPrecmdOutput() throws {
@@ -1526,13 +1500,14 @@ final class ZshShellIntegrationHandoffTests: XCTestCase {
                 "PS1='PROMPT%# '; " +
                 "late_precmd() { print -rn -- 'LATE'; }; " +
                 "precmd_functions+=(late_precmd); " +
+                "(( $+functions[_ghostty_deferred_init] )) && _ghostty_deferred_init >/dev/null 2>&1; " +
                 "_ghostty_fd=1; " +
                 "for fn in \"${precmd_functions[@]}\"; do \"$fn\"; done; " +
                 "print -P -- \"$PS1\""
         )
 
         let lateRange = try XCTUnwrap(output.range(of: "LATE"), output)
-        let promptMarker = try XCTUnwrap(output.range(of: "\u{001B}]133;P"), output)
+        let promptMarker = try XCTUnwrap(output.range(of: "\u{001B}]133;A"), output)
         XCTAssertGreaterThan(
             output.distance(from: output.startIndex, to: promptMarker.lowerBound),
             output.distance(from: output.startIndex, to: lateRange.lowerBound),
@@ -1546,6 +1521,7 @@ final class ZshShellIntegrationHandoffTests: XCTestCase {
             cmuxShellIntegration: true,
             command:
                 "PS1='PROMPT%# '; " +
+                "(( $+functions[_ghostty_deferred_init] )) && _ghostty_deferred_init >/dev/null 2>&1; " +
                 "unfunction _ghostty_zle_line_init >/dev/null 2>&1 || true; " +
                 "_ghostty_fd=1; " +
                 "for fn in \"${precmd_functions[@]}\"; do \"$fn\"; done; " +
