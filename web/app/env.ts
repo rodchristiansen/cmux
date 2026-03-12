@@ -4,7 +4,7 @@ import { z } from "zod";
 export const env = createEnv({
   server: {
     RESEND_API_KEY: z.string().min(1),
-    CMUX_FEEDBACK_FROM_EMAIL: z.string().email().optional(),
+    CMUX_FEEDBACK_FROM_EMAIL: z.string().email(),
     CMUX_FEEDBACK_RATE_LIMIT_ID: z.string().min(1),
   },
   runtimeEnv: {

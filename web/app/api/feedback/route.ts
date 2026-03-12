@@ -1,6 +1,6 @@
 import { checkRateLimit } from "@vercel/firewall";
 import { NextResponse } from "next/server";
-import { Resend, type Attachment, type CreateEmailOptions } from "resend";
+import { Resend } from "resend";
 import { z } from "zod";
 
 import { env } from "@/app/env";
@@ -9,7 +9,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const feedbackRecipient = "feedback@manaflow.com";
-const resendDefaultFromEmail = "onboarding@resend.dev";
 const maxAttachmentCount = 10;
 const maxAttachmentBytes = 4 * 1024 * 1024;
 // Keep multipart requests below Vercel Functions' 4.5 MB request-body limit.
@@ -40,15 +39,6 @@ type PreparedAttachment = {
   contentType: string;
   filename: string;
   size: number;
-};
-
-type FeedbackEmailMessage = {
-  attachments: Attachment[];
-  html: string;
-  replyTo: string;
-  subject: string;
-  text: string;
-  to: string[];
 };
 
 export async function POST(request: Request) {
@@ -111,7 +101,9 @@ export async function POST(request: Request) {
   const subject = buildSubject(email, message, appVersion);
   const attachments = attachmentsResult.attachments;
   const resend = new Resend(feedbackConfig.resendApiKey);
-  const error = await sendFeedbackEmail(resend, feedbackConfig.fromEmail, {
+
+  const { error } = await resend.emails.send({
+    from: `Manaflow <${feedbackConfig.fromEmail}>`,
     to: [feedbackRecipient],
     replyTo: email,
     subject,
@@ -161,7 +153,7 @@ export async function POST(request: Request) {
 
 function resolveFeedbackConfig() {
   const resendApiKey = env.RESEND_API_KEY;
-  const fromEmail = env.CMUX_FEEDBACK_FROM_EMAIL ?? resendDefaultFromEmail;
+  const fromEmail = env.CMUX_FEEDBACK_FROM_EMAIL;
   const rateLimitId = env.CMUX_FEEDBACK_RATE_LIMIT_ID;
 
   if (!resendApiKey || !fromEmail || !rateLimitId) {
@@ -173,86 +165,6 @@ function resolveFeedbackConfig() {
     fromEmail,
     rateLimitId,
   };
-}
-
-async function sendFeedbackEmail(
-  resend: Resend,
-  fromEmail: string,
-  message: FeedbackEmailMessage,
-) {
-  const firstAttempt = await resend.emails.send(
-    buildFeedbackEmailRequest(fromEmail, message),
-  );
-
-  if (!firstAttempt.error) {
-    return null;
-  }
-
-  if (!shouldRetryWithDefaultSender(firstAttempt.error, fromEmail)) {
-    return firstAttempt.error;
-  }
-
-  console.warn("feedback.route.resend_retrying_with_default_sender", {
-    configuredFromEmail: fromEmail,
-    fallbackFromEmail: resendDefaultFromEmail,
-    error: firstAttempt.error,
-  });
-
-  const fallbackAttempt = await resend.emails.send(
-    buildFeedbackEmailRequest(resendDefaultFromEmail, message),
-  );
-
-  return fallbackAttempt.error ?? null;
-}
-
-function buildFeedbackEmailRequest(
-  fromEmail: string,
-  message: FeedbackEmailMessage,
-): CreateEmailOptions {
-  return {
-    from: formatFeedbackSender(fromEmail),
-    to: message.to,
-    replyTo: message.replyTo,
-    subject: message.subject,
-    text: message.text,
-    html: message.html,
-    attachments: message.attachments,
-  };
-}
-
-function formatFeedbackSender(fromEmail: string) {
-  return `Manaflow <${fromEmail}>`;
-}
-
-function shouldRetryWithDefaultSender(error: unknown, fromEmail: string) {
-  if (fromEmail === resendDefaultFromEmail) {
-    return false;
-  }
-
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  const statusCode =
-    "statusCode" in error && typeof error.statusCode === "number"
-      ? error.statusCode
-      : null;
-  const message =
-    "message" in error && typeof error.message === "string"
-      ? error.message.toLowerCase()
-      : "";
-  const domain = emailDomain(fromEmail);
-
-  return (
-    statusCode === 403 &&
-    domain.length > 0 &&
-    message.includes(`not authorized to send emails from ${domain}`)
-  );
-}
-
-function emailDomain(email: string) {
-  const atIndex = email.lastIndexOf("@");
-  return atIndex >= 0 ? email.slice(atIndex + 1).toLowerCase() : "";
 }
 
 function getString(formData: FormData, key: string) {
