@@ -1518,6 +1518,43 @@ final class ZshShellIntegrationHandoffTests: XCTestCase {
         XCTAssertTrue(output.contains("\u{001B}]133;C\u{0007}"), output)
     }
 
+    func testCmuxPromptMarkerFollowsLaterPrecmdOutput() throws {
+        let output = try runInteractiveZsh(
+            cmuxLoadGhosttyIntegration: true,
+            cmuxShellIntegration: true,
+            command:
+                "PS1='PROMPT%# '; " +
+                "late_precmd() { print -rn -- 'LATE'; }; " +
+                "precmd_functions+=(late_precmd); " +
+                "_ghostty_fd=1; " +
+                "for fn in \"${precmd_functions[@]}\"; do \"$fn\"; done; " +
+                "print -P -- \"$PS1\""
+        )
+
+        let lateRange = try XCTUnwrap(output.range(of: "LATE"), output)
+        let promptMarker = try XCTUnwrap(output.range(of: "\u{001B}]133;P"), output)
+        XCTAssertGreaterThan(
+            output.distance(from: output.startIndex, to: promptMarker.lowerBound),
+            output.distance(from: output.startIndex, to: lateRange.lowerBound),
+            output
+        )
+    }
+
+    func testCmuxPromptDrawKeepsInputMarkerWithoutZLELineInit() throws {
+        let output = try runInteractiveZsh(
+            cmuxLoadGhosttyIntegration: true,
+            cmuxShellIntegration: true,
+            command:
+                "PS1='PROMPT%# '; " +
+                "unfunction _ghostty_zle_line_init >/dev/null 2>&1 || true; " +
+                "_ghostty_fd=1; " +
+                "for fn in \"${precmd_functions[@]}\"; do \"$fn\"; done; " +
+                "print -P -- \"$PS1\""
+        )
+
+        XCTAssertTrue(output.contains("\u{001B}]133;B\u{0007}"), output)
+    }
+
     private func runInteractiveZsh(
         cmuxLoadGhosttyIntegration: Bool,
         cmuxShellIntegration: Bool = false,
