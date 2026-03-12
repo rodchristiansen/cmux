@@ -3610,13 +3610,7 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
         return nil
     }
 
-    func testCommandFFiresMenuShortcutBeforeGhosttyBinding() {
-        let previousMenu = NSApp.mainMenu
-        defer { NSApp.mainMenu = previousMenu }
-
-        let spy = ActionSpy()
-        installMenu(spy: spy)
-
+    private func makeTerminalSurfaceWindow() -> (surface: TerminalSurface, hostedView: GhosttySurfaceScrollView, surfaceView: GhosttyNSView, window: NSWindow)? {
         let surface = TerminalSurface(
             tabId: UUID(),
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
@@ -3625,8 +3619,7 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
         )
         let hostedView = surface.hostedView
         guard let surfaceView = terminalSurfaceView(in: hostedView) else {
-            XCTFail("Expected Ghostty surface view")
-            return
+            return nil
         }
 
         let window = NSWindow(
@@ -3635,11 +3628,8 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
-        defer { window.orderOut(nil) }
-
         guard let contentView = window.contentView else {
-            XCTFail("Expected content view")
-            return
+            return nil
         }
         hostedView.frame = contentView.bounds
         hostedView.autoresizingMask = [.width, .height]
@@ -3650,6 +3640,56 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
         contentView.layoutSubtreeIfNeeded()
         hostedView.setVisibleInUI(true)
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        return (surface, hostedView, surfaceView, window)
+    }
+
+    private func makeManagedTerminalWindow() -> (manager: TabManager, panel: TerminalPanel, surfaceView: GhosttyNSView, window: NSWindow)? {
+        let manager = TabManager()
+        guard let workspace = manager.selectedWorkspace,
+              let panel = workspace.focusedTerminalPanel else {
+            return nil
+        }
+
+        let hostedView = panel.hostedView
+        guard let surfaceView = terminalSurfaceView(in: hostedView) else {
+            return nil
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        guard let contentView = window.contentView else {
+            return nil
+        }
+        hostedView.frame = contentView.bounds
+        hostedView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostedView)
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        hostedView.setVisibleInUI(true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        return (manager, panel, surfaceView, window)
+    }
+
+    func testCommandFFiresMenuShortcutBeforeGhosttyBinding() {
+        let previousMenu = NSApp.mainMenu
+        defer { NSApp.mainMenu = previousMenu }
+
+        let spy = ActionSpy()
+        installMenu(spy: spy)
+
+        guard let (_, hostedView, surfaceView, window) = makeTerminalSurfaceWindow() else {
+            XCTFail("Expected Ghostty surface view")
+            return
+        }
+        defer { window.orderOut(nil) }
 
         XCTAssertTrue(window.makeFirstResponder(surfaceView), "Expected terminal to be first responder")
 
@@ -3671,6 +3711,55 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
 
         XCTAssertTrue(surfaceView.performKeyEquivalent(with: event))
         XCTAssertEqual(spy.invocationCount, 1, "Cmd-F should fire the app menu before Ghostty bindings")
+    }
+
+    func testDirectTerminalFindShortcutDoesNotDismissExistingFindOverlay() {
+        guard let (surface, _, surfaceView, window) = makeTerminalSurfaceWindow() else {
+            XCTFail("Expected Ghostty surface view")
+            return
+        }
+        defer { window.orderOut(nil) }
+
+        surface.searchState = TerminalSurface.SearchState()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertNotNil(surface.searchState)
+
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "f",
+            charactersIgnoringModifiers: "f",
+            isARepeat: false,
+            keyCode: 3
+        ) else {
+            XCTFail("Expected Cmd-F event")
+            return
+        }
+
+        XCTAssertTrue(handleTerminalFindShortcutEquivalent(event: event, ghosttyView: surfaceView, mainMenu: nil))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertNotNil(surface.searchState, "Repeated direct terminal Find should keep the existing overlay visible")
+    }
+
+    func testTabManagerStartSearchDoesNotDismissExistingFindOverlay() {
+        guard let (manager, panel, _, window) = makeManagedTerminalWindow() else {
+            XCTFail("Expected managed terminal surface view")
+            return
+        }
+        defer { window.orderOut(nil) }
+
+        panel.searchState = TerminalSurface.SearchState()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        manager.startSearch()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertNotNil(panel.searchState, "Repeated menu terminal Find should keep the existing overlay visible")
     }
 }
 
