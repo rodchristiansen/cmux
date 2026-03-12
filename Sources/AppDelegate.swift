@@ -1705,7 +1705,8 @@ enum TerminalFindShortcutAction {
 func terminalFindShortcutAction(
     flags: NSEvent.ModifierFlags,
     chars: String,
-    keyCode: UInt16
+    keyCode: UInt16,
+    layoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
 ) -> TerminalFindShortcutAction? {
     let normalizedFlags = flags.intersection(.deviceIndependentFlagsMask)
     guard normalizedFlags.contains(.command),

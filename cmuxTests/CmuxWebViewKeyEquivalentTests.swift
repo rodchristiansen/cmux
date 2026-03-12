@@ -3393,6 +3393,33 @@ final class FullScreenShortcutTests: XCTestCase {
     }
 }
 
+final class TerminalFindShortcutActionTests: XCTestCase {
+    func testMatchesFindWhenCommandAwareLayoutTranslatesNonQwertyKeyToF() {
+        XCTAssertEqual(
+            terminalFindShortcutAction(
+                flags: [.command],
+                chars: "k",
+                keyCode: 40,
+                layoutCharacterProvider: { _, modifierFlags in
+                    modifierFlags.contains(.command) ? "f" : "k"
+                }
+            ),
+            .start
+        )
+    }
+
+    func testDoesNotFallbackToAnsiFWhenCommandAwareLayoutMapsToDifferentShortcut() {
+        XCTAssertNil(
+            terminalFindShortcutAction(
+                flags: [.command],
+                chars: "",
+                keyCode: 3,
+                layoutCharacterProvider: { _, _ in "u" }
+            )
+        )
+    }
+}
+
 final class BrowserZoomShortcutActionTests: XCTestCase {
     func testZoomInSupportsEqualsAndPlusVariants() {
         XCTAssertEqual(
