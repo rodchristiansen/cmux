@@ -3071,6 +3071,7 @@ struct SettingsView: View {
     @AppStorage(NotificationSoundSettings.customCommandKey) private var notificationCustomCommand = NotificationSoundSettings.defaultCustomCommand
     @AppStorage(NotificationBadgeSettings.dockBadgeEnabledKey) private var notificationDockBadgeEnabled = NotificationBadgeSettings.defaultDockBadgeEnabled
     @AppStorage(NotificationPaneRingSettings.enabledKey) private var notificationPaneRingEnabled = NotificationPaneRingSettings.defaultEnabled
+    @AppStorage(NotificationPaneFlashSettings.enabledKey) private var notificationPaneFlashEnabled = NotificationPaneFlashSettings.defaultEnabled
     @AppStorage(QuitWarningSettings.warnBeforeQuitKey) private var warnBeforeQuitShortcut = QuitWarningSettings.defaultWarnBeforeQuit
     @AppStorage(CommandPaletteRenameSelectionSettings.selectAllOnFocusKey)
     private var commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
@@ -3512,6 +3513,17 @@ struct SettingsView: View {
                             subtitle: String(localized: "settings.notifications.paneRing.subtitle", defaultValue: "Show a blue ring around panes with unread notifications.")
                         ) {
                             Toggle("", isOn: $notificationPaneRingEnabled)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.notifications.paneFlash.title", defaultValue: "Pane Flash"),
+                            subtitle: String(localized: "settings.notifications.paneFlash.subtitle", defaultValue: "Briefly flash a blue outline when cmux highlights a pane.")
+                        ) {
+                            Toggle("", isOn: $notificationPaneFlashEnabled)
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
@@ -4383,6 +4395,7 @@ struct SettingsView: View {
         notificationCustomCommand = NotificationSoundSettings.defaultCustomCommand
         notificationDockBadgeEnabled = NotificationBadgeSettings.defaultDockBadgeEnabled
         notificationPaneRingEnabled = NotificationPaneRingSettings.defaultEnabled
+        notificationPaneFlashEnabled = NotificationPaneFlashSettings.defaultEnabled
         warnBeforeQuitShortcut = QuitWarningSettings.defaultWarnBeforeQuit
         commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
         ShortcutHintDebugSettings.resetVisibilityDefaults()

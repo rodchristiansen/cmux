@@ -44917,6 +44917,40 @@
         }
       }
     },
+    "settings.notifications.paneFlash.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Briefly flash a blue outline when cmux highlights a pane."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "cmux がペインを強調表示するときに短い青いアウトラインを表示します。"
+          }
+        }
+      }
+    },
+    "settings.notifications.paneFlash.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pane Flash"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ペインフラッシュ"
+          }
+        }
+      }
+    },
     "settings.notifications.paneRing.title": {
       "extractionState": "manual",
       "localizations": {

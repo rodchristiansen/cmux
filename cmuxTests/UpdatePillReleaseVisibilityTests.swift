@@ -203,3 +203,29 @@ final class NotificationPaneRingSettingsTests: XCTestCase {
         XCTAssertFalse(NotificationPaneRingSettings.isEnabled(defaults: defaults))
     }
 }
+
+final class NotificationPaneFlashSettingsTests: XCTestCase {
+    func testDefaultsToEnabledWhenUnset() {
+        let suiteName = "NotificationPaneFlashSettingsTests.Default.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Failed to create isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(NotificationPaneFlashSettings.isEnabled(defaults: defaults))
+    }
+
+    func testReadsPersistedDisabledValue() {
+        let suiteName = "NotificationPaneFlashSettingsTests.Disabled.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Failed to create isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(false, forKey: NotificationPaneFlashSettings.enabledKey)
+
+        XCTAssertFalse(NotificationPaneFlashSettings.isEnabled(defaults: defaults))
+    }
+}
