@@ -545,16 +545,16 @@
       "badgeChanged": "Geändert",
       "badgeFixed": "Behoben",
       "badgeContributors": "Mitwirkende",
-      "v0.62.0": {
+      "v0_62_0": {
         "title": "Markdown-Viewer, Browser-Suche, Vi-Kopiermodus und Lokalisierung"
       },
-      "v0.61.0": {
+      "v0_61_0": {
         "title": "Tab-Farben, Befehlspalette, Arbeitsbereiche anheften"
       },
-      "v0.60.0": {
+      "v0_60_0": {
         "title": "Tab-Kontextmenü, DevTools, Benachrichtigungsringe, CJK-Eingabe"
       },
-      "v0.32.0": {
+      "v0_32_0": {
         "title": "Seitenleisten-Metadaten"
       }
     },

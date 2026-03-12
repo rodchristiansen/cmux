@@ -545,7 +545,7 @@
       "badgeChanged": "变更",
       "badgeFixed": "修复",
       "badgeContributors": "贡献者",
-      "v0.62.0": {
+      "v0_62_0": {
         "title": "Markdown 查看器、浏览器搜索、Vi 复制模式和本地化",
         "markdownViewer": {
           "title": "Markdown 查看器",
@@ -568,7 +568,7 @@
           "description": "cmux 现支持日语及另外 16 种语言，应用内语言设置可在不更改 macOS 系统设置的情况下切换 UI 语言。"
         }
       },
-      "v0.61.0": {
+      "v0_61_0": {
         "title": "标签颜色、命令面板、固定工作区",
         "tabColors": {
           "title": "标签颜色",
@@ -591,7 +591,7 @@
           "description": "侧边栏现显示每个工作区的更多上下文：PR 链接、监听端口、git 分支和所有面板的工作目录。"
         }
       },
-      "v0.60.0": {
+      "v0_60_0": {
         "title": "标签右键菜单、DevTools、通知环、CJK 输入",
         "tabContextMenu": {
           "title": "标签右键菜单",
@@ -614,7 +614,7 @@
           "description": "Claude Code 集成现默认启用。每个工作区都有独立的路由上下文，agent 可通过 API 读取终端屏幕内容。"
         }
       },
-      "v0.32.0": {
+      "v0_32_0": {
         "title": "侧边栏元数据",
         "sidebarMetadata": {
           "title": "侧边栏元数据",

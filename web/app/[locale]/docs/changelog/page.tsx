@@ -172,9 +172,10 @@ function FeatureList({
     <div style={{ paddingTop: 20, display: "flex", flexDirection: "column", gap: 24 }}>
       {media.features.map((feature, i) => {
         const key = feature.key;
-        const title = key ? t(`v${version}.${key}.title`) : feature.title;
+        const vk = versionKey(version);
+        const title = key ? t(`${vk}.${key}.title`) : feature.title;
         const description = key
-          ? t(`v${version}.${key}.description`)
+          ? t(`${vk}.${key}.description`)
           : feature.description;
         return (
           <div key={i}>
@@ -262,6 +263,10 @@ function SectionBadge({
   );
 }
 
+function versionKey(version: string): string {
+  return `v${version.replaceAll(".", "_")}`;
+}
+
 export default function ChangelogPage() {
   const t = useTranslations("docs.changelog");
   const locale = useLocale();
@@ -303,7 +308,7 @@ export default function ChangelogPage() {
 
               {media?.title && (
                 <div style={{ paddingTop: 12, margin: 0, fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.025em" }}>
-                  {t(`v${v.version}.title`)}
+                  {t(`${versionKey(v.version)}.title`)}
                 </div>
               )}
 
