@@ -542,6 +542,7 @@ final class WorkspaceContentViewVisibilityTests: XCTestCase {
         panes: [WorkspacePaneGraphState] = [],
         focusedPaneId: UUID? = nil,
         focusedPanelId: UUID? = nil,
+        pendingTerminalFocusHandoff: WorkspaceTerminalFocusHandoffState? = nil,
         zoomedPaneId: UUID? = nil
     ) -> WorkspaceGraphSnapshot {
         let paneNodes = panes.map { pane in
@@ -583,6 +584,7 @@ final class WorkspaceContentViewVisibilityTests: XCTestCase {
             panes: panes,
             focusedPaneId: focusedPaneId,
             focusedPanelId: focusedPanelId,
+            pendingTerminalFocusHandoff: pendingTerminalFocusHandoff,
             zoomedPaneId: zoomedPaneId
         )
     }

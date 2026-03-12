@@ -54,6 +54,11 @@ struct WorkspacePaneGraphState: Equatable, Sendable {
     let selectedPanelId: UUID?
 }
 
+struct WorkspaceTerminalFocusHandoffState: Equatable, Sendable {
+    let sourcePanelId: UUID
+    let targetPanelId: UUID
+}
+
 struct WorkspaceGraphSnapshot: Equatable, Sendable {
     let workspaceId: UUID
     let paneTree: ExternalTreeNode
@@ -61,6 +66,7 @@ struct WorkspaceGraphSnapshot: Equatable, Sendable {
     let panes: [WorkspacePaneGraphState]
     let focusedPaneId: UUID?
     let focusedPanelId: UUID?
+    let pendingTerminalFocusHandoff: WorkspaceTerminalFocusHandoffState?
     let zoomedPaneId: UUID?
 
     var isSplit: Bool {
@@ -123,6 +129,14 @@ struct WorkspaceGraphSnapshot: Equatable, Sendable {
             }
             return previousZoomedPaneId
         }()
+        let mergedPendingTerminalFocusHandoff = live.pendingTerminalFocusHandoff ?? {
+            guard let previousPendingTerminalFocusHandoff = pendingTerminalFocusHandoff,
+                  allPanelIds.contains(previousPendingTerminalFocusHandoff.sourcePanelId),
+                  allPanelIds.contains(previousPendingTerminalFocusHandoff.targetPanelId) else {
+                return nil
+            }
+            return previousPendingTerminalFocusHandoff
+        }()
 
         return WorkspaceGraphSnapshot(
             workspaceId: live.workspaceId,
@@ -131,6 +145,7 @@ struct WorkspaceGraphSnapshot: Equatable, Sendable {
             panes: mergedPanes,
             focusedPaneId: mergedFocusedPaneId,
             focusedPanelId: mergedFocusedPanelId,
+            pendingTerminalFocusHandoff: mergedPendingTerminalFocusHandoff,
             zoomedPaneId: mergedZoomedPaneId
         )
     }

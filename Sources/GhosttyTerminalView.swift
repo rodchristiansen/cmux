@@ -4207,10 +4207,18 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             .map { String($0.uuidString.prefix(5)) } ?? "nil"
         let focusedPanelShort = workspace.focusedPanelId
             .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let graphFocusedPanelShort = workspace.graphSnapshot().focusedPanelId
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let pendingSourcePanelShort = workspace.graphSnapshot().pendingTerminalFocusHandoff
+            .map { String($0.sourcePanelId.uuidString.prefix(5)) } ?? "nil"
+        let pendingTargetPanelShort = workspace.graphSnapshot().pendingTerminalFocusHandoff
+            .map { String($0.targetPanelId.uuidString.prefix(5)) } ?? "nil"
 
         return
             "workspace=\(workspaceShort) pane=\(paneShort) focusedPane=\(focusedPaneShort) " +
             "selectedPanel=\(selectedPanelShort) focusedPanel=\(focusedPanelShort) " +
+            "graphFocusedPanel=\(graphFocusedPanelShort) " +
+            "pendingSourcePanel=\(pendingSourcePanelShort) pendingTargetPanel=\(pendingTargetPanelShort) " +
             "firstResponderPanel=\(firstResponderPanel)"
     }
 #endif
@@ -6852,7 +6860,8 @@ final class GhosttySurfaceScrollView: NSView {
                   let panelId = surfaceView.terminalSurface?.id else {
                 return active
             }
-            let modelTargetsThisSurface = matchesCurrentTerminalFocusTarget(tabId: tabId, surfaceId: panelId)
+            let focusRole = currentWorkspaceTerminalFocusRole(tabId: tabId, surfaceId: panelId)
+            let modelTargetsThisSurface = focusRole == .active
             if active {
                 return modelTargetsThisSurface
             }
@@ -7176,18 +7185,7 @@ final class GhosttySurfaceScrollView: NSView {
             retry()
             return
         }
-
-        guard let tab = tabManager.tabs.first(where: { $0.id == tabId }),
-              let tabIdForSurface = tab.surfaceIdFromPanelId(surfaceId),
-              let paneId = tab.bonsplitController.allPaneIds.first(where: { paneId in
-                  tab.bonsplitController.tabs(inPane: paneId).contains(where: { $0.id == tabIdForSurface })
-              }) else {
-            retry()
-            return
-        }
-
-        guard tab.bonsplitController.selectedTab(inPane: paneId)?.id == tabIdForSurface,
-              tab.bonsplitController.focusedPaneId == paneId else {
+        guard currentWorkspaceTerminalFocusRole(tabId: tabId, surfaceId: surfaceId) != .inactive else {
             retry()
             return
         }
@@ -7231,20 +7229,17 @@ final class GhosttySurfaceScrollView: NSView {
         }
     }
 
-    private func matchesCurrentTerminalFocusTarget(tabId: UUID, surfaceId: UUID) -> Bool {
+    private func currentWorkspaceTerminalFocusRole(
+        tabId: UUID,
+        surfaceId: UUID
+    ) -> Workspace.TerminalFocusRole {
         guard let delegate = AppDelegate.shared,
               let tabManager = delegate.tabManagerFor(tabId: tabId) ?? delegate.tabManager,
               tabManager.selectedTabId == tabId,
-              let tab = tabManager.tabs.first(where: { $0.id == tabId }),
-              let tabIdForSurface = tab.surfaceIdFromPanelId(surfaceId),
-              let paneId = tab.bonsplitController.allPaneIds.first(where: { paneId in
-                  tab.bonsplitController.tabs(inPane: paneId).contains(where: { $0.id == tabIdForSurface })
-              }) else {
-            return false
+              let tab = tabManager.tabs.first(where: { $0.id == tabId }) else {
+            return .inactive
         }
-
-        return tab.bonsplitController.selectedTab(inPane: paneId)?.id == tabIdForSurface &&
-            tab.bonsplitController.focusedPaneId == paneId
+        return tab.terminalFocusRole(for: surfaceId)
     }
 
     /// Suppress the surface view's onFocus callback and ghostty_surface_set_focus during
@@ -7284,6 +7279,15 @@ final class GhosttySurfaceScrollView: NSView {
         guard let window else { return false }
         return window.makeFirstResponder(surfaceView)
     }
+
+#if DEBUG
+    @discardableResult
+    func debugConfirmPendingSurfaceFocusIfFirstResponder() -> Bool {
+        guard isSurfaceViewFirstResponder() else { return false }
+        reassertTerminalSurfaceFocus(reason: "debugConfirmPendingSurfaceFocus")
+        return true
+    }
+#endif
 
     private func reassertTerminalSurfaceFocus(reason: String) {
         guard let terminalSurface = surfaceView.terminalSurface else { return }
@@ -7329,8 +7333,15 @@ final class GhosttySurfaceScrollView: NSView {
         }()
         let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
         let surfaceShort = surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil"
+        let focusRole: Workspace.TerminalFocusRole = {
+            guard let tabId = surfaceView.tabId,
+                  let panelId = surfaceView.terminalSurface?.id else {
+                return .inactive
+            }
+            return currentWorkspaceTerminalFocusRole(tabId: tabId, surfaceId: panelId)
+        }()
 
-        guard isActive else { return }
+        guard isActive || focusRole == .pending else { return }
         guard surfaceView.isVisibleInUI else { return }
         guard !isHiddenForFocus, hasUsablePortalGeometry else {
 #if DEBUG
@@ -7343,9 +7354,7 @@ final class GhosttySurfaceScrollView: NSView {
             return
         }
         guard let window, window.isKeyWindow else { return }
-        guard let tabId = surfaceView.tabId,
-              let panelId = surfaceView.terminalSurface?.id,
-              matchesCurrentTerminalFocusTarget(tabId: tabId, surfaceId: panelId) else {
+        guard focusRole != .inactive else {
 #if DEBUG
             dlog(
                 "focus.apply.skip surface=\(surfaceShort) " +

@@ -4993,6 +4993,138 @@ final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
             "Expected replacement pane to become first responder once it has usable geometry"
         )
     }
+
+    func testProgrammaticSplitSelectionTracksPendingHandoffUntilReplacementActuallyBecomesFirstResponder() {
+        let previousSharedAppDelegate = AppDelegate.shared
+        let sharedAppDelegate = previousSharedAppDelegate ?? AppDelegate()
+        let previousTabManager = sharedAppDelegate.tabManager
+        AppDelegate.shared = sharedAppDelegate
+
+        let manager = TabManager()
+        sharedAppDelegate.tabManager = manager
+        defer {
+            sharedAppDelegate.tabManager = previousTabManager
+            AppDelegate.shared = previousSharedAppDelegate
+        }
+
+        guard let workspace = manager.selectedWorkspace,
+              let sourcePanelId = workspace.focusedPanelId,
+              let sourcePanel = workspace.terminalPanel(for: sourcePanelId),
+              let replacementPanel = workspace.newTerminalSplit(
+                from: sourcePanelId,
+                orientation: .horizontal,
+                focus: false
+              ) else {
+            XCTFail("Expected workspace split setup to succeed")
+            return
+        }
+
+        let window = makeWindow()
+        defer { window.orderOut(nil) }
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        sourcePanel.hostedView.frame = NSRect(x: 0, y: 0, width: 180, height: 220)
+        sourcePanel.hostedView.setVisibleInUI(true)
+        replacementPanel.hostedView.frame = NSRect(x: 180, y: 0, width: 0, height: 0)
+        replacementPanel.hostedView.setBoundsSize(NSSize(width: 180, height: 220))
+        replacementPanel.hostedView.setVisibleInUI(true)
+        contentView.addSubview(sourcePanel.hostedView)
+        contentView.addSubview(replacementPanel.hostedView)
+
+        guard let sourceSurfaceView = surfaceView(in: sourcePanel.hostedView) else {
+            XCTFail("Expected source terminal surface view")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        sourcePanel.hostedView.layoutSubtreeIfNeeded()
+        replacementPanel.hostedView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        sourcePanel.hostedView.setActive(true)
+        replacementPanel.hostedView.setActive(false)
+        XCTAssertTrue(
+            window.makeFirstResponder(sourceSurfaceView),
+            "Expected the source split pane to start as first responder"
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        sourcePanel.hostedView.suppressReparentFocus()
+        workspace.focusPanel(replacementPanel.id, previousHostedView: sourcePanel.hostedView)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            replacementPanel.id,
+            "Expected Bonsplit selection to move to the replacement pane immediately"
+        )
+
+        let pendingSnapshot = workspace.graphSnapshot()
+        XCTAssertEqual(
+            pendingSnapshot.focusedPanelId,
+            sourcePanelId,
+            "Expected graph focus to stay on the source pane until the replacement pane actually becomes first responder"
+        )
+        XCTAssertEqual(
+            pendingSnapshot.pendingTerminalFocusHandoff?.sourcePanelId,
+            sourcePanelId,
+            "Expected the pending handoff to keep the source pane recorded as the focus owner"
+        )
+        XCTAssertEqual(
+            pendingSnapshot.pendingTerminalFocusHandoff?.targetPanelId,
+            replacementPanel.id,
+            "Expected the pending handoff to track the replacement pane as the focus target"
+        )
+        XCTAssertEqual(
+            workspace.terminalFocusRole(for: sourcePanelId),
+            .active,
+            "Expected the source pane to remain the workspace's active focus owner while the replacement pane is pending"
+        )
+        XCTAssertEqual(
+            workspace.terminalFocusRole(for: replacementPanel.id),
+            .pending,
+            "Expected the replacement pane to stay in a pending focus state until AppKit first responder commits"
+        )
+        XCTAssertTrue(
+            sourcePanel.hostedView.isSurfaceViewFirstResponder(),
+            "Expected the source pane to keep first responder until the replacement pane can take it"
+        )
+
+        replacementPanel.hostedView.frame = NSRect(x: 180, y: 0, width: 180, height: 220)
+        contentView.layoutSubtreeIfNeeded()
+        replacementPanel.hostedView.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        XCTAssertTrue(
+            replacementPanel.hostedView.makeSurfaceViewFirstResponder(),
+            "Expected the replacement pane to accept first responder once it has usable geometry"
+        )
+        XCTAssertTrue(
+            replacementPanel.hostedView.debugConfirmPendingSurfaceFocusIfFirstResponder(),
+            "Expected the replacement pane to confirm the deferred focus handoff once AppKit first responder lands"
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.10))
+        sourcePanel.hostedView.clearSuppressReparentFocus()
+
+        let committedSnapshot = workspace.graphSnapshot()
+        XCTAssertNil(
+            committedSnapshot.pendingTerminalFocusHandoff,
+            "Expected pending split handoff state to clear once the replacement pane becomes first responder"
+        )
+        XCTAssertEqual(
+            committedSnapshot.focusedPanelId,
+            replacementPanel.id,
+            "Expected graph focus to commit to the replacement pane after first responder moves"
+        )
+        XCTAssertTrue(
+            replacementPanel.hostedView.isSurfaceViewFirstResponder(),
+            "Expected the replacement pane to become first responder once it has usable geometry"
+        )
+    }
 }
 
 @MainActor

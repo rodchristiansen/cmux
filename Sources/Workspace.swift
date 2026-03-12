@@ -979,6 +979,12 @@ final class Workspace: Identifiable, ObservableObject {
         case terminalFirstResponder
     }
 
+    enum TerminalFocusRole {
+        case active
+        case pending
+        case inactive
+    }
+
     /// Published directory for each panel
     @Published var panelDirectories: [UUID: String] = [:]
     @Published var panelTitles: [UUID: String] = [:]
@@ -1242,8 +1248,14 @@ final class Workspace: Identifiable, ObservableObject {
         let reassertAppKitFocus: Bool
         let focusIntent: PanelFocusIntent?
         let previousTerminalHostedView: GhosttySurfaceScrollView?
+        let previousFocusedPanelId: UUID?
     }
     private var pendingTabSelection: PendingTabSelectionRequest?
+    private struct PendingTerminalFocusHandoff {
+        let sourcePanelId: UUID
+        let targetPanelId: UUID
+    }
+    private var pendingTerminalFocusHandoff: PendingTerminalFocusHandoff?
     private var isReconcilingFocusState = false
     private var focusReconcileScheduled = false
 #if DEBUG
@@ -1387,7 +1399,8 @@ final class Workspace: Identifiable, ObservableObject {
             layoutSnapshot: layoutSnapshot,
             panes: paneStates,
             focusedPaneId: bonsplitController.focusedPaneId?.id,
-            focusedPanelId: focusedPanelId,
+            focusedPanelId: committedFocusedPanelIdForGraphState(),
+            pendingTerminalFocusHandoff: graphPendingTerminalFocusHandoffState(),
             zoomedPaneId: bonsplitController.zoomedPaneId?.id
         )
     }
@@ -1406,6 +1419,60 @@ final class Workspace: Identifiable, ObservableObject {
 
     func markdownPanel(for panelId: UUID) -> MarkdownPanel? {
         panels[panelId] as? MarkdownPanel
+    }
+
+    func terminalFocusRole(for panelId: UUID) -> TerminalFocusRole {
+        if let pending = resolvedPendingTerminalFocusHandoff() {
+            if pending.sourcePanelId == panelId {
+                return .active
+            }
+            if pending.targetPanelId == panelId {
+                return .pending
+            }
+        }
+        return focusedPanelId == panelId ? .active : .inactive
+    }
+
+    private func committedFocusedPanelIdForGraphState() -> UUID? {
+        resolvedPendingTerminalFocusHandoff()?.sourcePanelId ?? focusedPanelId
+    }
+
+    private func graphPendingTerminalFocusHandoffState() -> WorkspaceTerminalFocusHandoffState? {
+        guard let pending = resolvedPendingTerminalFocusHandoff() else { return nil }
+        return WorkspaceTerminalFocusHandoffState(
+            sourcePanelId: pending.sourcePanelId,
+            targetPanelId: pending.targetPanelId
+        )
+    }
+
+    private func resolvedPendingTerminalFocusHandoff() -> PendingTerminalFocusHandoff? {
+        guard let pending = pendingTerminalFocusHandoff,
+              pending.sourcePanelId != pending.targetPanelId,
+              panels[pending.sourcePanelId] is TerminalPanel,
+              panels[pending.targetPanelId] is TerminalPanel,
+              focusedPanelId == pending.targetPanelId else {
+            return nil
+        }
+        return pending
+    }
+
+    private func setPendingTerminalFocusHandoff(
+        sourcePanelId: UUID,
+        targetPanelId: UUID
+    ) {
+        let next = PendingTerminalFocusHandoff(sourcePanelId: sourcePanelId, targetPanelId: targetPanelId)
+        guard pendingTerminalFocusHandoff?.sourcePanelId != next.sourcePanelId ||
+                pendingTerminalFocusHandoff?.targetPanelId != next.targetPanelId else {
+            return
+        }
+        pendingTerminalFocusHandoff = next
+        markGraphStateChanged(reason: "pendingTerminalFocusHandoff")
+    }
+
+    private func clearPendingTerminalFocusHandoff(reason: String) {
+        guard pendingTerminalFocusHandoff != nil else { return }
+        pendingTerminalFocusHandoff = nil
+        markGraphStateChanged(reason: reason)
     }
 
     private func surfaceKind(for panel: any Panel) -> String {
@@ -3136,6 +3203,7 @@ final class Workspace: Identifiable, ObservableObject {
 
 #if DEBUG
     private func debugFocusStateSummary(targetPanelId: UUID? = nil) -> String {
+        let pendingHandoff = resolvedPendingTerminalFocusHandoff()
         let targetPanelShort = targetPanelId.map { String($0.uuidString.prefix(5)) } ?? "nil"
         let targetPaneShort = targetPanelId
             .flatMap { paneId(forPanelId: $0) }
@@ -3151,13 +3219,21 @@ final class Workspace: Identifiable, ObservableObject {
             .map { String($0.uuidString.prefix(5)) } ?? "nil"
         let focusedPanelShort = focusedPanelId
             .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let committedFocusedPanelShort = committedFocusedPanelIdForGraphState()
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let pendingSourcePanelShort = pendingHandoff
+            .map { String($0.sourcePanelId.uuidString.prefix(5)) } ?? "nil"
+        let pendingTargetPanelShort = pendingHandoff
+            .map { String($0.targetPanelId.uuidString.prefix(5)) } ?? "nil"
         let firstResponderPanelShort = cmuxOwningGhosttyView(
             for: NSApp.keyWindow?.firstResponder ?? NSApp.mainWindow?.firstResponder
         )?.terminalSurface?.id.uuidString.prefix(5).description ?? "nil"
         return
             "workspace=\(id.uuidString.prefix(5)) targetPanel=\(targetPanelShort) targetPane=\(targetPaneShort) " +
             "focusedPane=\(focusedPaneShort) selectedTab=\(selectedTabShort) selectedPanel=\(selectedPanelShort) " +
-            "focusedPanel=\(focusedPanelShort) firstResponderPanel=\(firstResponderPanelShort)"
+            "focusedPanel=\(focusedPanelShort) committedFocusedPanel=\(committedFocusedPanelShort) " +
+            "pendingSourcePanel=\(pendingSourcePanelShort) pendingTargetPanel=\(pendingTargetPanelShort) " +
+            "firstResponderPanel=\(firstResponderPanelShort)"
     }
 #endif
 
@@ -3219,6 +3295,15 @@ final class Workspace: Identifiable, ObservableObject {
         }
 #endif
 
+        let activationIntent = panels[panelId]?.preferredFocusIntentForActivation()
+        beginPendingTerminalFocusHandoffIfNeeded(
+            targetPanelId: panelId,
+            previousFocusedPanelId: currentlyFocusedPanelId,
+            previousTerminalHostedView: previousTerminalHostedView,
+            reassertAppKitFocus: !shouldSuppressReentrantRefocus,
+            focusIntent: activationIntent
+        )
+
         if let targetPaneId, !selectionAlreadyConverged {
 #if DEBUG
             dlog(
@@ -3240,13 +3325,13 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         if let targetPaneId {
-            let activationIntent = panels[panelId]?.preferredFocusIntentForActivation()
             applyTabSelection(
                 tabId: tabId,
                 inPane: targetPaneId,
                 reassertAppKitFocus: !shouldSuppressReentrantRefocus,
                 focusIntent: activationIntent,
-                previousTerminalHostedView: previousTerminalHostedView
+                previousTerminalHostedView: previousTerminalHostedView,
+                previousFocusedPanelId: currentlyFocusedPanelId
             )
         }
 
@@ -3714,7 +3799,7 @@ final class Workspace: Identifiable, ObservableObject {
             guard let terminalPanel = panel as? TerminalPanel else { continue }
             let shouldBeVisible = visiblePanelIds.contains(terminalPanel.id)
             terminalPanel.hostedView.setVisibleInUI(shouldBeVisible)
-            terminalPanel.hostedView.setActive(shouldBeVisible && focusedPanelId == terminalPanel.id)
+            terminalPanel.hostedView.setActive(shouldBeVisible && terminalFocusRole(for: terminalPanel.id) == .active)
             TerminalWindowPortalRegistry.updateEntryVisibility(
                 for: terminalPanel.hostedView,
                 visibleInUI: shouldBeVisible
@@ -4274,14 +4359,16 @@ extension Workspace: BonsplitDelegate {
         inPane pane: PaneID,
         reassertAppKitFocus: Bool = true,
         focusIntent: PanelFocusIntent? = nil,
-        previousTerminalHostedView: GhosttySurfaceScrollView? = nil
+        previousTerminalHostedView: GhosttySurfaceScrollView? = nil,
+        previousFocusedPanelId: UUID? = nil
     ) {
         pendingTabSelection = PendingTabSelectionRequest(
             tabId: tabId,
             pane: pane,
             reassertAppKitFocus: reassertAppKitFocus,
             focusIntent: focusIntent,
-            previousTerminalHostedView: previousTerminalHostedView
+            previousTerminalHostedView: previousTerminalHostedView,
+            previousFocusedPanelId: previousFocusedPanelId
         )
         guard !isApplyingTabSelection else { return }
         isApplyingTabSelection = true
@@ -4300,7 +4387,8 @@ extension Workspace: BonsplitDelegate {
                 inPane: request.pane,
                 reassertAppKitFocus: request.reassertAppKitFocus,
                 focusIntent: request.focusIntent,
-                previousTerminalHostedView: request.previousTerminalHostedView
+                previousTerminalHostedView: request.previousTerminalHostedView,
+                previousFocusedPanelId: request.previousFocusedPanelId
             )
         }
     }
@@ -4310,9 +4398,10 @@ extension Workspace: BonsplitDelegate {
         inPane pane: PaneID,
         reassertAppKitFocus: Bool,
         focusIntent: PanelFocusIntent?,
-        previousTerminalHostedView: GhosttySurfaceScrollView?
+        previousTerminalHostedView: GhosttySurfaceScrollView?,
+        previousFocusedPanelId requestedPreviousFocusedPanelId: UUID?
     ) {
-        let previousFocusedPanelId = focusedPanelId
+        let previousFocusedPanelId = requestedPreviousFocusedPanelId ?? focusedPanelId
 #if DEBUG
         let focusedPaneBefore = bonsplitController.focusedPaneId.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
         let selectedTabBefore = bonsplitController.focusedPaneId
@@ -4389,6 +4478,14 @@ extension Workspace: BonsplitDelegate {
             activationIntent: activationIntent
         )
         let shouldDeferTerminalFocusCompletion = deferredPreviousTerminalPanelId != nil
+        if shouldDeferTerminalFocusCompletion, let deferredPreviousTerminalPanelId {
+            setPendingTerminalFocusHandoff(
+                sourcePanelId: deferredPreviousTerminalPanelId,
+                targetPanelId: panelId
+            )
+        } else if resolvedPendingTerminalFocusHandoff()?.targetPanelId == panelId {
+            clearPendingTerminalFocusHandoff(reason: "pendingTerminalFocusHandoffCancelled")
+        }
 
         syncPinnedStateForTab(selectedTabId, panelId: selectedPanelId)
         syncUnreadBadgeStateForPanel(selectedPanelId)
@@ -4541,6 +4638,37 @@ extension Workspace: BonsplitDelegate {
         }
     }
 
+    private func beginPendingTerminalFocusHandoffIfNeeded(
+        targetPanelId: UUID,
+        previousFocusedPanelId: UUID?,
+        previousTerminalHostedView: GhosttySurfaceScrollView?,
+        reassertAppKitFocus: Bool,
+        focusIntent: PanelFocusIntent?
+    ) {
+        guard reassertAppKitFocus,
+              let focusIntent,
+              let targetTerminalPanel = terminalPanel(for: targetPanelId),
+              shouldMoveTerminalSurfaceFocus(for: focusIntent),
+              let previousFocusedPanelId,
+              previousFocusedPanelId != targetPanelId,
+              let previousTerminalHostedView,
+              previousTerminalHostedView.isSuppressingReparentFocus,
+              targetTerminalPanel.hostedView.requiresDeferredProgrammaticFocusCompletion(),
+              let previousTerminalPanel = terminalPanel(for: previousFocusedPanelId),
+              previousTerminalPanel.hostedView === previousTerminalHostedView else {
+            if pendingTerminalFocusHandoff?.targetPanelId != targetPanelId {
+                clearPendingTerminalFocusHandoff(reason: "pendingTerminalFocusHandoffCancelled")
+            }
+            return
+        }
+
+        setPendingTerminalFocusHandoff(
+            sourcePanelId: previousFocusedPanelId,
+            targetPanelId: targetPanelId
+        )
+        previousTerminalPanel.hostedView.setActive(true)
+    }
+
     private func deferredProgrammaticSplitPreviousTerminalPanelId(
         targetPanel: any Panel,
         targetPanelId: UUID,
@@ -4549,6 +4677,11 @@ extension Workspace: BonsplitDelegate {
         reassertAppKitFocus: Bool,
         activationIntent: PanelFocusIntent
     ) -> UUID? {
+        if let pending = resolvedPendingTerminalFocusHandoff(),
+           pending.targetPanelId == targetPanelId {
+            return pending.sourcePanelId
+        }
+
         guard reassertAppKitFocus,
               let targetTerminalPanel = targetPanel as? TerminalPanel,
               shouldMoveTerminalSurfaceFocus(for: activationIntent),
@@ -4574,6 +4707,7 @@ extension Workspace: BonsplitDelegate {
         guard focusedPanelId == targetPanelId,
               let currentTargetPanel = terminalPanel(for: targetPanelId),
               currentTargetPanel === targetPanel else {
+            clearPendingTerminalFocusHandoff(reason: "pendingTerminalFocusHandoffCancelled")
             return
         }
 
@@ -4582,6 +4716,8 @@ extension Workspace: BonsplitDelegate {
            let previousPanel = panels[previousPanelId] {
             previousPanel.unfocus()
         }
+
+        clearPendingTerminalFocusHandoff(reason: "pendingTerminalFocusHandoffCommitted")
 
         finishTabSelectionFocusCommit(
             panelId: targetPanelId,
