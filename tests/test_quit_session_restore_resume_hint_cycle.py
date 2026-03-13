@@ -83,6 +83,28 @@ if __name__ == "__main__":
     raise SystemExit(main())
 """
 
+REAL_AGENT_LAUNCHER_SOURCE = r"""#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import sys
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: launcher.py <binary> <prompt>")
+
+    binary = sys.argv[1]
+    prompt = sys.argv[2]
+    sys.stdout.write(f"CMUX_REAL_AGENT_LAUNCHED_{binary}\r\n")
+    sys.stdout.flush()
+    os.execvp(binary, [binary, prompt])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
 
 def _must(condition: bool, message: str) -> None:
     if not condition:
@@ -267,6 +289,13 @@ def _fixture_script_path() -> Path:
     return path
 
 
+def _real_agent_launcher_path() -> Path:
+    path = Path("/tmp") / f"cmux-real-agent-launcher-{os.getpid()}.py"
+    path.write_text(REAL_AGENT_LAUNCHER_SOURCE, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 def _fixture_command(fixture_path: Path, label: str, required_interrupts: int) -> str:
     return (
         f"python3 {fixture_path} "
@@ -285,6 +314,7 @@ def _run_case(
     expected_markers: list[str],
     ready_timeout: float = 8.0,
     restore_timeout: float = 12.0,
+    settle_delay: float = 0.0,
 ) -> None:
     socket_path = Path(f"/tmp/cmux-quit-restore-{label}-{os.getpid()}.sock")
     snapshot.unlink(missing_ok=True)
@@ -299,6 +329,8 @@ def _run_case(
             surface_id = _current_surface_id(client, workspace_id)
             client.send_surface(surface_id, command + "\n")
             _wait_for_marker(client, workspace_id, surface_id, ready_marker, timeout=ready_timeout)
+            if settle_delay > 0:
+                time.sleep(settle_delay)
         finally:
             client.close()
 
@@ -338,6 +370,7 @@ def main() -> int:
     bundle_id = _bundle_id(app_path)
     snapshot = _snapshot_path(bundle_id)
     fixture_path = _fixture_script_path()
+    real_agent_launcher_path = _real_agent_launcher_path()
     failures: list[str] = []
 
     cases: list[dict[str, object]] = [
@@ -364,19 +397,21 @@ def main() -> int:
         cases.extend([
             {
                 "label": "real-codex",
-                "command": "codex 'Print exactly CMUX_REAL_CODEX_READY on one line and then wait for more input.'",
-                "ready_marker": "CMUX_REAL_CODEX_READY",
+                "command": f'python3 {real_agent_launcher_path} codex "say hi in one sentence and then wait for more input"',
+                "ready_marker": "CMUX_REAL_AGENT_LAUNCHED_codex",
                 "expected_markers": ["To continue this session, run codex resume"],
-                "ready_timeout": 90.0,
+                "ready_timeout": 8.0,
                 "restore_timeout": 20.0,
+                "settle_delay": 12.0,
             },
             {
                 "label": "real-claude",
-                "command": "claude 'Print exactly CMUX_REAL_CLAUDE_READY on one line and then wait for more input.'",
-                "ready_marker": "CMUX_REAL_CLAUDE_READY",
+                "command": f'python3 {real_agent_launcher_path} claude "say hi in one sentence and then wait for more input"',
+                "ready_marker": "CMUX_REAL_AGENT_LAUNCHED_claude",
                 "expected_markers": ["Resume this session with:", "claude --resume"],
-                "ready_timeout": 90.0,
+                "ready_timeout": 8.0,
                 "restore_timeout": 20.0,
+                "settle_delay": 12.0,
             },
         ])
 
@@ -398,12 +433,14 @@ def main() -> int:
                     expected_markers=[str(marker) for marker in case["expected_markers"]],
                     ready_timeout=float(case.get("ready_timeout", 8.0)),
                     restore_timeout=float(case.get("restore_timeout", 12.0)),
+                    settle_delay=float(case.get("settle_delay", 0.0)),
                 )
                 print(f"PASS: {label}")
             except Exception as exc:
                 failures.append(f"{label}: {exc}")
     finally:
         fixture_path.unlink(missing_ok=True)
+        real_agent_launcher_path.unlink(missing_ok=True)
 
     if failures:
         print("FAIL:")
