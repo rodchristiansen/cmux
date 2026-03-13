@@ -15,6 +15,9 @@ export async function generateMetadata({
   };
 }
 
+const linkClass =
+  "underline underline-offset-2 decoration-border hover:decoration-foreground transition-colors";
+
 export default function NightlyPage() {
   const t = useTranslations("nightly");
 
@@ -67,7 +70,28 @@ export default function NightlyPage() {
           className="text-[15px] text-muted mt-8"
           style={{ lineHeight: 1.5 }}
         >
-          {t("warning")}
+          {t.rich("warning", {
+            githubLink: (chunks) => (
+              <a
+                href="https://github.com/manaflow-ai/cmux/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkClass}
+              >
+                {chunks}
+              </a>
+            ),
+            discordLink: (chunks) => (
+              <a
+                href="https://discord.gg/xsgFEVrWCZ"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkClass}
+              >
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
       </main>
     </div>
