@@ -59,11 +59,13 @@ final class BonsplitTabDragUITests: XCTestCase {
         let alphaTab = app.buttons["UITest Alpha"]
         XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
 
-        let topGap = max(0, window.frame.maxY - alphaTab.frame.maxY)
+        let gapIfOriginIsBottomLeft = abs(window.frame.maxY - alphaTab.frame.maxY)
+        let gapIfOriginIsTopLeft = abs(alphaTab.frame.minY - window.frame.minY)
+        let topGap = min(gapIfOriginIsBottomLeft, gapIfOriginIsTopLeft)
         XCTAssertLessThanOrEqual(
             topGap,
             8,
-            "Expected the selected pane tab to reach the top edge when the workspace titlebar is hidden. window=\(window.frame) alphaTab=\(alphaTab.frame) gap=\(topGap)"
+            "Expected the selected pane tab to reach the top edge when the workspace titlebar is hidden. window=\(window.frame) alphaTab=\(alphaTab.frame) gap.bottomLeft=\(gapIfOriginIsBottomLeft) gap.topLeft=\(gapIfOriginIsTopLeft)"
         )
     }
 
@@ -80,6 +82,8 @@ final class BonsplitTabDragUITests: XCTestCase {
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
         let alphaTab = app.buttons["UITest Alpha"]
         XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
+        let betaTab = app.buttons["UITest Beta"]
+        XCTAssertTrue(betaTab.waitForExistence(timeout: 5.0), "Expected beta tab to exist")
 
         let newTerminalButton = app.buttons["paneTabBarControl.newTerminal"]
         XCTAssertTrue(newTerminalButton.waitForExistence(timeout: 5.0), "Expected new terminal control to exist")
@@ -90,10 +94,16 @@ final class BonsplitTabDragUITests: XCTestCase {
             "Expected pane tab bar controls to hide away from the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
-        alphaTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        hover(
+            in: window,
+            at: CGPoint(
+                x: min(window.frame.maxX - 140, betaTab.frame.maxX + 80),
+                y: alphaTab.frame.midY
+            )
+        )
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { newTerminalButton.isHittable },
-            "Expected pane tab bar controls to reveal when hovering inside the pane tab bar. button=\(newTerminalButton.debugDescription)"
+            "Expected pane tab bar controls to reveal when hovering inside empty pane-tab-bar space. window=\(window.frame) alphaTab=\(alphaTab.frame) betaTab=\(betaTab.frame) button=\(newTerminalButton.debugDescription)"
         )
 
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
@@ -166,5 +176,15 @@ final class BonsplitTabDragUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
         return condition()
+    }
+
+    private func hover(in window: XCUIElement, at point: CGPoint) {
+        let origin = window.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(
+            CGVector(
+                dx: point.x - window.frame.minX,
+                dy: point.y - window.frame.minY
+            )
+        ).hover()
     }
 }
