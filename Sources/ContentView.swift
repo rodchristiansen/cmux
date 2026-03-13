@@ -1934,6 +1934,10 @@ struct ContentView: View {
     /// Space at top of content area reserved for the custom workspace titlebar.
     @State private var titlebarPadding: CGFloat = 32
 
+    private var effectiveTitlebarPadding: CGFloat {
+        showWorkspaceTitlebar ? titlebarPadding : 0
+    }
+
     private var terminalContent: some View {
         let mountedWorkspaceIdSet = Set(mountedWorkspaceIds)
         let mountedWorkspaces = tabManager.tabs.filter { mountedWorkspaceIdSet.contains($0.id) }
@@ -1987,7 +1991,7 @@ struct ContentView: View {
                     .allowsHitTesting(sidebarSelectionState.selection == .notifications)
                     .accessibilityHidden(sidebarSelectionState.selection != .notifications)
             }
-            .padding(.top, titlebarPadding)
+            .padding(.top, effectiveTitlebarPadding)
 
             if showWorkspaceTitlebar {
                 // Titlebar overlay is only over terminal content, not the sidebar.

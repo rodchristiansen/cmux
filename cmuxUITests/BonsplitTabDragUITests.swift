@@ -44,7 +44,7 @@ final class BonsplitTabDragUITests: XCTestCase {
         )
     }
 
-    func testPaneTabBarControlsRevealOnlyOnTrailingHover() {
+    func testPaneTabBarControlsRevealWhenHoveringAnywhereOnPaneTabBar() {
         let (app, _) = launchConfiguredApp()
 
         XCTAssertTrue(
@@ -55,8 +55,8 @@ final class BonsplitTabDragUITests: XCTestCase {
         let window = app.windows.element(boundBy: 0)
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
 
-        let controlsRegion = app.otherElements["paneTabBarControlsRegion"]
-        XCTAssertTrue(controlsRegion.waitForExistence(timeout: 5.0), "Expected pane tab bar controls region to exist")
+        let paneTabBar = app.otherElements["paneTabBar"]
+        XCTAssertTrue(paneTabBar.waitForExistence(timeout: 5.0), "Expected pane tab bar to exist")
 
         let newTerminalButton = app.buttons["paneTabBarControl.newTerminal"]
         XCTAssertTrue(newTerminalButton.waitForExistence(timeout: 5.0), "Expected new terminal control to exist")
@@ -64,19 +64,19 @@ final class BonsplitTabDragUITests: XCTestCase {
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { !newTerminalButton.isHittable },
-            "Expected pane tab bar controls to hide away from the trailing hover zone. button=\(newTerminalButton.debugDescription)"
+            "Expected pane tab bar controls to hide away from the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
-        controlsRegion.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        paneTabBar.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).hover()
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { newTerminalButton.isHittable },
-            "Expected pane tab bar controls to reveal when hovering the trailing controls zone. button=\(newTerminalButton.debugDescription)"
+            "Expected pane tab bar controls to reveal when hovering anywhere on the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { !newTerminalButton.isHittable },
-            "Expected pane tab bar controls to hide again after leaving the hover zone. button=\(newTerminalButton.debugDescription)"
+            "Expected pane tab bar controls to hide again after leaving the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
     }
 
