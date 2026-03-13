@@ -19,6 +19,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -241,7 +242,11 @@ def _session_json_contains(snapshot: Path, marker: str) -> bool:
     return marker in snapshot.read_text(encoding="utf-8", errors="replace")
 
 
-def _restored_scrollback_contains(client: cmux, marker: str, timeout: float = 10.0) -> str | None:
+def _session_json_contains_all(snapshot: Path, markers: list[str]) -> bool:
+    return all(_session_json_contains(snapshot, marker) for marker in markers)
+
+
+def _restored_scrollback_contains_all(client: cmux, markers: list[str], timeout: float = 10.0) -> str | None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         for _index, workspace_id, _title, _selected in client.list_workspaces():
@@ -249,7 +254,7 @@ def _restored_scrollback_contains(client: cmux, marker: str, timeout: float = 10
             time.sleep(0.2)
             for _surface_index, surface_id, _focused in client.list_surfaces(workspace_id):
                 text = _read_scrollback(client, surface_id)
-                if marker in text:
+                if all(marker in text for marker in markers):
                     return text
         time.sleep(0.3)
     return None
@@ -262,11 +267,26 @@ def _fixture_script_path() -> Path:
     return path
 
 
-def _run_case(app_path: Path, bundle_id: str, snapshot: Path, fixture_path: Path, label: str, required_interrupts: int) -> None:
-    socket_path = Path(f"/tmp/cmux-quit-restore-{label}-{os.getpid()}.sock")
-    expected = f"{label} --resume fixture-{required_interrupts}"
-    ready_marker = f"FIXTURE_READY {label}"
+def _fixture_command(fixture_path: Path, label: str, required_interrupts: int) -> str:
+    return (
+        f"python3 {fixture_path} "
+        f"--required-interrupts {required_interrupts} "
+        f"--label {label}"
+    )
 
+
+def _run_case(
+    app_path: Path,
+    bundle_id: str,
+    snapshot: Path,
+    label: str,
+    command: str,
+    ready_marker: str,
+    expected_markers: list[str],
+    ready_timeout: float = 8.0,
+    restore_timeout: float = 12.0,
+) -> None:
+    socket_path = Path(f"/tmp/cmux-quit-restore-{label}-{os.getpid()}.sock")
     snapshot.unlink(missing_ok=True)
     _kill_existing(app_path)
 
@@ -277,27 +297,22 @@ def _run_case(app_path: Path, bundle_id: str, snapshot: Path, fixture_path: Path
             workspace_id = client.new_workspace()
             client.select_workspace(workspace_id)
             surface_id = _current_surface_id(client, workspace_id)
-            command = (
-                f"python3 {fixture_path} "
-                f"--required-interrupts {required_interrupts} "
-                f"--label {label}"
-            )
             client.send_surface(surface_id, command + "\n")
-            _wait_for_marker(client, workspace_id, surface_id, ready_marker)
+            _wait_for_marker(client, workspace_id, surface_id, ready_marker, timeout=ready_timeout)
         finally:
             client.close()
 
         _quit(bundle_id, socket_path)
         _must(snapshot.exists(), f"snapshot missing after quit for {label}")
         _must(
-            _session_json_contains(snapshot, expected),
+            _session_json_contains_all(snapshot, expected_markers),
             f"snapshot missing resume marker for {label}",
         )
 
         socket_path = _launch(app_path, socket_path)
         client = _connect(socket_path)
         try:
-            restored = _restored_scrollback_contains(client, expected, timeout=12.0)
+            restored = _restored_scrollback_contains_all(client, expected_markers, timeout=restore_timeout)
             _must(restored is not None, f"restored scrollback missing resume marker for {label}")
         finally:
             client.close()
@@ -325,15 +340,65 @@ def main() -> int:
     fixture_path = _fixture_script_path()
     failures: list[str] = []
 
-    cases = [
-        ("fixture-codex", 1),
-        ("fixture-claude", 3),
+    cases: list[dict[str, object]] = [
+        {
+            "label": "fixture-codex",
+            "command": _fixture_command(fixture_path, "fixture-codex", 1),
+            "ready_marker": "FIXTURE_READY fixture-codex",
+            "expected_markers": ["fixture-codex --resume fixture-1"],
+        },
+        {
+            "label": "fixture-claude",
+            "command": _fixture_command(fixture_path, "fixture-claude", 3),
+            "ready_marker": "FIXTURE_READY fixture-claude",
+            "expected_markers": ["fixture-claude --resume fixture-3"],
+        },
     ]
 
+    include_real_agents = os.environ.get("CMUX_INCLUDE_REAL_AGENTS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if include_real_agents:
+        cases.extend([
+            {
+                "label": "real-codex",
+                "command": "codex 'Print exactly CMUX_REAL_CODEX_READY on one line and then wait for more input.'",
+                "ready_marker": "CMUX_REAL_CODEX_READY",
+                "expected_markers": ["To continue this session, run codex resume"],
+                "ready_timeout": 90.0,
+                "restore_timeout": 20.0,
+            },
+            {
+                "label": "real-claude",
+                "command": "claude 'Print exactly CMUX_REAL_CLAUDE_READY on one line and then wait for more input.'",
+                "ready_marker": "CMUX_REAL_CLAUDE_READY",
+                "expected_markers": ["Resume this session with:", "claude --resume"],
+                "ready_timeout": 90.0,
+                "restore_timeout": 20.0,
+            },
+        ])
+
     try:
-        for label, required_interrupts in cases:
+        if include_real_agents:
+            for binary in ("codex", "claude"):
+                _must(shutil.which(binary) is not None, f"{binary} not found in PATH")
+
+        for case in cases:
+            label = str(case["label"])
             try:
-                _run_case(app_path, bundle_id, snapshot, fixture_path, label, required_interrupts)
+                _run_case(
+                    app_path=app_path,
+                    bundle_id=bundle_id,
+                    snapshot=snapshot,
+                    label=label,
+                    command=str(case["command"]),
+                    ready_marker=str(case["ready_marker"]),
+                    expected_markers=[str(marker) for marker in case["expected_markers"]],
+                    ready_timeout=float(case.get("ready_timeout", 8.0)),
+                    restore_timeout=float(case.get("restore_timeout", 12.0)),
+                )
                 print(f"PASS: {label}")
             except Exception as exc:
                 failures.append(f"{label}: {exc}")
