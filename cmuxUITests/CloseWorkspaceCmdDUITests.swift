@@ -31,7 +31,7 @@ final class CloseWorkspaceCmdDUITests: XCTestCase {
         )
     }
 
-    func testCmdWOnLastTabKeepsWorkspaceOpen() {
+    func testCmdWOnLastTabKeepsWorkspaceOpen() throws {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
         app.launch()
