@@ -312,6 +312,23 @@ class TerminalController {
         return currentSorted != nextSorted
     }
 
+    nonisolated static func normalizeAutosuggestionProvider(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return nil }
+        switch trimmed {
+        case "none", "cmux":
+            return trimmed
+        default:
+            guard trimmed.hasPrefix("external:") else { return nil }
+            let suffix = trimmed.dropFirst("external:".count)
+            let cleaned = suffix.filter {
+                $0.isLetter || $0.isNumber || $0 == ":" || $0 == "." || $0 == "_" || $0 == "-"
+            }
+            guard !cleaned.isEmpty else { return "external:unknown" }
+            return "external:\(cleaned)"
+        }
+    }
+
     private struct SocketSurfaceKey: Hashable {
         let workspaceId: UUID
         let panelId: UUID
@@ -1458,6 +1475,9 @@ class TerminalController {
 
         case "report_pwd":
             return reportPwd(args)
+
+        case "report_autosuggestion_provider":
+            return reportAutosuggestionProvider(args)
 
         case "sidebar_state":
             return sidebarState(args)
@@ -9702,6 +9722,7 @@ class TerminalController {
           report_tty <tty_name> [--tab=X] [--panel=Y] - Register TTY for batched port scanning
           ports_kick [--tab=X] [--panel=Y] - Request batched port scan for panel
           report_pwd <path> [--tab=X] [--panel=Y] - Report current working directory
+          report_autosuggestion_provider <provider> [--tab=X] [--panel=Y] - Report terminal autosuggestion owner
           clear_ports [--tab=X] [--panel=Y] - Clear listening ports
           sidebar_state [--tab=X] - Dump sidebar metadata
           reset_sidebar [--tab=X] - Clear sidebar metadata
@@ -13599,6 +13620,67 @@ class TerminalController {
         return result
     }
 
+    private func reportAutosuggestionProvider(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let rawProvider = parsed.positional.first,
+              let provider = Self.normalizeAutosuggestionProvider(rawProvider) else {
+            return "ERROR: Missing or invalid provider — usage: report_autosuggestion_provider <none|cmux|external:name> [--tab=X] [--panel=Y]"
+        }
+
+        if let scope = Self.explicitSocketScope(options: parsed.options) {
+            DispatchQueue.main.async {
+                guard let tabManager = AppDelegate.shared?.tabManagerFor(tabId: scope.workspaceId),
+                      let tab = tabManager.tabs.first(where: { $0.id == scope.workspaceId }) else {
+                    return
+                }
+                let validSurfaceIds = Set(tab.panels.keys)
+                tab.pruneSurfaceMetadata(validSurfaceIds: validSurfaceIds)
+                guard validSurfaceIds.contains(scope.panelId) else { return }
+                tab.updatePanelAutosuggestionProvider(panelId: scope.panelId, provider: provider)
+            }
+            return "OK"
+        }
+
+        var result = "OK"
+        DispatchQueue.main.sync {
+            guard let tab = resolveTabForReport(args) else {
+                result = parsed.options["tab"] != nil ? "ERROR: Tab not found" : "ERROR: No tab selected"
+                return
+            }
+
+            let validSurfaceIds = Set(tab.panels.keys)
+            tab.pruneSurfaceMetadata(validSurfaceIds: validSurfaceIds)
+
+            let panelArg = parsed.options["panel"] ?? parsed.options["surface"]
+            let surfaceId: UUID
+            if let panelArg {
+                if panelArg.isEmpty {
+                    result = "ERROR: Missing panel id — usage: report_autosuggestion_provider <none|cmux|external:name> [--tab=X] [--panel=Y]"
+                    return
+                }
+                guard let parsedId = UUID(uuidString: panelArg) else {
+                    result = "ERROR: Invalid panel id '\(panelArg)'"
+                    return
+                }
+                surfaceId = parsedId
+            } else {
+                guard let focused = tab.focusedPanelId else {
+                    result = "ERROR: Missing panel id (no focused surface)"
+                    return
+                }
+                surfaceId = focused
+            }
+
+            guard validSurfaceIds.contains(surfaceId) else {
+                result = "ERROR: Panel not found '\(surfaceId.uuidString)'"
+                return
+            }
+
+            tab.updatePanelAutosuggestionProvider(panelId: surfaceId, provider: provider)
+        }
+        return result
+    }
+
     private func clearPorts(_ args: String) -> String {
         let parsed = parseOptions(args)
         var result = "OK"
@@ -13785,6 +13867,17 @@ class TerminalController {
             } else {
                 lines.append("progress=none")
             }
+
+            if let autosuggestionProvider = tab.autosuggestionProvider {
+                lines.append("autosuggestion_provider=\(autosuggestionProvider.provider)")
+            } else {
+                lines.append("autosuggestion_provider=unknown")
+            }
+            let autosuggestionMode = TerminalAutosuggestionSettings.mode()
+            lines.append("autosuggestion_mode=\(autosuggestionMode.rawValue)")
+            lines.append(
+                "autosuggestion_rendering=\(TerminalAutosuggestionSettings.shouldRender(mode: autosuggestionMode, reportedProvider: tab.autosuggestionProvider?.provider) ? "enabled" : "disabled")"
+            )
 
             let statusEntries = tab.sidebarStatusEntriesInDisplayOrder()
             lines.append("status_count=\(statusEntries.count)")
