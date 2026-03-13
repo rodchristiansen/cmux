@@ -111,6 +111,23 @@ final class CmuxWebViewKeyEquivalentTests: XCTestCase {
         }
     }
 
+    private final class WindowCyclingActionSpy: NSObject {
+        weak var firstWindow: NSWindow?
+        weak var secondWindow: NSWindow?
+        private(set) var invocationCount = 0
+
+        @objc func cycleWindow(_ sender: Any?) {
+            invocationCount += 1
+            guard let firstWindow, let secondWindow else { return }
+
+            if NSApp.keyWindow === firstWindow {
+                secondWindow.makeKeyAndOrderFront(nil)
+            } else {
+                firstWindow.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
     private final class FirstResponderView: NSView {
         override var acceptsFirstResponder: Bool { true }
     }
@@ -677,15 +694,145 @@ final class CmuxWebViewKeyEquivalentTests: XCTestCase {
         }
         XCTAssertTrue(window.makeFirstResponder(responder))
     }
+
+    @MainActor
+    func testCmdBacktickMenuActionThatChangesKeyWindowOnlyRunsOnceWhenTerminalIsFirstResponder() {
+        _ = NSApplication.shared
+        AppDelegate.installWindowResponderSwizzlesForTesting()
+
+        let firstWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let secondWindow = NSWindow(
+            contentRect: NSRect(x: 40, y: 40, width: 640, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+
+        let firstContainer = NSView(frame: firstWindow.contentRect(forFrameRect: firstWindow.frame))
+        let secondContainer = NSView(frame: secondWindow.contentRect(forFrameRect: secondWindow.frame))
+        firstWindow.contentView = firstContainer
+        secondWindow.contentView = secondContainer
+
+        let firstTerminal = GhosttyNSView(frame: firstContainer.bounds)
+        firstTerminal.autoresizingMask = [.width, .height]
+        firstContainer.addSubview(firstTerminal)
+
+        let secondTerminal = GhosttyNSView(frame: secondContainer.bounds)
+        secondTerminal.autoresizingMask = [.width, .height]
+        secondContainer.addSubview(secondTerminal)
+
+        let spy = WindowCyclingActionSpy()
+        spy.firstWindow = firstWindow
+        spy.secondWindow = secondWindow
+        installMenu(
+            target: spy,
+            action: #selector(WindowCyclingActionSpy.cycleWindow(_:)),
+            key: "`",
+            modifiers: [.command]
+        )
+
+        secondWindow.orderFront(nil)
+        firstWindow.makeKeyAndOrderFront(nil)
+        defer {
+            secondWindow.orderOut(nil)
+            firstWindow.orderOut(nil)
+        }
+
+        XCTAssertTrue(firstWindow.makeFirstResponder(firstTerminal))
+        guard let event = makeKeyDownEvent(
+            key: "`",
+            modifiers: [.command],
+            keyCode: 50,
+            windowNumber: firstWindow.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+` event")
+            return
+        }
+
+        NSApp.sendEvent(event)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertEqual(spy.invocationCount, 1, "Cmd+` should only trigger one window-cycle action")
+    }
+
+    @MainActor
+    func testCmdBacktickDoesNotRouteDirectlyToMainMenuWhenWebViewIsFirstResponder() {
+        _ = NSApplication.shared
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+
+        let container = NSView(frame: window.contentRect(forFrameRect: window.frame))
+        window.contentView = container
+
+        let webView = CmuxWebView(frame: container.bounds, configuration: WKWebViewConfiguration())
+        webView.autoresizingMask = [.width, .height]
+        container.addSubview(webView)
+
+        let spy = ActionSpy()
+        installMenu(
+            target: spy,
+            action: #selector(ActionSpy.didInvoke(_:)),
+            key: "`",
+            modifiers: [.command]
+        )
+
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+        }
+
+        XCTAssertTrue(window.makeFirstResponder(webView))
+        guard let event = makeKeyDownEvent(
+            key: "`",
+            modifiers: [.command],
+            keyCode: 50,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+` event")
+            return
+        }
+
+        XCTAssertFalse(shouldRouteCommandEquivalentDirectlyToMainMenu(event))
+        _ = webView.performKeyEquivalent(with: event)
+        XCTAssertFalse(
+            spy.invoked,
+            "CmuxWebView should not route Cmd+` directly to the menu when WebKit is first responder"
+        )
+    }
+
     private func installMenu(spy: ActionSpy, key: String, modifiers: NSEvent.ModifierFlags) {
+        installMenu(
+            target: spy,
+            action: #selector(ActionSpy.didInvoke(_:)),
+            key: key,
+            modifiers: modifiers
+        )
+    }
+
+    private func installMenu(
+        target: NSObject,
+        action: Selector,
+        key: String,
+        modifiers: NSEvent.ModifierFlags
+    ) {
         let mainMenu = NSMenu()
 
         let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
         let fileMenu = NSMenu(title: "File")
 
-        let item = NSMenuItem(title: "Test Item", action: #selector(ActionSpy.didInvoke(_:)), keyEquivalent: key)
+        let item = NSMenuItem(title: "Test Item", action: action, keyEquivalent: key)
         item.keyEquivalentModifierMask = modifiers
-        item.target = spy
+        item.target = target
         fileMenu.addItem(item)
 
         mainMenu.addItem(fileItem)
@@ -696,13 +843,18 @@ final class CmuxWebViewKeyEquivalentTests: XCTestCase {
         NSApp.mainMenu = mainMenu
     }
 
-    private func makeKeyDownEvent(key: String, modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> NSEvent? {
+    private func makeKeyDownEvent(
+        key: String,
+        modifiers: NSEvent.ModifierFlags,
+        keyCode: UInt16,
+        windowNumber: Int = 0
+    ) -> NSEvent? {
         NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
             modifierFlags: modifiers,
             timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: 0,
+            windowNumber: windowNumber,
             context: nil,
             characters: key,
             charactersIgnoringModifiers: key,
@@ -11860,6 +12012,80 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
         anchor.frame = NSRect(x: 40, y: 40, width: 180, height: 40)
         portal.synchronizeHostedViewForAnchor(anchor)
         XCTAssertFalse(hosted.isHidden, "Portal should unhide after geometry is usable")
+    }
+
+    func testScheduledExternalGeometrySyncRefreshesAncestorLayoutShift() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: window)
+            window.orderOut(nil)
+        }
+
+        realizeWindowLayout(window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let shiftedContainer = NSView(frame: NSRect(x: 120, y: 60, width: 220, height: 160))
+        contentView.addSubview(shiftedContainer)
+        let anchor = NSView(frame: NSRect(x: 24, y: 28, width: 72, height: 56))
+        shiftedContainer.addSubview(anchor)
+
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        let hosted = surface.hostedView
+        TerminalWindowPortalRegistry.bind(
+            hostedView: hosted,
+            to: anchor,
+            visibleInUI: true,
+            expectedSurfaceId: surface.id,
+            expectedGeneration: surface.portalBindingGeneration()
+        )
+        TerminalWindowPortalRegistry.synchronizeForAnchor(anchor)
+
+        let anchorCenter = NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY)
+        let originalWindowPoint = anchor.convert(anchorCenter, to: nil)
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(originalWindowPoint, in: window),
+            "Initial hit-testing should resolve the portal-hosted terminal at its original window position"
+        )
+
+        shiftedContainer.frame.origin.x += 96
+        contentView.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+
+        let shiftedWindowPoint = anchor.convert(anchorCenter, to: nil)
+        XCTAssertNotEqual(originalWindowPoint.x, shiftedWindowPoint.x, accuracy: 0.5)
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedWindowPoint, in: window),
+            "Ancestor-only layout shifts should leave the portal stale until an external geometry sync runs"
+        )
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(originalWindowPoint, in: window),
+            "Before the external geometry sync, hit-testing should still point at the stale portal location"
+        )
+
+        TerminalWindowPortalRegistry.scheduleExternalGeometrySynchronizeForAllWindows()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(originalWindowPoint, in: window),
+            "The stale portal position should be cleared after the scheduled external geometry sync"
+        )
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedWindowPoint, in: window),
+            "The scheduled external geometry sync should move the portal-hosted terminal to the anchor's new window position"
+        )
     }
 }
 
