@@ -45,39 +45,41 @@ final class BonsplitTabDragUITests: XCTestCase {
     }
 
     func testHiddenWorkspaceTitlebarPlacesPaneTabBarAtTopEdge() {
-        let (app, _) = launchConfiguredApp()
+        let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch for hidden titlebar top-gap UI test. state=\(app.state.rawValue)"
         )
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
 
         let window = app.windows.element(boundBy: 0)
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
 
-        let paneTabBar = app.otherElements["paneTabBar"]
-        XCTAssertTrue(paneTabBar.waitForExistence(timeout: 5.0), "Expected pane tab bar to exist")
+        let alphaTab = app.buttons["UITest Alpha"]
+        XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
 
-        let topGap = max(0, window.frame.maxY - paneTabBar.frame.maxY)
+        let topGap = max(0, window.frame.maxY - alphaTab.frame.maxY)
         XCTAssertLessThanOrEqual(
             topGap,
             8,
-            "Expected pane tab bar to reach the top edge when the workspace titlebar is hidden. window=\(window.frame) paneTabBar=\(paneTabBar.frame) gap=\(topGap)"
+            "Expected the selected pane tab to reach the top edge when the workspace titlebar is hidden. window=\(window.frame) alphaTab=\(alphaTab.frame) gap=\(topGap)"
         )
     }
 
     func testPaneTabBarControlsRevealWhenHoveringAnywhereOnPaneTabBar() {
-        let (app, _) = launchConfiguredApp()
+        let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch for Bonsplit controls hover UI test. state=\(app.state.rawValue)"
         )
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
 
         let window = app.windows.element(boundBy: 0)
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
-        let paneTabBar = app.otherElements["paneTabBar"]
-        XCTAssertTrue(paneTabBar.waitForExistence(timeout: 5.0), "Expected pane tab bar to exist")
+        let alphaTab = app.buttons["UITest Alpha"]
+        XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
 
         let newTerminalButton = app.buttons["paneTabBarControl.newTerminal"]
         XCTAssertTrue(newTerminalButton.waitForExistence(timeout: 5.0), "Expected new terminal control to exist")
@@ -88,7 +90,7 @@ final class BonsplitTabDragUITests: XCTestCase {
             "Expected pane tab bar controls to hide away from the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
-        paneTabBar.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).hover()
+        alphaTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { newTerminalButton.isHittable },
             "Expected pane tab bar controls to reveal when hovering inside the pane tab bar. button=\(newTerminalButton.debugDescription)"
