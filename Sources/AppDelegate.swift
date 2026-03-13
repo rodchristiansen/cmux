@@ -4049,6 +4049,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func requestCommandPaletteCommands(preferredWindow: NSWindow? = nil, source: String = "api.commandPalette") {
+#if DEBUG
+        UITestRecorder.incrementInt("commandPaletteCommandsRequests")
+#endif
         postCommandPaletteRequest(
             name: .commandPaletteRequested,
             preferredWindow: preferredWindow,
@@ -4058,6 +4061,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func requestCommandPaletteSwitcher(preferredWindow: NSWindow? = nil, source: String = "api.commandPaletteSwitcher") {
+#if DEBUG
+        UITestRecorder.incrementInt("commandPaletteSwitcherRequests")
+#endif
         postCommandPaletteRequest(
             name: .commandPaletteSwitcherRequested,
             preferredWindow: preferredWindow,

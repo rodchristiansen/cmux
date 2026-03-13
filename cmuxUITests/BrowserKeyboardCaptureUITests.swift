@@ -24,6 +24,7 @@ final class BrowserKeyboardCaptureUITests: XCTestCase {
 
         enterKeyboardCaptureMode(app)
         let baselineKeydownCount = pageKeydownCount()
+        let baselinePaletteRequests = Int(loadKeyequiv()["commandPaletteCommandsRequests"] ?? "") ?? 0
 
         app.typeKey("p", modifierFlags: [.command, .shift])
 
@@ -38,9 +39,11 @@ final class BrowserKeyboardCaptureUITests: XCTestCase {
             "Expected Cmd+Shift+P to reach the page while keyboard capture is active. data=\(String(describing: loadData()))"
         )
 
-        XCTAssertFalse(
-            app.textFields["CommandPaletteSearchField"].waitForExistence(timeout: 1.0),
-            "Expected cmux command palette to stay closed while keyboard capture is active"
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(
+            Int(loadKeyequiv()["commandPaletteCommandsRequests"] ?? "") ?? 0,
+            baselinePaletteRequests,
+            "Expected Cmd+Shift+P to bypass cmux command palette while keyboard capture is active. keyequiv=\(loadKeyequiv())"
         )
     }
 
@@ -87,10 +90,14 @@ final class BrowserKeyboardCaptureUITests: XCTestCase {
             "Expected second Esc to be consumed by cmux instead of the page"
         )
 
+        let baselinePaletteRequests = Int(loadKeyequiv()["commandPaletteCommandsRequests"] ?? "") ?? 0
         app.typeKey("p", modifierFlags: [.command, .shift])
         XCTAssertTrue(
-            app.textFields["CommandPaletteSearchField"].waitForExistence(timeout: 5.0),
-            "Expected Cmd+Shift+P to open cmux command palette after exiting capture mode"
+            waitForKeyequivMatch(timeout: 5.0) { data in
+                let requests = Int(data["commandPaletteCommandsRequests"] ?? "") ?? 0
+                return requests >= baselinePaletteRequests + 1
+            },
+            "Expected Cmd+Shift+P to route back to cmux command palette after exiting capture mode. keyequiv=\(loadKeyequiv())"
         )
     }
 
