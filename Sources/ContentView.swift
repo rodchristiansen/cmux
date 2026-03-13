@@ -7282,13 +7282,15 @@ struct VerticalTabsSidebar: View {
         .background(
             WindowAccessor { window in
                 modifierKeyMonitor.setHostWindow(window)
+            }
+            .frame(width: 0, height: 0)
+        )
+        .background(
+            WindowTrafficLightMetricsReader { metrics in
                 guard !showWorkspaceTitlebar else { return }
-                let computedTitlebarHeight = window.frame.height - window.contentLayoutRect.height
-                let nextPadding = max(trafficLightPadding, min(52, computedTitlebarHeight + 6))
+                let nextPadding = max(trafficLightPadding, min(64, metrics.topInset))
                 if abs(hiddenTitlebarTrafficLightPadding - nextPadding) > 0.5 {
-                    DispatchQueue.main.async {
-                        hiddenTitlebarTrafficLightPadding = nextPadding
-                    }
+                    hiddenTitlebarTrafficLightPadding = nextPadding
                 }
             }
             .frame(width: 0, height: 0)
