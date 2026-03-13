@@ -3040,6 +3040,17 @@ enum TelemetrySettings {
     static let enabledForCurrentLaunch = isEnabled()
 }
 
+private extension TitlebarControlsVisibilityMode {
+    var displayName: String {
+        switch self {
+        case .always:
+            return String(localized: "settings.app.titlebarControls.always", defaultValue: "Always Visible")
+        case .onHover:
+            return String(localized: "settings.app.titlebarControls.hover", defaultValue: "Show on Hover")
+        }
+    }
+}
+
 struct SettingsView: View {
     private let contentTopInset: CGFloat = 8
     private let pickerColumnWidth: CGFloat = 196
@@ -3048,6 +3059,10 @@ struct SettingsView: View {
     @AppStorage(LanguageSettings.languageKey) private var appLanguage = LanguageSettings.defaultLanguage.rawValue
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
     @AppStorage(AppIconSettings.modeKey) private var appIconMode = AppIconSettings.defaultMode.rawValue
+    @AppStorage(TitlebarControlsVisibilitySettings.modeKey)
+    private var titlebarControlsVisibilityMode = TitlebarControlsVisibilitySettings.defaultMode.rawValue
+    @AppStorage(WorkspaceTitlebarSettings.showTitlebarKey)
+    private var showWorkspaceTitlebar = WorkspaceTitlebarSettings.defaultShowTitlebar
     @AppStorage(SocketControlSettings.appStorageKey) private var socketControlMode = SocketControlSettings.defaultMode.rawValue
     @AppStorage(ClaudeCodeIntegrationSettings.hooksEnabledKey)
     private var claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
@@ -3119,6 +3134,45 @@ struct SettingsView: View {
 
     private var selectedWorkspacePlacement: NewWorkspacePlacement {
         NewWorkspacePlacement(rawValue: newWorkspacePlacement) ?? WorkspacePlacementSettings.defaultPlacement
+    }
+
+    private var selectedTitlebarControlsVisibilityMode: TitlebarControlsVisibilityMode {
+        TitlebarControlsVisibilitySettings.mode(for: titlebarControlsVisibilityMode)
+    }
+
+    private var titlebarControlsVisibilitySelection: Binding<String> {
+        Binding(
+            get: { selectedTitlebarControlsVisibilityMode.rawValue },
+            set: { titlebarControlsVisibilityMode = TitlebarControlsVisibilitySettings.mode(for: $0).rawValue }
+        )
+    }
+
+    private var titlebarControlsVisibilitySubtitle: String {
+        switch selectedTitlebarControlsVisibilityMode {
+        case .always:
+            return String(
+                localized: "settings.app.titlebarControls.subtitleAlways",
+                defaultValue: "Keep the sidebar, notifications, and new workspace buttons visible."
+            )
+        case .onHover:
+            return String(
+                localized: "settings.app.titlebarControls.subtitleHover",
+                defaultValue: "Hide titlebar buttons until the pointer reaches them."
+            )
+        }
+    }
+
+    private var workspaceTitlebarSubtitle: String {
+        if showWorkspaceTitlebar {
+            return String(
+                localized: "settings.app.showWorkspaceTitlebar.subtitleOn",
+                defaultValue: "Show the folder and active title above pane tabs."
+            )
+        }
+        return String(
+            localized: "settings.app.showWorkspaceTitlebar.subtitleOff",
+            defaultValue: "Hide the folder/title strip and drag from empty space in the top pane tab bar."
+        )
     }
 
     private var selectedSidebarActiveTabIndicatorStyle: SidebarActiveTabIndicatorStyle {
@@ -3472,6 +3526,30 @@ struct SettingsView: View {
                                 AppIconSettings.applyIcon(mode)
                             }
                         )
+
+                        SettingsCardDivider()
+
+                        SettingsPickerRow(
+                            String(localized: "settings.app.titlebarControls", defaultValue: "Titlebar Controls"),
+                            subtitle: titlebarControlsVisibilitySubtitle,
+                            controlWidth: pickerColumnWidth,
+                            selection: titlebarControlsVisibilitySelection
+                        ) {
+                            ForEach(TitlebarControlsVisibilityMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode.rawValue)
+                            }
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.showWorkspaceTitlebar", defaultValue: "Show Workspace Title Bar"),
+                            subtitle: workspaceTitlebarSubtitle
+                        ) {
+                            Toggle("", isOn: $showWorkspaceTitlebar)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
 
                         SettingsCardDivider()
 
@@ -4386,6 +4464,8 @@ struct SettingsView: View {
         }
         appearanceMode = AppearanceSettings.defaultMode.rawValue
         appIconMode = AppIconSettings.defaultMode.rawValue
+        titlebarControlsVisibilityMode = TitlebarControlsVisibilitySettings.defaultMode.rawValue
+        showWorkspaceTitlebar = WorkspaceTitlebarSettings.defaultShowTitlebar
         AppIconSettings.applyIcon(.automatic)
         socketControlMode = SocketControlSettings.defaultMode.rawValue
         claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
