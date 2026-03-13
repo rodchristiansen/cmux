@@ -3563,6 +3563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               let destinationManager = tabManagerFor(windowId: windowId) else {
             return false
         }
+        let broadcastInputEnabled = sourceManager.isBroadcastInputEnabled(for: workspaceId)
 
         if sourceManager === destinationManager {
             if focus {
@@ -3575,6 +3576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         guard let workspace = sourceManager.detachWorkspace(tabId: workspaceId) else { return false }
         destinationManager.attachWorkspace(workspace, select: focus)
+        destinationManager.setBroadcastInputEnabled(broadcastInputEnabled, for: workspaceId)
 
         if focus {
             _ = focusMainWindow(windowId: windowId)
@@ -8180,6 +8182,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
             // Only consume when a focused terminal actually handled the toggle.
             // Otherwise allow the event to continue through the responder chain.
+            return handled
+        }
+
+        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleWorkspaceInputBroadcast)) {
+            let handled = tabManager?.toggleSelectedWorkspaceInputBroadcast() ?? false
+#if DEBUG
+            dlog(
+                "shortcut.action name=toggleWorkspaceInputBroadcast handled=\(handled ? 1 : 0) " +
+                "\(debugShortcutRouteSnapshot(event: event))"
+            )
+#endif
             return handled
         }
 

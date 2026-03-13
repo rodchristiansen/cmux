@@ -4265,6 +4265,7 @@ final class Workspace: Identifiable, ObservableObject {
 
     /// Callback used by TabManager to capture recently closed browser panels for Cmd+Shift+T restore.
     var onClosedBrowserPanel: ((ClosedBrowserPanelRestoreSnapshot) -> Void)?
+    var onTerminalPanelRegistered: ((TerminalPanel) -> Void)?
 
 
     // Closing tabs mutates split layout immediately; terminal views handle their own AppKit
@@ -4505,9 +4506,7 @@ final class Workspace: Identifiable, ObservableObject {
             initialCommand: initialTerminalCommand,
             initialEnvironmentOverrides: initialTerminalEnvironment
         )
-        panels[terminalPanel.id] = terminalPanel
-        panelTitles[terminalPanel.id] = terminalPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: terminalPanel.id, configTemplate: configTemplate)
+        registerTerminalPanel(terminalPanel, configTemplate: configTemplate)
 
         // Create initial tab in bonsplit and store the mapping
         var initialTabId: TabID?
@@ -4552,6 +4551,20 @@ final class Workspace: Identifiable, ObservableObject {
             }
             bonsplitController.selectTab(initialTabId)
         }
+    }
+
+    private func registerTerminalPanel(
+        _ terminalPanel: TerminalPanel,
+        configTemplate: ghostty_surface_config_s?
+    ) {
+        panels[terminalPanel.id] = terminalPanel
+        panelTitles[terminalPanel.id] = terminalPanel.displayTitle
+        seedTerminalInheritanceFontPoints(panelId: terminalPanel.id, configTemplate: configTemplate)
+        onTerminalPanelRegistered?(terminalPanel)
+    }
+
+    func bindTerminalInputRelayIfNeeded(_ terminalPanel: TerminalPanel) {
+        onTerminalPanelRegistered?(terminalPanel)
     }
 
     deinit {
@@ -5773,12 +5786,10 @@ final class Workspace: Identifiable, ObservableObject {
             portOrdinal: portOrdinal,
             initialCommand: remoteTerminalStartupCommand
         )
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
+        registerTerminalPanel(newPanel, configTemplate: inheritedConfig)
         if remoteTerminalStartupCommand != nil {
             trackRemoteTerminalSurface(newPanel.id)
         }
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         // Pre-generate the bonsplit tab ID so we can install the panel mapping before bonsplit
         // mutates layout state (avoids transient "Empty Panel" flashes during split).
@@ -5860,12 +5871,10 @@ final class Workspace: Identifiable, ObservableObject {
             initialCommand: remoteTerminalStartupCommand,
             additionalEnvironment: startupEnvironment
         )
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
+        registerTerminalPanel(newPanel, configTemplate: inheritedConfig)
         if remoteTerminalStartupCommand != nil {
             trackRemoteTerminalSurface(newPanel.id)
         }
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         // Create tab in bonsplit
         guard let newTabId = bonsplitController.createTab(
@@ -6611,6 +6620,7 @@ final class Workspace: Identifiable, ObservableObject {
         panels[detached.panelId] = detached.panel
         if let terminalPanel = detached.panel as? TerminalPanel {
             terminalPanel.updateWorkspaceId(id)
+            bindTerminalInputRelayIfNeeded(terminalPanel)
         } else if let browserPanel = detached.panel as? BrowserPanel {
             browserPanel.updateWorkspaceId(id)
             browserPanel.setRemoteProxyEndpoint(remoteProxyEndpoint)
@@ -7119,9 +7129,7 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: inheritedConfig,
             portOrdinal: portOrdinal
         )
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
+        registerTerminalPanel(newPanel, configTemplate: inheritedConfig)
 
         // Create tab in bonsplit
         if let newTabId = bonsplitController.createTab(
@@ -7315,6 +7323,23 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         return visiblePanelIds
+    }
+
+    func broadcastTerminalInput(_ payload: TerminalBroadcastInputPayload, from sourcePanelId: UUID) {
+        let renderedPaneIds = bonsplitController.zoomedPaneId.map { [$0] } ?? bonsplitController.allPaneIds
+        var deliveredPanelIds: Set<UUID> = []
+
+        for paneId in renderedPaneIds {
+            let selectedTab = bonsplitController.selectedTab(inPane: paneId) ?? bonsplitController.tabs(inPane: paneId).first
+            guard let selectedTab,
+                  let panelId = panelIdFromSurfaceId(selectedTab.id),
+                  panelId != sourcePanelId,
+                  deliveredPanelIds.insert(panelId).inserted,
+                  let terminalPanel = terminalPanel(for: panelId) else {
+                continue
+            }
+            terminalPanel.surface.sendBroadcastInput(payload)
+        }
     }
 
     private func reconcileTerminalPortalVisibilityForCurrentRenderedLayout() {
@@ -8575,9 +8600,7 @@ extension Workspace: BonsplitDelegate {
                         configTemplate: inheritedConfig,
                         portOrdinal: portOrdinal
                     )
-                    panels[replacementPanel.id] = replacementPanel
-                    panelTitles[replacementPanel.id] = replacementPanel.displayTitle
-                    seedTerminalInheritanceFontPoints(panelId: replacementPanel.id, configTemplate: inheritedConfig)
+                    registerTerminalPanel(replacementPanel, configTemplate: inheritedConfig)
                     surfaceIdToPanelId[replacementTab.id] = replacementPanel.id
 
                     bonsplitController.updateTab(
@@ -8641,9 +8664,7 @@ extension Workspace: BonsplitDelegate {
             configTemplate: inheritedConfig,
             portOrdinal: portOrdinal
         )
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
+        registerTerminalPanel(newPanel, configTemplate: inheritedConfig)
 
         guard let newTabId = bonsplitController.createTab(
             title: newPanel.displayTitle,
