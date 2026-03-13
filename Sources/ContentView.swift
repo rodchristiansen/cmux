@@ -3548,6 +3548,14 @@ struct ContentView: View {
         return Array(resultIDs.prefix(limit))
     }
 
+    static func commandPalettePendingVisibleResultIDs(
+        previewResultIDs: [String],
+        currentVisibleResultIDs: [String],
+        canReuseCurrentVisibleResults: Bool
+    ) -> [String] {
+        previewResultIDs
+    }
+
     static func commandPaletteShouldSynchronouslySeedResults(
         hasVisibleResultsForScope: Bool
     ) -> Bool {

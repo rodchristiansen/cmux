@@ -421,6 +421,39 @@ final class CommandPaletteSearchEngineTests: XCTestCase {
         XCTAssertEqual(previewCandidateIDs.last, "command.191")
     }
 
+    func testPendingVisibleResultsPreserveCurrentRowsWhenPreviewIsEmpty() {
+        XCTAssertEqual(
+            ContentView.commandPalettePendingVisibleResultIDs(
+                previewResultIDs: [],
+                currentVisibleResultIDs: ["workspace.1", "workspace.2"],
+                canReuseCurrentVisibleResults: true
+            ),
+            ["workspace.1", "workspace.2"]
+        )
+    }
+
+    func testPendingVisibleResultsDoNotPreserveRowsAcrossScopeRefresh() {
+        XCTAssertEqual(
+            ContentView.commandPalettePendingVisibleResultIDs(
+                previewResultIDs: [],
+                currentVisibleResultIDs: ["workspace.1", "workspace.2"],
+                canReuseCurrentVisibleResults: false
+            ),
+            []
+        )
+    }
+
+    func testPendingVisibleResultsPreferFreshPreviewMatches() {
+        XCTAssertEqual(
+            ContentView.commandPalettePendingVisibleResultIDs(
+                previewResultIDs: ["workspace.9"],
+                currentVisibleResultIDs: ["workspace.1", "workspace.2"],
+                canReuseCurrentVisibleResults: true
+            ),
+            ["workspace.9"]
+        )
+    }
+
     func testSynchronousSeedRunsOnlyWhenScopeChanges() {
         XCTAssertTrue(
             ContentView.commandPaletteShouldSynchronouslySeedResults(
