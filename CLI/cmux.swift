@@ -490,10 +490,16 @@ private func cliIsUnixSocketFile(_ path: String) -> Bool {
     cliUnixSocketStat(path) != nil
 }
 
+private func cliIsUnixSocketOwnedByCurrentUser(_ path: String) -> Bool {
+    guard let st = cliUnixSocketStat(path) else { return false }
+    return st.st_uid == getuid()
+}
+
 fileprivate struct SocketClientConfiguration {
     let connectRetryWindowSeconds: TimeInterval
     let connectAttemptTimeoutSeconds: TimeInterval
     let responseTimeoutSeconds: TimeInterval
+    let timeoutDeadline: Date?
 
     static func defaultConfig(
         processEnv: [String: String] = ProcessInfo.processInfo.environment
@@ -501,19 +507,27 @@ fileprivate struct SocketClientConfiguration {
         SocketClientConfiguration(
             connectRetryWindowSeconds: 2.0,
             connectAttemptTimeoutSeconds: 2.0,
-            responseTimeoutSeconds: cliDefaultResponseTimeoutSeconds(processEnv: processEnv)
+            responseTimeoutSeconds: cliDefaultResponseTimeoutSeconds(processEnv: processEnv),
+            timeoutDeadline: nil
+        )
+    }
+
+    static func versionQuery(
+        timeoutSeconds: TimeInterval,
+        deadline: Date? = nil
+    ) -> SocketClientConfiguration {
+        return SocketClientConfiguration(
+            connectRetryWindowSeconds: timeoutSeconds,
+            connectAttemptTimeoutSeconds: timeoutSeconds,
+            responseTimeoutSeconds: timeoutSeconds,
+            timeoutDeadline: deadline ?? Date().addingTimeInterval(max(0, timeoutSeconds))
         )
     }
 
     static func versionQuery(
         processEnv: [String: String] = ProcessInfo.processInfo.environment
     ) -> SocketClientConfiguration {
-        let timeout = cliVersionSocketTimeoutSeconds(processEnv: processEnv)
-        return SocketClientConfiguration(
-            connectRetryWindowSeconds: timeout,
-            connectAttemptTimeoutSeconds: timeout,
-            responseTimeoutSeconds: timeout
-        )
+        versionQuery(timeoutSeconds: cliVersionSocketTimeoutSeconds(processEnv: processEnv))
     }
 }
 
@@ -626,7 +640,8 @@ private enum CLISocketPathResolver {
     static func resolve(
         requestedPath: String,
         source: CLISocketPathSource,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        connectProbeDeadline: Date? = nil
     ) -> String {
         guard source == .implicitDefault else {
             return requestedPath
@@ -635,12 +650,17 @@ private enum CLISocketPathResolver {
         let candidates = dedupe(candidatePaths(requestedPath: requestedPath, environment: environment))
 
         // Prefer sockets that are currently accepting connections.
-        for path in candidates where canConnect(to: path) {
-            return path
+        for path in candidates {
+            guard let timeoutSeconds = remainingConnectProbeTimeout(until: connectProbeDeadline) else {
+                break
+            }
+            if canConnect(to: path, timeoutSeconds: timeoutSeconds) {
+                return path
+            }
         }
 
         // If the listener is still starting, prefer existing socket files.
-        for path in candidates where isSocketFile(path) {
+        for path in candidates where isOwnedSocketFile(path) {
             return path
         }
 
@@ -696,18 +716,28 @@ private enum CLISocketPathResolver {
         return discovered.prefix(limit).map(\.path)
     }
 
-    private static func isSocketFile(_ path: String) -> Bool {
-        cliIsUnixSocketFile(path)
+    private static func isOwnedSocketFile(_ path: String) -> Bool {
+        cliIsUnixSocketOwnedByCurrentUser(path)
     }
 
-    private static func canConnect(to path: String) -> Bool {
-        guard isSocketFile(path) else { return false }
-        let connectErrno = UnixSocketConnector.probe(path: path, timeoutSeconds: connectProbeTimeoutSeconds)
+    private static func canConnect(to path: String, timeoutSeconds: TimeInterval) -> Bool {
+        guard isOwnedSocketFile(path) else { return false }
+        let connectErrno = UnixSocketConnector.probe(path: path, timeoutSeconds: timeoutSeconds)
         if connectErrno == 0 {
             return true
         }
         _ = CLIStaleSocketFileCleaner.cleanupIfNeeded(path: path, connectErrno: connectErrno)
         return false
+    }
+
+    private static func remainingConnectProbeTimeout(until deadline: Date?) -> TimeInterval? {
+        guard let deadline else {
+            return connectProbeTimeoutSeconds
+        }
+
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0 else { return nil }
+        return min(connectProbeTimeoutSeconds, remaining)
     }
 
     private static func sanitizeTagSlug(_ raw: String) -> String {
@@ -759,7 +789,9 @@ fileprivate final class SocketClient {
     func connect() throws {
         if socketFD >= 0 { return }
 
-        let deadline = Date().addingTimeInterval(configuration.connectRetryWindowSeconds)
+        let deadline =
+            configuration.timeoutDeadline ??
+            Date().addingTimeInterval(configuration.connectRetryWindowSeconds)
         var lastError: CLIError?
 
         while true {
@@ -833,11 +865,19 @@ fileprivate final class SocketClient {
 
         var data = Data()
         var sawNewline = false
-        let start = Date()
+        let deadline =
+            configuration.timeoutDeadline ??
+            Date().addingTimeInterval(configuration.responseTimeoutSeconds)
 
         while true {
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0, !sawNewline {
+                throw CLIError(message: "Command timed out")
+            }
+
+            let timeoutMs = Int32(min(Double(100), ceil(max(0.001, remaining) * 1000.0)))
             var pollFD = pollfd(fd: socketFD, events: Int16(POLLIN), revents: 0)
-            let ready = poll(&pollFD, 1, 100)
+            let ready = poll(&pollFD, 1, max(1, timeoutMs))
             if ready < 0 {
                 throw CLIError(message: "Socket read error")
             }
@@ -845,7 +885,7 @@ fileprivate final class SocketClient {
                 if sawNewline {
                     break
                 }
-                if Date().timeIntervalSince(start) > configuration.responseTimeoutSeconds {
+                if deadline.timeIntervalSinceNow <= 0 {
                     throw CLIError(message: "Command timed out")
                 }
                 continue
@@ -8184,16 +8224,18 @@ struct CMUXCLI {
         processEnv: [String: String]
     ) -> String {
         var info = resolvedVersionInfo()
+        let versionDeadline = Date().addingTimeInterval(cliVersionSocketTimeoutSeconds(processEnv: processEnv))
         let resolvedSocketPath = CLISocketPathResolver.resolve(
             requestedPath: requestedSocketPath,
             source: socketPathSource,
-            environment: processEnv
+            environment: processEnv,
+            connectProbeDeadline: versionDeadline
         )
 
         if let appInfo = runningAppVersionInfo(
             socketPath: resolvedSocketPath,
             explicitPassword: explicitPassword,
-            processEnv: processEnv
+            versionDeadline: versionDeadline
         ) {
             info.merge(appInfo, uniquingKeysWith: { _, new in new })
         }
@@ -8204,13 +8246,18 @@ struct CMUXCLI {
     private func runningAppVersionInfo(
         socketPath: String,
         explicitPassword: String?,
-        processEnv: [String: String]
+        versionDeadline: Date
     ) -> [String: String]? {
         guard cliIsUnixSocketFile(socketPath) else {
             return nil
         }
+        let remaining = versionDeadline.timeIntervalSinceNow
+        guard remaining > 0 else { return nil }
 
-        let client = SocketClient(path: socketPath, configuration: .versionQuery(processEnv: processEnv))
+        let client = SocketClient(
+            path: socketPath,
+            configuration: .versionQuery(timeoutSeconds: remaining, deadline: versionDeadline)
+        )
         do {
             try client.connect()
             defer { client.close() }

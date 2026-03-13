@@ -2275,11 +2275,15 @@ class TerminalController {
 
     private func v2Identify(params: [String: Any]) -> [String: Any] {
         guard let tabManager = v2ResolveTabManager(params: params) else {
-            return [
+            var payload: [String: Any] = [
                 "socket_path": socketPath,
                 "focused": NSNull(),
                 "caller": NSNull()
             ]
+            if let appInfo = v2AppVersionInfo() {
+                payload["app_info"] = appInfo
+            }
+            return payload
         }
 
         var focused: [String: Any] = [:]

@@ -358,6 +358,7 @@ private final class FakeVersionSocketServer {
     private let mode: FakeVersionSocketServerMode
     private let ready = DispatchSemaphore(value: 0)
     private let stateLock = NSLock()
+    private var readBuffer = Data()
     private var stopRequested = false
     private var thread: Thread?
     private var listenerFD: Int32 = -1
@@ -486,6 +487,9 @@ private final class FakeVersionSocketServer {
     }
 
     private func handleConnection(_ clientFD: Int32) {
+        readBuffer.removeAll(keepingCapacity: true)
+        defer { readBuffer.removeAll(keepingCapacity: true) }
+
         while !isStopRequested {
             guard let requestLine = readLine(from: clientFD, timeoutMilliseconds: 200) else {
                 return
@@ -554,9 +558,13 @@ private final class FakeVersionSocketServer {
     }
 
     private func readLine(from fd: Int32, timeoutMilliseconds: Int32) -> String? {
-        var data = Data()
-
         while !isStopRequested {
+            if let newlineIndex = readBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                let lineData = readBuffer.prefix(upTo: newlineIndex)
+                readBuffer.removeSubrange(readBuffer.startIndex...newlineIndex)
+                return String(data: lineData, encoding: .utf8)
+            }
+
             var pollFD = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let ready = poll(&pollFD, 1, timeoutMilliseconds)
             if ready < 0 {
@@ -566,7 +574,7 @@ private final class FakeVersionSocketServer {
                 return nil
             }
             if ready == 0 {
-                if data.isEmpty {
+                if readBuffer.isEmpty {
                     return nil
                 }
                 continue
@@ -575,13 +583,12 @@ private final class FakeVersionSocketServer {
             var buffer = [UInt8](repeating: 0, count: 4096)
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count <= 0 {
-                return data.isEmpty ? nil : String(data: data, encoding: .utf8)
+                guard !readBuffer.isEmpty else { return nil }
+                let line = String(data: readBuffer, encoding: .utf8)
+                readBuffer.removeAll(keepingCapacity: true)
+                return line
             }
-            data.append(buffer, count: count)
-            if let newlineIndex = data.firstIndex(of: UInt8(ascii: "\n")) {
-                let lineData = data.prefix(upTo: newlineIndex)
-                return String(data: lineData, encoding: .utf8)
-            }
+            readBuffer.append(buffer, count: count)
         }
 
         return nil
