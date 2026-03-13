@@ -536,7 +536,7 @@
       "patternDebug": "Fang debug-artefakter ved feil",
       "patternSession": "Lagre og gjenopprett nettleserøkt",
       "metaTitle": "Nettleserautomatisering",
-      "navigationDesc": "Bruk open eller open-split for å opprette en ny nettleserflate og laste en URL. Bruk navigate eller goto når du allerede har en flate og vil bytte side. Bekreft URL-en etter begge før du venter eller tar et snapshot.",
+      "navigationDesc": "Bruk open eller open-split for å opprette en ny nettleserflate og laste en URL. Bruk navigate når du allerede har en flate og vil bytte side. Bekreft URL-en etter begge før du venter eller tar et snapshot.",
       "patternNavigateDesc": "Den stabile løkken er: navigate, bekreft med get url, wait, deretter snapshot.",
       "troubleshooting": "Feilsøking",
       "troubleBlankPage": "Tomme sider og tomme snapshots",

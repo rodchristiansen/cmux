@@ -515,7 +515,7 @@
       "targetingSurface": "ブラウザサーフェスの指定",
       "targetingDesc": "ほとんどのサブコマンドにはターゲットサーフェスが必要です。位置引数または--surfaceで指定できます。",
       "navigation": "ナビゲーション",
-      "navigationDesc": "openとopen-splitは新しいブラウザサーフェスを作成してURLを読み込みます。既存サーフェスでページを切り替えるときはnavigateまたはgotoを使います。どちらの場合も、waitやsnapshotの前にURLを確認してください。",
+      "navigationDesc": "openとopen-splitは新しいブラウザサーフェスを作成してURLを読み込みます。既存サーフェスでページを切り替えるときはnavigateを使います。どちらの場合も、waitやsnapshotの前にURLを確認してください。",
       "waitingSection": "待機",
       "waitingDesc": "waitを使用して、セレクタ、テキスト、URLフラグメント、ロード状態、またはJavaScript条件が満たされるまでブロックします。",
       "domSection": "DOM操作",

@@ -536,7 +536,7 @@
       "patternDebug": "Capturar artefactos de depuración en caso de error",
       "patternSession": "Persistir y restaurar sesión del navegador",
       "metaTitle": "Automatización del navegador",
-      "navigationDesc": "Usa open u open-split para crear una nueva superficie del navegador y cargar una URL. Usa navigate o goto cuando ya tengas una superficie y quieras cambiar de página. Después de cualquiera de ellas, confirma la URL antes de esperar o tomar un snapshot.",
+      "navigationDesc": "Usa open u open-split para crear una nueva superficie del navegador y cargar una URL. Usa navigate cuando ya tengas una superficie y quieras cambiar de página. Después de cualquiera de ellas, confirma la URL antes de esperar o tomar un snapshot.",
       "patternNavigateDesc": "El flujo estable es: navigate, verificar con get url, wait y luego snapshot.",
       "troubleshooting": "Solución de problemas",
       "troubleBlankPage": "Páginas en blanco y snapshots vacíos",

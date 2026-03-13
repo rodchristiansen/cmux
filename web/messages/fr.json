@@ -536,7 +536,7 @@
       "patternDebug": "Capturer les artefacts de debug en cas d'échec",
       "patternSession": "Persister et restaurer la session du navigateur",
       "metaTitle": "Automatisation du navigateur",
-      "navigationDesc": "Utilisez open ou open-split pour créer une nouvelle surface navigateur et charger une URL. Utilisez navigate ou goto lorsque vous avez déjà une surface et souhaitez changer de page. Après l'une ou l'autre, confirmez l'URL avant d'attendre ou de prendre un snapshot.",
+      "navigationDesc": "Utilisez open ou open-split pour créer une nouvelle surface navigateur et charger une URL. Utilisez navigate lorsque vous avez déjà une surface et souhaitez changer de page. Après l'une ou l'autre, confirmez l'URL avant d'attendre ou de prendre un snapshot.",
       "patternNavigateDesc": "La boucle stable est : navigate, vérifier avec get url, wait, puis snapshot.",
       "troubleshooting": "Dépannage",
       "troubleBlankPage": "Pages vides et snapshots vides",

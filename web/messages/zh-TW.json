@@ -536,7 +536,7 @@
       "patternDebug": "失敗時擷取除錯資訊",
       "patternSession": "保存和還原瀏覽器工作階段",
       "metaTitle": "瀏覽器自動化",
-      "navigationDesc": "使用 open 或 open-split 建立新的瀏覽器表面並載入 URL。當你已經有表面且想切換頁面時，請使用 navigate 或 goto。無論哪一種，在等待或擷取快照之前，都先確認 URL。",
+      "navigationDesc": "使用 open 或 open-split 建立新的瀏覽器表面並載入 URL。當你已經有表面且想切換頁面時，請使用 navigate。無論哪一種，在等待或擷取快照之前，都先確認 URL。",
       "patternNavigateDesc": "穩定流程是：navigate，用 get url 驗證，wait，然後 snapshot。",
       "troubleshooting": "疑難排解",
       "troubleBlankPage": "空白頁面與空快照",

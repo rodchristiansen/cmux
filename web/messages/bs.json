@@ -536,7 +536,7 @@
       "patternDebug": "Uhvati debug artefakte pri neuspjehu",
       "patternSession": "Sačuvaj i obnovi sesiju preglednika",
       "metaTitle": "Automatizacija preglednika",
-      "navigationDesc": "Koristite open ili open-split da napravite novu površinu preglednika i učitate URL. Koristite navigate ili goto kada već imate površinu i želite promijeniti stranicu. Nakon bilo koje od tih komandi, potvrdite URL prije čekanja ili pravljenja snapshota.",
+      "navigationDesc": "Koristite open ili open-split da napravite novu površinu preglednika i učitate URL. Koristite navigate kada već imate površinu i želite promijeniti stranicu. Nakon bilo koje od tih komandi, potvrdite URL prije čekanja ili pravljenja snapshota.",
       "patternNavigateDesc": "Stabilna petlja je: navigate, provjera sa get url, wait, pa snapshot.",
       "troubleshooting": "Rješavanje problema",
       "troubleBlankPage": "Prazne stranice i prazni snapshoti",

@@ -536,7 +536,7 @@
       "patternDebug": "จับ debug artifact เมื่อล้มเหลว",
       "patternSession": "บันทึกและกู้คืนเซสชันเบราว์เซอร์",
       "metaTitle": "ระบบอัตโนมัติของเบราว์เซอร์",
-      "navigationDesc": "ใช้ open หรือ open-split เพื่อสร้างพื้นผิวเบราว์เซอร์ใหม่และโหลด URL ใช้ navigate หรือ goto เมื่อคุณมีพื้นผิวอยู่แล้วและต้องการเปลี่ยนหน้า หลังจากใช้คำสั่งใดคำสั่งหนึ่ง ให้ยืนยัน URL ก่อนรอหรือทำ snapshot",
+      "navigationDesc": "ใช้ open หรือ open-split เพื่อสร้างพื้นผิวเบราว์เซอร์ใหม่และโหลด URL ใช้ navigate เมื่อคุณมีพื้นผิวอยู่แล้วและต้องการเปลี่ยนหน้า หลังจากใช้วิธีใดวิธีหนึ่ง ให้ยืนยัน URL ก่อนรอหรือทำ snapshot",
       "patternNavigateDesc": "ลำดับที่เสถียรคือ navigate ตรวจสอบด้วย get url จากนั้น wait แล้วค่อย snapshot",
       "troubleshooting": "การแก้ปัญหา",
       "troubleBlankPage": "หน้าว่างและ snapshot ว่าง",

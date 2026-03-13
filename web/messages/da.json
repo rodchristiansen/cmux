@@ -536,7 +536,7 @@
       "patternDebug": "Indfang debug-artefakter ved fejl",
       "patternSession": "Gem og gendan browsersession",
       "metaTitle": "Browserautomatisering",
-      "navigationDesc": "Brug open eller open-split til at oprette en ny browserflade og indlæse en URL. Brug navigate eller goto, når du allerede har en flade og vil skifte side. Bekræft URL'en efter begge, før du venter eller tager et snapshot.",
+      "navigationDesc": "Brug open eller open-split til at oprette en ny browserflade og indlæse en URL. Brug navigate, når du allerede har en flade og vil skifte side. Bekræft URL'en efter begge, før du venter eller tager et snapshot.",
       "patternNavigateDesc": "Den stabile løkke er: navigate, bekræft med get url, wait og derefter snapshot.",
       "troubleshooting": "Fejlfinding",
       "troubleBlankPage": "Tomme sider og tomme snapshots",

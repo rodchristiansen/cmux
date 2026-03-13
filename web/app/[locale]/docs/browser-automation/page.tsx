@@ -278,6 +278,7 @@ cmux browser surface:2 reload`}</CodeBlock>
       <CodeBlock lang="bash">{`cmux browser surface:2 get url
 # If the URL is empty or about:blank, navigate before waiting
 cmux browser surface:2 navigate https://example.com
+cmux browser surface:2 get url
 cmux browser surface:2 wait --load-state complete --timeout-ms 15000
 cmux browser surface:2 snapshot --interactive --compact`}</CodeBlock>
 

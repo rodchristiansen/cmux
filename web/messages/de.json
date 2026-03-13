@@ -536,7 +536,7 @@
       "patternDebug": "Debug-Artefakte bei Fehler erfassen",
       "patternSession": "Browser-Sitzung speichern und wiederherstellen",
       "metaTitle": "Browser-Automatisierung",
-      "navigationDesc": "Verwende open oder open-split, um eine neue Browser-Oberfläche zu erstellen und eine URL zu laden. Verwende navigate oder goto, wenn bereits eine Oberfläche vorhanden ist und du die Seite wechseln möchtest. Bestätige danach jeweils zuerst die URL, bevor du wartest oder einen Snapshot erstellst.",
+      "navigationDesc": "Verwende open oder open-split, um eine neue Browser-Oberfläche zu erstellen und eine URL zu laden. Verwende navigate, wenn bereits eine Oberfläche vorhanden ist und du die Seite wechseln möchtest. Bestätige danach zuerst die URL, bevor du wartest oder einen Snapshot erstellst.",
       "patternNavigateDesc": "Der stabile Ablauf ist: navigate, mit get url prüfen, wait, dann snapshot.",
       "troubleshooting": "Fehlerbehebung",
       "troubleBlankPage": "Leere Seiten und leere Snapshots",
