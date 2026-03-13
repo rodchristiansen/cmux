@@ -45,30 +45,18 @@ final class BonsplitTabDragUITests: XCTestCase {
     }
 
     func testPaneTabBarControlsRevealWhenHoveringAnywhereOnPaneTabBar() {
-        let (app, dataPath) = launchConfiguredApp()
+        let (app, _) = launchConfiguredApp()
 
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch for Bonsplit controls hover UI test. state=\(app.state.rawValue)"
         )
 
-        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
-        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
-            XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
-            return
-        }
-
-        if let setupError = ready["setupError"], !setupError.isEmpty {
-            XCTFail("Setup failed: \(setupError)")
-            return
-        }
-
         let window = app.windows.element(boundBy: 0)
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
 
-        let alphaTitle = ready["alphaTitle"] ?? "UITest Alpha"
-        let alphaTab = app.buttons[alphaTitle]
-        XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
+        let terminalTab = app.buttons["Terminal"]
+        XCTAssertTrue(terminalTab.waitForExistence(timeout: 5.0), "Expected terminal tab to exist")
 
         let newTerminalButton = app.buttons["paneTabBarControl.newTerminal"]
         XCTAssertTrue(newTerminalButton.waitForExistence(timeout: 5.0), "Expected new terminal control to exist")
@@ -79,7 +67,7 @@ final class BonsplitTabDragUITests: XCTestCase {
             "Expected pane tab bar controls to hide away from the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
-        alphaTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        terminalTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { newTerminalButton.isHittable },
             "Expected pane tab bar controls to reveal when hovering a tab inside the pane tab bar. button=\(newTerminalButton.debugDescription)"
