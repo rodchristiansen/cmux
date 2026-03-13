@@ -585,12 +585,6 @@
     "metaDescription": "ดาวน์โหลด cmux NIGHTLY แอปแยกที่สร้างอัตโนมัติจาก commit ล่าสุดบน main ทำงานควบคู่กับเวอร์ชันเสถียรพร้อมอัปเดตอัตโนมัติของตัวเอง",
     "description": "cmux NIGHTLY สร้างอัตโนมัติจาก commit ล่าสุดบน main มี bundle ID เป็นของตัวเอง จึงทำงานควบคู่กับเวอร์ชันเสถียรได้โดยไม่ขัดแย้ง ใช้เพื่อทดสอบฟีเจอร์ใหม่ก่อนเปิดตัว",
     "download": "ดาวน์โหลด NIGHTLY สำหรับ Mac",
-    "detailsHeading": "วิธีการทำงาน",
-    "detailSeparateApp": "แอปแยกที่มี bundle ID ไอคอน และการตั้งค่าเป็นของตัวเอง",
-    "detailAutoBuilt": "สร้างอัตโนมัติจาก commit ล่าสุดบน main",
-    "detailAutoUpdates": "อัปเดตอัตโนมัติผ่าน Sparkle feed ของตัวเอง แยกจากเวอร์ชันเสถียร",
-    "detailSideBySide": "ทำงานควบคู่กับเวอร์ชันเสถียร",
-    "homebrewHeading": "ติดตั้งผ่าน Homebrew",
     "warning": "บิลด์ nightly อาจมีบั๊กหรือฟีเจอร์ที่ยังไม่สมบูรณ์ หากพบปัญหา รายงานบน GitHub แล้วสลับกลับไปใช้เวอร์ชันเสถียร"
   },
   "languageSwitcher": {

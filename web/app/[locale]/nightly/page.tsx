@@ -24,18 +24,13 @@ export default function NightlyPage() {
       <main className="w-full max-w-2xl mx-auto px-6 py-10">
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">
-          <div className="relative">
-            <img
-              src="/logo.png"
-              alt="cmux icon"
-              width={48}
-              height={48}
-              className="rounded-xl"
-            />
-            <span className="absolute -bottom-1 -right-2 text-[9px] font-bold tracking-wider bg-amber-500 text-black px-1.5 py-0.5 rounded-full leading-none">
-              NIGHTLY
-            </span>
-          </div>
+          <img
+            src="/logo-nightly.png"
+            alt="cmux NIGHTLY icon"
+            width={48}
+            height={48}
+            className="rounded-xl"
+          />
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               {t("title")}
@@ -68,44 +63,6 @@ export default function NightlyPage() {
           </svg>
           {t("download")}
         </a>
-
-        {/* Details */}
-        <section className="mt-10">
-          <h2 className="text-xs font-medium text-muted tracking-tight mb-3">
-            {t("detailsHeading")}
-          </h2>
-          <ul
-            className="space-y-3 text-[15px]"
-            style={{ lineHeight: 1.5 }}
-          >
-            <li className="flex gap-3">
-              <span className="text-muted shrink-0">-</span>
-              <span className="text-muted">{t("detailSeparateApp")}</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="text-muted shrink-0">-</span>
-              <span className="text-muted">{t("detailAutoBuilt")}</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="text-muted shrink-0">-</span>
-              <span className="text-muted">{t("detailAutoUpdates")}</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="text-muted shrink-0">-</span>
-              <span className="text-muted">{t("detailSideBySide")}</span>
-            </li>
-          </ul>
-        </section>
-
-        {/* Install via Homebrew */}
-        <section className="mt-10">
-          <h2 className="text-xs font-medium text-muted tracking-tight mb-3">
-            {t("homebrewHeading")}
-          </h2>
-          <pre className="bg-code-bg border border-border rounded-lg px-4 py-3 text-sm font-mono overflow-x-auto">
-            <code>{`brew tap manaflow-ai/cmux\nbrew install --cask cmux-nightly`}</code>
-          </pre>
-        </section>
 
         {/* Warning */}
         <section className="mt-10">

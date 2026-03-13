@@ -589,12 +589,6 @@
     "metaDescription": "cmux NIGHTLY indirin. main deki en son commit ten otomatik olarak derlenen bağımsız bir uygulama. Kararlı sürümle yan yana çalışır ve kendi otomatik güncellemelerine sahiptir.",
     "description": "cmux NIGHTLY, main deki en son commit ten otomatik olarak derlenir. Kendi bundle ID sine sahip olduğundan kararlı sürümle çakışmadan yan yana çalışır. Yeni özellikleri yayınlanmadan önce test etmek için kullanın.",
     "download": "Mac için NIGHTLY indir",
-    "detailsHeading": "Nasıl çalışır",
-    "detailSeparateApp": "Kendi bundle ID si, simgesi ve tercihleri olan bağımsız uygulama",
-    "detailAutoBuilt": "main deki en son commit ten otomatik olarak derlenir",
-    "detailAutoUpdates": "Kararlı sürümden bağımsız kendi Sparkle akışı üzerinden otomatik güncelleme",
-    "detailSideBySide": "Kararlı sürümle yan yana çalışır",
-    "homebrewHeading": "Homebrew ile kur",
     "warning": "Nightly derlemeler hatalar veya tamamlanmamış özellikler içerebilir. Bir sorun oluşursa GitHub da bildirin ve kararlı sürüme geçin."
   },
   "languageSwitcher": {

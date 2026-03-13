@@ -589,12 +589,6 @@
     "metaDescription": "Preuzmite cmux NIGHTLY, zasebnu aplikaciju koja se automatski kompajlira iz posljednjeg commita na main. Radi uporedo sa stabilnom verzijom s vlastitim automatskim ažuriranjima.",
     "description": "cmux NIGHTLY se automatski kompajlira iz posljednjeg commita na main. Ima vlastiti bundle ID, pa radi uporedo sa stabilnom verzijom bez konflikata. Koristite ga za testiranje novih funkcija prije objavljivanja.",
     "download": "Preuzmi NIGHTLY za Mac",
-    "detailsHeading": "Kako funkcionira",
-    "detailSeparateApp": "Zasebna aplikacija s vlastitim bundle ID-om, ikonom i postavkama",
-    "detailAutoBuilt": "Automatski kompajlirana iz posljednjeg commita na main",
-    "detailAutoUpdates": "Automatska ažuriranja putem vlastitog Sparkle feeda, nezavisno od stabilne verzije",
-    "detailSideBySide": "Radi uporedo sa stabilnim izdanjem",
-    "homebrewHeading": "Instalacija putem Homebrew",
     "warning": "Nightly verzije mogu sadržavati greške ili nepotpune funkcije. Ako nešto ne radi, prijavite to na GitHubu i prebacite se na stabilnu verziju."
   },
   "languageSwitcher": {

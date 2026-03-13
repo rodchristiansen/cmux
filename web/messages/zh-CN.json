@@ -589,12 +589,6 @@
     "metaDescription": "下载 cmux NIGHTLY，从最新 main 提交自动构建的独立应用。与稳定版并行运行，拥有独立的自动更新。",
     "description": "cmux NIGHTLY 从 main 的最新提交自动构建。它拥有独立的 Bundle ID，因此可以与稳定版并行运行，互不冲突。用它来测试尚未发布的新功能。",
     "download": "下载 Mac 版 NIGHTLY",
-    "detailsHeading": "工作原理",
-    "detailSeparateApp": "拥有独立的 Bundle ID、图标和偏好设置",
-    "detailAutoBuilt": "从 main 的最新提交自动构建",
-    "detailAutoUpdates": "通过独立的 Sparkle 源自动更新，与稳定版无关",
-    "detailSideBySide": "可与稳定版并行运行",
-    "homebrewHeading": "通过 Homebrew 安装",
     "warning": "每夜构建可能包含错误或不完整的功能。如果遇到问题，请在 GitHub 上报告并切换回稳定版。"
   },
   "languageSwitcher": {
