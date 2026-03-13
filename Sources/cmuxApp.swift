@@ -555,6 +555,12 @@ struct cmuxApp: App {
                 }
                 .keyboardShortcut("r", modifiers: .command)
 
+                Toggle(
+                    String(localized: "menu.view.captureWebviewKeyboard", defaultValue: "Capture Webview Keyboard"),
+                    isOn: focusedBrowserKeyboardCaptureBinding
+                )
+                .disabled(activeTabManager.focusedBrowserPanel == nil)
+
                 splitCommandButton(title: String(localized: "menu.view.toggleDevTools", defaultValue: "Toggle Developer Tools"), shortcut: toggleBrowserDeveloperToolsMenuShortcut) {
                     let manager = activeTabManager
                     if !manager.toggleDeveloperToolsFocusedBrowser() {
@@ -797,6 +803,19 @@ struct cmuxApp: App {
         AppDelegate.shared?.synchronizeActiveMainWindowContext(
             preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow
         ) ?? tabManager
+    }
+
+    private var focusedBrowserKeyboardCaptureBinding: Binding<Bool> {
+        Binding(
+            get: { activeTabManager.focusedBrowserPanel?.isKeyboardCaptureActive ?? false },
+            set: { enabled in
+                _ = activeTabManager.setFocusedBrowserKeyboardCaptureActive(
+                    enabled,
+                    reason: "mainMenu.toggle",
+                    focusWebView: enabled
+                )
+            }
+        )
     }
 
     private func decodeShortcut(from data: Data, fallback: StoredShortcut) -> StoredShortcut {

@@ -1972,6 +1972,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var jumpUnreadFocusObserver: NSObjectProtocol?
     private var didSetupGotoSplitUITest = false
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
+    private var gotoSplitUITestKeyboardCapturePollGeneration: UInt64 = 0
+    private var gotoSplitUITestKeyboardCapturePanelId: UUID?
     private var didSetupMultiWindowNotificationsUITest = false
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
@@ -4026,6 +4028,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         markPending: Bool
     ) {
         let targetWindow = preferredWindow ?? NSApp.keyWindow ?? NSApp.mainWindow
+        if let targetWindow,
+           let context = contextForMainWindow(targetWindow) {
+            _ = context.tabManager.setFocusedBrowserKeyboardCaptureActive(
+                false,
+                reason: "commandPaletteRequest.\(name.rawValue)"
+            )
+        }
         if markPending {
             markCommandPaletteOpenRequested(for: targetWindow)
         }
@@ -6540,6 +6549,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if ProcessInfo.processInfo.environment["CMUX_UI_TEST_GOTO_SPLIT_INPUT_SETUP"] == "1" {
                 setupFocusedInputForGotoSplitUITest(panel: browserPanel)
             }
+            if ProcessInfo.processInfo.environment["CMUX_UI_TEST_BROWSER_KEY_CAPTURE_SETUP"] == "1" {
+                setupBrowserKeyboardCaptureUITest(panel: browserPanel)
+            }
             return
         }
 
@@ -6572,6 +6584,163 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         guard let browserPane, let terminalPane else { return nil }
         return (browserPane, terminalPane)
+    }
+
+    private func browserPanelAcrossContexts(for panelId: UUID) -> BrowserPanel? {
+        if let panel = tabManager?.tabs.compactMap({ $0.browserPanel(for: panelId) }).first {
+            return panel
+        }
+        for context in mainWindowContexts.values {
+            if let panel = context.tabManager.tabs.compactMap({ $0.browserPanel(for: panelId) }).first {
+                return panel
+            }
+        }
+        return nil
+    }
+
+    private func setupBrowserKeyboardCaptureUITest(panel: BrowserPanel, attempt: Int = 0) {
+        let maxAttempts = 80
+        guard attempt < maxAttempts else {
+            writeGotoSplitTestData([
+                "browserKeyboardCapturePageTrackerInstalled": "false",
+                "setupError": "Timed out installing browser keyboard capture test tracker"
+            ])
+            return
+        }
+
+        let script = """
+        (() => {
+          try {
+            const readyState = String(document.readyState || "");
+            if (readyState !== "complete") {
+              return { installed: false, readyState };
+            }
+
+            if (!window.__cmuxKeyboardCaptureState || window.__cmuxKeyboardCaptureState.version !== 1) {
+              window.__cmuxKeyboardCaptureState = {
+                version: 1,
+                keydownCount: 0,
+                lastKey: "",
+                lastCode: "",
+                lastMeta: false,
+                lastShift: false,
+                lastControl: false,
+                lastOption: false,
+                lastRepeat: false,
+                lastTargetTag: "",
+                lastInputValue: ""
+              };
+            }
+
+            if (window.__cmuxKeyboardCaptureHandlerInstalled !== true) {
+              window.__cmuxKeyboardCaptureHandlerInstalled = true;
+              window.addEventListener("keydown", event => {
+                const state = window.__cmuxKeyboardCaptureState;
+                const active = document.activeElement;
+                state.keydownCount = (Number(state.keydownCount) || 0) + 1;
+                state.lastKey = String(event.key || "");
+                state.lastCode = String(event.code || "");
+                state.lastMeta = !!event.metaKey;
+                state.lastShift = !!event.shiftKey;
+                state.lastControl = !!event.ctrlKey;
+                state.lastOption = !!event.altKey;
+                state.lastRepeat = !!event.repeat;
+                state.lastTargetTag = active && active.tagName ? String(active.tagName).toLowerCase() : "";
+                state.lastInputValue =
+                  active && typeof active.value === "string" ? active.value : "";
+              }, true);
+            }
+
+            return {
+              installed: window.__cmuxKeyboardCaptureHandlerInstalled === true,
+              readyState,
+              keydownCount: Number(window.__cmuxKeyboardCaptureState.keydownCount || 0)
+            };
+          } catch (_) {
+            return { installed: false, readyState: "error" };
+          }
+        })();
+        """
+
+        panel.webView.evaluateJavaScript(script) { [weak self] result, _ in
+            guard let self else { return }
+            let payload = result as? [String: Any]
+            let installed = (payload?["installed"] as? Bool) ?? false
+            let readyState = (payload?["readyState"] as? String) ?? ""
+            if installed {
+                self.writeGotoSplitTestData([
+                    "browserKeyboardCapturePageTrackerInstalled": "true",
+                    "browserKeyboardCapturePageReadyState": readyState
+                ])
+                self.startBrowserKeyboardCaptureUITestPolling(panelId: panel.id)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.setupBrowserKeyboardCaptureUITest(panel: panel, attempt: attempt + 1)
+            }
+        }
+    }
+
+    private func startBrowserKeyboardCaptureUITestPolling(panelId: UUID) {
+        gotoSplitUITestKeyboardCapturePanelId = panelId
+        gotoSplitUITestKeyboardCapturePollGeneration &+= 1
+        pollBrowserKeyboardCaptureUITestState(panelId: panelId, generation: gotoSplitUITestKeyboardCapturePollGeneration)
+    }
+
+    private func pollBrowserKeyboardCaptureUITestState(panelId: UUID, generation: UInt64) {
+        guard gotoSplitUITestKeyboardCapturePanelId == panelId,
+              gotoSplitUITestKeyboardCapturePollGeneration == generation else {
+            return
+        }
+        guard let panel = browserPanelAcrossContexts(for: panelId) else { return }
+
+        let script = """
+        (() => {
+          try {
+            const state = window.__cmuxKeyboardCaptureState;
+            if (!state) {
+              return { installed: false };
+            }
+            return {
+              installed: window.__cmuxKeyboardCaptureHandlerInstalled === true,
+              keydownCount: Number(state.keydownCount || 0),
+              lastKey: String(state.lastKey || ""),
+              lastCode: String(state.lastCode || ""),
+              lastMeta: !!state.lastMeta,
+              lastShift: !!state.lastShift,
+              lastControl: !!state.lastControl,
+              lastOption: !!state.lastOption,
+              lastRepeat: !!state.lastRepeat,
+              lastTargetTag: String(state.lastTargetTag || ""),
+              lastInputValue: String(state.lastInputValue || "")
+            };
+          } catch (_) {
+            return { installed: false };
+          }
+        })();
+        """
+
+        panel.webView.evaluateJavaScript(script) { [weak self] result, _ in
+            guard let self else { return }
+            let payload = result as? [String: Any]
+            self.writeGotoSplitTestData([
+                "browserKeyboardCapturePageTrackerInstalled": ((payload?["installed"] as? Bool) ?? false) ? "true" : "false",
+                "browserKeyboardCapturePageKeydownCount": String((payload?["keydownCount"] as? NSNumber)?.intValue ?? 0),
+                "browserKeyboardCapturePageLastKey": (payload?["lastKey"] as? String) ?? "",
+                "browserKeyboardCapturePageLastCode": (payload?["lastCode"] as? String) ?? "",
+                "browserKeyboardCapturePageLastMeta": ((payload?["lastMeta"] as? Bool) ?? false) ? "true" : "false",
+                "browserKeyboardCapturePageLastShift": ((payload?["lastShift"] as? Bool) ?? false) ? "true" : "false",
+                "browserKeyboardCapturePageLastControl": ((payload?["lastControl"] as? Bool) ?? false) ? "true" : "false",
+                "browserKeyboardCapturePageLastOption": ((payload?["lastOption"] as? Bool) ?? false) ? "true" : "false",
+                "browserKeyboardCapturePageLastRepeat": ((payload?["lastRepeat"] as? Bool) ?? false) ? "true" : "false",
+                "browserKeyboardCapturePageLastTargetTag": (payload?["lastTargetTag"] as? String) ?? "",
+                "browserKeyboardCapturePageLastInputValue": (payload?["lastInputValue"] as? String) ?? ""
+            ])
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.pollBrowserKeyboardCaptureUITestState(panelId: panelId, generation: generation)
+            }
+        }
     }
 
     private func installGotoSplitUITestFocusObserversIfNeeded() {
@@ -7947,6 +8116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 
+        if let handled = handleCapturedBrowserKeyboardShortcutBypass(event: event) {
+            return handled
+        }
+
         // Guard against stale browserAddressBarFocusedPanelId after focus transitions
         // (e.g., split that doesn't properly blur the address bar). If the first responder
         // is a terminal surface, the address bar can't be focused.
@@ -8667,6 +8840,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 #endif
 
+    private var browserKeyboardCaptureExitTimeout: TimeInterval { 1.25 }
+
+    private func focusedBrowserPanel(in context: MainWindowContext) -> BrowserPanel? {
+        guard let workspace = context.tabManager.selectedWorkspace,
+              let panelId = workspace.focusedPanelId else {
+            return nil
+        }
+        return workspace.browserPanel(for: panelId)
+    }
+
+    private func browserPanelOwningWebView(_ webView: WKWebView) -> BrowserPanel? {
+        for context in mainWindowContexts.values {
+            for workspace in context.tabManager.tabs {
+                for panel in workspace.panels.values {
+                    guard let browser = panel as? BrowserPanel, browser.webView === webView else { continue }
+                    return browser
+                }
+            }
+        }
+        if let tabManager {
+            for workspace in tabManager.tabs {
+                for panel in workspace.panels.values {
+                    guard let browser = panel as? BrowserPanel, browser.webView === webView else { continue }
+                    return browser
+                }
+            }
+        }
+        return nil
+    }
+
+    private func capturedBrowserPanelForShortcutEvent(_ event: NSEvent) -> BrowserPanel? {
+        guard !titlebarAccessoryController.isNotificationsPopoverShown() else { return nil }
+        guard let context = preferredMainWindowContextForShortcutRouting(event: event),
+              let panel = focusedBrowserPanel(in: context),
+              panel.isKeyboardCaptureActive else {
+            return nil
+        }
+        return panel
+    }
+
+    func shouldBypassCmuxShortcutRoutingForCapturedBrowser(
+        event: NSEvent,
+        webView: CmuxWebView? = nil
+    ) -> Bool {
+        if let webView,
+           let panel = browserPanelOwningWebView(webView) {
+            return panel.isKeyboardCaptureActive
+        }
+        return capturedBrowserPanelForShortcutEvent(event) != nil
+    }
+
+    private func handleCapturedBrowserKeyboardShortcutBypass(event: NSEvent) -> Bool? {
+        guard let panel = capturedBrowserPanelForShortcutEvent(event) else { return nil }
+        let normalizedFlags = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.numericPad, .function, .capsLock])
+
+        guard normalizedFlags.isEmpty, event.keyCode == 53 else {
+            panel.clearKeyboardCaptureExitArm(reason: "nonEscape")
+            return false
+        }
+
+        if panel.isKeyboardCaptureExitArmed {
+            panel.clearKeyboardCapture(reason: "escapeDouble")
+#if DEBUG
+            dlog("browser.keyboardCapture.exit panel=\(panel.id.uuidString.prefix(5)) via=escapeDouble")
+#endif
+            return true
+        }
+
+        panel.armKeyboardCaptureExit(timeout: browserKeyboardCaptureExitTimeout, reason: "escapeFirst")
+        return false
+    }
+
     @discardableResult
     private func focusBrowserAddressBar(panelId: UUID) -> Bool {
         guard let tabManager,
@@ -8728,6 +8975,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func focusBrowserAddressBar(in panel: BrowserPanel) {
+        panel.clearKeyboardCapture(reason: "addressBarRequest")
 #if DEBUG
         let requestId = panel.requestAddressBarFocus()
         dlog(
@@ -9179,7 +9427,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// through the same app-level shortcut handler used by the local key monitor.
     @discardableResult
     func handleBrowserSurfaceKeyEquivalent(_ event: NSEvent) -> Bool {
-        handleCustomShortcut(event: event)
+        if capturedBrowserPanelForShortcutEvent(event) != nil {
+            return false
+        }
+        return handleCustomShortcut(event: event)
     }
 
     @discardableResult
@@ -11122,6 +11373,18 @@ private extension NSWindow {
 #endif
             self.firstResponder?.keyDown(with: event)
             return true
+        }
+
+        if let firstResponderWebView,
+           AppDelegate.shared?.shouldBypassCmuxShortcutRoutingForCapturedBrowser(
+            event: event,
+            webView: firstResponderWebView
+           ) == true {
+            let result = firstResponderWebView.performKeyEquivalent(with: event)
+#if DEBUG
+            dlog("  → captured browser direct: \(result)")
+#endif
+            return result
         }
 
         if AppDelegate.shared?.handleBrowserSurfaceKeyEquivalent(event) == true {
