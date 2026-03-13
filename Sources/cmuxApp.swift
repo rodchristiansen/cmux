@@ -3590,6 +3590,7 @@ struct SettingsView: View {
                     }
                 }
                 .onChange(of: trimmedSettingsSearchText) { _, _ in
+                    guard hasActiveSettingsSearch else { return }
                     DispatchQueue.main.async {
                         proxy.scrollTo(settingsTopAnchor, anchor: .top)
                     }
@@ -3729,8 +3730,12 @@ struct SettingsView: View {
                             selectedCategory = category
                             if hasActiveSettingsSearch {
                                 settingsSearchText = ""
+                                DispatchQueue.main.async {
+                                    pendingScrollCategory = category
+                                }
+                            } else {
+                                pendingScrollCategory = category
                             }
-                            pendingScrollCategory = category
                         } label: {
                             SettingsCategorySidebarButton(
                                 category: category,
@@ -3763,7 +3768,7 @@ struct SettingsView: View {
 
     private var settingsDetailPane: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 24) {
                 Color.clear
                     .frame(height: 0)
                     .id(settingsTopAnchor)
