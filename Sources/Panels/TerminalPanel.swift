@@ -199,6 +199,10 @@ final class TerminalPanel: Panel, ObservableObject {
         surface.sendText(text)
     }
 
+    func setInputBroadcastRelay(_ relay: ((TerminalBroadcastInputPayload) -> Void)?) {
+        surface.setInputBroadcastRelay(relay)
+    }
+
     func performBindingAction(_ action: String) -> Bool {
         surface.performBindingAction(action)
     }

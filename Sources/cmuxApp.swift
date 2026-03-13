@@ -37,6 +37,8 @@ struct cmuxApp: App {
     @AppStorage(KeyboardShortcutSettings.Action.renameWorkspace.defaultsKey) private var renameWorkspaceShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.openFolder.defaultsKey) private var openFolderShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.closeWorkspace.defaultsKey) private var closeWorkspaceShortcutData = Data()
+    @AppStorage(KeyboardShortcutSettings.Action.toggleWorkspaceInputBroadcast.defaultsKey)
+    private var toggleWorkspaceInputBroadcastShortcutData = Data()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
@@ -618,6 +620,15 @@ struct cmuxApp: App {
 
                 Divider()
 
+                splitCommandToggle(
+                    title: String(localized: "menu.view.broadcastInput", defaultValue: "Broadcast Input to All Panes"),
+                    shortcut: toggleWorkspaceInputBroadcastMenuShortcut,
+                    isOn: selectedWorkspaceBroadcastInputBinding(in: activeTabManager)
+                )
+                .disabled(activeTabManager.selectedWorkspace == nil)
+
+                Divider()
+
                 // Cmd+1 through Cmd+9 for workspace selection (9 = last workspace)
                 ForEach(1...9, id: \.self) { number in
                     Button(String(localized: "menu.view.workspace", defaultValue: "Workspace \(number)")) {
@@ -787,6 +798,13 @@ struct cmuxApp: App {
         )
     }
 
+    private var toggleWorkspaceInputBroadcastMenuShortcut: StoredShortcut {
+        decodeShortcut(
+            from: toggleWorkspaceInputBroadcastShortcutData,
+            fallback: KeyboardShortcutSettings.Action.toggleWorkspaceInputBroadcast.defaultShortcut
+        )
+    }
+
     private var notificationMenuSnapshot: NotificationMenuSnapshot {
         NotificationMenuSnapshotBuilder.make(notifications: notificationStore.notifications)
     }
@@ -928,6 +946,16 @@ struct cmuxApp: App {
         notificationStore.markUnread(forTabId: workspaceId)
     }
 
+    private func selectedWorkspaceBroadcastInputBinding(in manager: TabManager) -> Binding<Bool> {
+        Binding(
+            get: { manager.isSelectedWorkspaceInputBroadcastEnabled },
+            set: { enabled in
+                guard let workspaceId = manager.selectedWorkspace?.id else { return }
+                manager.setBroadcastInputEnabled(enabled, for: workspaceId)
+            }
+        )
+    }
+
     @ViewBuilder
     private func workspaceCommandMenuContent(manager: TabManager) -> some View {
         let workspace = manager.selectedWorkspace
@@ -1032,6 +1060,16 @@ struct cmuxApp: App {
                 .keyboardShortcut(key, modifiers: shortcut.eventModifiers)
         } else {
             Button(title, action: action)
+        }
+    }
+
+    @ViewBuilder
+    private func splitCommandToggle(title: String, shortcut: StoredShortcut, isOn: Binding<Bool>) -> some View {
+        if let key = shortcut.keyEquivalent {
+            Toggle(title, isOn: isOn)
+                .keyboardShortcut(key, modifiers: shortcut.eventModifiers)
+        } else {
+            Toggle(title, isOn: isOn)
         }
     }
 

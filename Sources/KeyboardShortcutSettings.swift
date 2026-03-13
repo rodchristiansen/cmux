@@ -25,6 +25,7 @@ enum KeyboardShortcutSettings {
         case closeWorkspace
         case newSurface
         case toggleTerminalCopyMode
+        case toggleWorkspaceInputBroadcast
 
         // Panes / splits
         case focusLeft
@@ -64,6 +65,7 @@ enum KeyboardShortcutSettings {
             case .closeWorkspace: return String(localized: "shortcut.closeWorkspace.label", defaultValue: "Close Workspace")
             case .newSurface: return String(localized: "shortcut.newSurface.label", defaultValue: "New Surface")
             case .toggleTerminalCopyMode: return String(localized: "shortcut.toggleTerminalCopyMode.label", defaultValue: "Toggle Terminal Copy Mode")
+            case .toggleWorkspaceInputBroadcast: return String(localized: "shortcut.toggleWorkspaceInputBroadcast.label", defaultValue: "Toggle Broadcast Input")
             case .focusLeft: return String(localized: "shortcut.focusPaneLeft.label", defaultValue: "Focus Pane Left")
             case .focusRight: return String(localized: "shortcut.focusPaneRight.label", defaultValue: "Focus Pane Right")
             case .focusUp: return String(localized: "shortcut.focusPaneUp.label", defaultValue: "Focus Pane Up")
@@ -108,10 +110,11 @@ enum KeyboardShortcutSettings {
             case .prevSurface: return "shortcut.prevSurface"
             case .newSurface: return "shortcut.newSurface"
             case .toggleTerminalCopyMode: return "shortcut.toggleTerminalCopyMode"
+            case .toggleWorkspaceInputBroadcast: return "shortcut.toggleWorkspaceInputBroadcast"
             case .openBrowser: return "shortcut.openBrowser"
             case .toggleBrowserDeveloperTools: return "shortcut.toggleBrowserDeveloperTools"
             case .showBrowserJavaScriptConsole: return "shortcut.showBrowserJavaScriptConsole"
-            }
+        }
         }
 
         var defaultShortcut: StoredShortcut {
@@ -170,6 +173,8 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "t", command: true, shift: false, option: false, control: false)
             case .toggleTerminalCopyMode:
                 return StoredShortcut(key: "m", command: true, shift: true, option: false, control: false)
+            case .toggleWorkspaceInputBroadcast:
+                return StoredShortcut(key: "b", command: true, shift: true, option: false, control: false)
             case .openBrowser:
                 return StoredShortcut(key: "l", command: true, shift: true, option: false, control: false)
             case .toggleBrowserDeveloperTools:
@@ -247,6 +252,7 @@ enum KeyboardShortcutSettings {
     static func nextSurfaceShortcut() -> StoredShortcut { shortcut(for: .nextSurface) }
     static func prevSurfaceShortcut() -> StoredShortcut { shortcut(for: .prevSurface) }
     static func newSurfaceShortcut() -> StoredShortcut { shortcut(for: .newSurface) }
+    static func toggleWorkspaceInputBroadcastShortcut() -> StoredShortcut { shortcut(for: .toggleWorkspaceInputBroadcast) }
 
     static func openBrowserShortcut() -> StoredShortcut { shortcut(for: .openBrowser) }
     static func toggleBrowserDeveloperToolsShortcut() -> StoredShortcut { shortcut(for: .toggleBrowserDeveloperTools) }

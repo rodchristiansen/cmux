@@ -36272,6 +36272,23 @@
         }
       }
     },
+    "menu.view.broadcastInput": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Broadcast Input to All Panes"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのペインへ入力をブロードキャスト"
+          }
+        }
+      }
+    },
     "menu.view.clearBrowserHistory": {
       "extractionState": "manual",
       "localizations": {
@@ -59835,6 +59852,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Terminal Kopyalama Modunu Aç/Kapat"
+          }
+        }
+      }
+    },
+    "shortcut.toggleWorkspaceInputBroadcast.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toggle Broadcast Input"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入力ブロードキャストを切替"
           }
         }
       }
