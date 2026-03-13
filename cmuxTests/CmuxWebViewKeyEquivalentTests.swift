@@ -5946,6 +5946,57 @@ final class WorkspaceTerminalConfigInheritanceSelectionTests: XCTestCase {
 }
 
 @MainActor
+final class WorkspaceSplitWorkingDirectoryTests: XCTestCase {
+    func testNewTerminalSplitPrefersSourcePanelDirectoryOverWorkspaceFallback() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId else {
+            XCTFail("Expected focused terminal panel")
+            return
+        }
+
+        workspace.updatePanelDirectory(panelId: sourcePanelId, directory: "/repo/source")
+        workspace.currentDirectory = "/repo/fallback"
+
+        guard let splitPanel = workspace.newTerminalSplit(from: sourcePanelId, orientation: .horizontal) else {
+            XCTFail("Expected split panel to be created")
+            return
+        }
+
+        XCTAssertEqual(
+            splitPanel.requestedWorkingDirectory,
+            "/repo/source",
+            "Expected Cmd+D-style splits to inherit the source terminal working directory"
+        )
+    }
+
+    func testBonsplitAutoCreatedSplitPrefersSourcePanelDirectoryOverWorkspaceFallback() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
+            XCTFail("Expected focused terminal pane")
+            return
+        }
+
+        workspace.updatePanelDirectory(panelId: sourcePanelId, directory: "/repo/source")
+        workspace.currentDirectory = "/repo/fallback"
+
+        guard let newPaneId = workspace.bonsplitController.splitPane(sourcePaneId, orientation: .horizontal),
+              let newTabId = workspace.bonsplitController.selectedTab(inPane: newPaneId)?.id,
+              let newPanelId = workspace.panelIdFromSurfaceId(newTabId),
+              let newPanel = workspace.terminalPanel(for: newPanelId) else {
+            XCTFail("Expected Bonsplit split to auto-create a terminal panel")
+            return
+        }
+
+        XCTAssertEqual(
+            newPanel.requestedWorkingDirectory,
+            "/repo/source",
+            "Expected Bonsplit-created split terminals to inherit the source terminal working directory"
+        )
+    }
+}
+
+@MainActor
 final class TabManagerWorkspaceConfigInheritanceSourceTests: XCTestCase {
     func testUsesFocusedTerminalWhenTerminalIsFocused() {
         let manager = TabManager()
