@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import Carbon.HIToolbox
 import Metal
 import QuartzCore
 import Combine
@@ -2297,6 +2298,11 @@ final class GhosttyMetalLayer: CAMetalLayer {
 // MARK: - Terminal Surface (owns the ghostty_surface_t lifecycle)
 
 final class TerminalSurface: Identifiable, ObservableObject {
+    enum NamedKey {
+        case ctrlC
+        case ctrlD
+    }
+
     final class SearchState: ObservableObject {
         @Published var needle: String
         @Published var selected: UInt?
@@ -3092,6 +3098,29 @@ final class TerminalSurface: Identifiable, ObservableObject {
     func needsConfirmClose() -> Bool {
         guard let surface = surface else { return false }
         return ghostty_surface_needs_confirm_quit(surface)
+    }
+
+    @discardableResult
+    func sendNamedKey(_ key: NamedKey) -> Bool {
+        guard let surface else { return false }
+
+        var keyEvent = ghostty_input_key_s()
+        keyEvent.action = GHOSTTY_ACTION_PRESS
+        keyEvent.mods = GHOSTTY_MODS_CTRL
+        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+        keyEvent.unshifted_codepoint = 0
+        keyEvent.composing = false
+        keyEvent.text = nil
+
+        switch key {
+        case .ctrlC:
+            keyEvent.keycode = UInt32(kVK_ANSI_C)
+        case .ctrlD:
+            keyEvent.keycode = UInt32(kVK_ANSI_D)
+        }
+
+        _ = ghostty_surface_key(surface, keyEvent)
+        return true
     }
 
     func sendText(_ text: String) {

@@ -186,6 +186,11 @@ final class TerminalPanel: Panel, ObservableObject {
         surface.needsConfirmClose()
     }
 
+    @discardableResult
+    func sendNamedKey(_ key: TerminalSurface.NamedKey) -> Bool {
+        surface.sendNamedKey(key)
+    }
+
     func triggerFlash() {
         hostedView.triggerFlash()
     }

@@ -2044,6 +2044,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var lastTypingActivityAt: TimeInterval = 0
     private var didHandleExplicitOpenIntentAtStartup = false
     private var isTerminatingApp = false
+    private var quitSessionRestoreTerminationPending = false
     private var didInstallLifecycleSnapshotObservers = false
     private var didDisableSuddenTermination = false
     private var commandPaletteVisibilityByWindowId: [UUID: Bool] = [:]
@@ -2056,6 +2057,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private static let commandPaletteRequestGraceInterval: TimeInterval = 1.25
     private static let commandPalettePendingOpenMaxAge: TimeInterval = 8.0
     private static let sessionAutosaveTypingQuietPeriod: TimeInterval = 0.65
+    private static let quitSessionRestoreSecondInterruptDelay: TimeInterval = 0.08
+    private static let quitSessionRestoreSnapshotDelay: TimeInterval = 0.35
 
     var updateViewModel: UpdateViewModel {
         updateController.viewModel
@@ -2302,6 +2305,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         isTerminatingApp = true
+        if prepareQuitSessionRestoreSnapshotIfNeeded() {
+            return .terminateLater
+        }
         _ = saveSessionSnapshot(includeScrollback: true, removeWhenEmpty: false)
         return .terminateNow
     }
@@ -3136,6 +3142,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     nonisolated static func shouldRunSessionAutosaveTick(isTerminatingApp: Bool) -> Bool {
         !isTerminatingApp
+    }
+
+    nonisolated static func shouldDelayQuitTerminationForSessionRestore(interruptTargetCount: Int) -> Bool {
+        interruptTargetCount > 0
+    }
+
+    private func prepareQuitSessionRestoreSnapshotIfNeeded() -> Bool {
+        if quitSessionRestoreTerminationPending {
+            return true
+        }
+
+        let targetPanelIds = quitSessionRestoreInterruptTargetPanelIds()
+        guard Self.shouldDelayQuitTerminationForSessionRestore(interruptTargetCount: targetPanelIds.count) else {
+            return false
+        }
+
+        quitSessionRestoreTerminationPending = true
+#if DEBUG
+        dlog("session.quit_prepare.begin targets=\(targetPanelIds.count)")
+#endif
+        sendQuitSessionRestoreInterrupts(to: targetPanelIds, attempt: 1)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quitSessionRestoreSecondInterruptDelay) { [weak self] in
+            guard let self, self.quitSessionRestoreTerminationPending else { return }
+            self.sendQuitSessionRestoreInterrupts(to: targetPanelIds, attempt: 2)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quitSessionRestoreSnapshotDelay) { [weak self] in
+            guard let self, self.quitSessionRestoreTerminationPending else { return }
+            self.quitSessionRestoreTerminationPending = false
+#if DEBUG
+            dlog("session.quit_prepare.capture targets=\(targetPanelIds.count)")
+#endif
+            _ = self.saveSessionSnapshot(includeScrollback: true, removeWhenEmpty: false)
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+
+        return true
+    }
+
+    private func quitSessionRestoreInterruptTargetPanelIds() -> [UUID] {
+        var panelIds: [UUID] = []
+        var seen = Set<UUID>()
+        forEachTerminalPanel { terminalPanel in
+            guard terminalPanel.surface.surface != nil else { return }
+            guard terminalPanel.needsConfirmClose() else { return }
+            guard seen.insert(terminalPanel.id).inserted else { return }
+            panelIds.append(terminalPanel.id)
+        }
+        panelIds.sort { $0.uuidString < $1.uuidString }
+        return panelIds
+    }
+
+    private func sendQuitSessionRestoreInterrupts(to panelIds: [UUID], attempt: Int) {
+        var sentCount = 0
+        for panelId in panelIds {
+            guard let (workspace, _) = workspaceContainingPanel(panelId: panelId),
+                  let terminalPanel = workspace.terminalPanel(for: panelId),
+                  terminalPanel.needsConfirmClose() else {
+                continue
+            }
+            guard terminalPanel.sendNamedKey(.ctrlC) else { continue }
+            terminalPanel.surface.forceRefresh(reason: "sessionQuitRestore.ctrlC.\(attempt)")
+            sentCount += 1
+        }
+#if DEBUG
+        dlog("session.quit_prepare.interrupt attempt=\(attempt) sent=\(sentCount)")
+#endif
     }
 
     private func remainingSessionAutosaveTypingQuietPeriod(
