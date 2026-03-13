@@ -4868,7 +4868,7 @@ private struct ThemePickerRow: View {
     private let thumbHeight: CGFloat = 50
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Text(String(localized: "settings.app.theme", defaultValue: "Theme"))
                 .font(.system(size: 13, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -4949,7 +4949,7 @@ private struct AppIconPickerRow: View {
     private let autoIconSize: CGFloat = 36
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(String(localized: "settings.app.appIcon", defaultValue: "App Icon"))
                     .font(.system(size: 13, weight: .medium))
