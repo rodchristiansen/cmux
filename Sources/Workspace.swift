@@ -195,20 +195,10 @@ extension Workspace {
         setCustomColor(snapshot.customColor)
         isPinned = snapshot.isPinned
 
-        statusEntries = Dictionary(
-            uniqueKeysWithValues: snapshot.statusEntries.map { entry in
-                (
-                    entry.key,
-                    SidebarStatusEntry(
-                        key: entry.key,
-                        value: entry.value,
-                        icon: entry.icon,
-                        color: entry.color,
-                        timestamp: Date(timeIntervalSince1970: entry.timestamp)
-                    )
-                )
-            }
-        )
+        // Status entries are ephemeral runtime state tied to running processes
+        // (e.g. claude_code "Running"). Don't restore them across app restarts
+        // because the processes that set them are gone.
+        statusEntries.removeAll()
         logEntries = snapshot.logEntries.map { entry in
             SidebarLogEntry(
                 message: entry.message,
