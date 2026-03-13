@@ -6703,10 +6703,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let script = """
         (() => {
           try {
-            const state = window.__cmuxKeyboardCaptureState;
-            if (!state) {
+            const readyState = String(document.readyState || "");
+            if (readyState !== "complete") {
               return { installed: false };
             }
+            if (!window.__cmuxKeyboardCaptureState || window.__cmuxKeyboardCaptureState.version !== 1) {
+              window.__cmuxKeyboardCaptureState = {
+                version: 1,
+                keydownCount: 0,
+                lastKey: "",
+                lastCode: "",
+                lastMeta: false,
+                lastShift: false,
+                lastControl: false,
+                lastOption: false,
+                lastRepeat: false,
+                lastTargetTag: "",
+                lastInputValue: ""
+              };
+            }
+            if (window.__cmuxKeyboardCaptureHandlerInstalled !== true) {
+              window.__cmuxKeyboardCaptureHandlerInstalled = true;
+              window.addEventListener("keydown", event => {
+                const state = window.__cmuxKeyboardCaptureState;
+                const active = document.activeElement;
+                state.keydownCount = (Number(state.keydownCount) || 0) + 1;
+                state.lastKey = String(event.key || "");
+                state.lastCode = String(event.code || "");
+                state.lastMeta = !!event.metaKey;
+                state.lastShift = !!event.shiftKey;
+                state.lastControl = !!event.ctrlKey;
+                state.lastOption = !!event.altKey;
+                state.lastRepeat = !!event.repeat;
+                state.lastTargetTag = active && active.tagName ? String(active.tagName).toLowerCase() : "";
+                state.lastInputValue =
+                  active && typeof active.value === "string" ? active.value : "";
+              }, true);
+            }
+            const state = window.__cmuxKeyboardCaptureState;
             return {
               installed: window.__cmuxKeyboardCaptureHandlerInstalled === true,
               keydownCount: Number(state.keydownCount || 0),
