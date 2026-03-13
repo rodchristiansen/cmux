@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 #if canImport(Security)
 import Security
@@ -292,6 +293,15 @@ struct SocketControlSettings {
     static let socketPasswordEnvKey = "CMUX_SOCKET_PASSWORD"
     static let launchTagEnvKey = "CMUX_TAG"
     static let baseDebugBundleIdentifier = "com.cmuxterm.app.debug"
+    static let stableDefaultSocketPath = "/tmp/cmux.sock"
+    static let lastSocketPathFile = "/tmp/cmux-last-socket-path"
+
+    enum StableDefaultSocketPathEntry: Equatable {
+        case missing
+        case socket(ownerUserID: uid_t)
+        case other(ownerUserID: uid_t)
+        case inaccessible(errnoCode: Int32)
+    }
 
     private static func normalizeMode(_ raw: String) -> String {
         raw
@@ -402,9 +412,16 @@ struct SocketControlSettings {
     static func socketPath(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleIdentifier: String? = Bundle.main.bundleIdentifier,
-        isDebugBuild: Bool = SocketControlSettings.isDebugBuild
+        isDebugBuild: Bool = SocketControlSettings.isDebugBuild,
+        currentUserID: uid_t = getuid(),
+        probeStableDefaultPathEntry: (String) -> StableDefaultSocketPathEntry = inspectStableDefaultSocketPathEntry
     ) -> String {
-        let fallback = defaultSocketPath(bundleIdentifier: bundleIdentifier, isDebugBuild: isDebugBuild)
+        let fallback = defaultSocketPath(
+            bundleIdentifier: bundleIdentifier,
+            isDebugBuild: isDebugBuild,
+            currentUserID: currentUserID,
+            probeStableDefaultPathEntry: probeStableDefaultPathEntry
+        )
 
         guard let override = environment["CMUX_SOCKET_PATH"], !override.isEmpty else {
             return fallback
@@ -421,7 +438,12 @@ struct SocketControlSettings {
         return fallback
     }
 
-    static func defaultSocketPath(bundleIdentifier: String?, isDebugBuild: Bool) -> String {
+    static func defaultSocketPath(
+        bundleIdentifier: String?,
+        isDebugBuild: Bool,
+        currentUserID: uid_t = getuid(),
+        probeStableDefaultPathEntry: (String) -> StableDefaultSocketPathEntry = inspectStableDefaultSocketPathEntry
+    ) -> String {
         if bundleIdentifier == "com.cmuxterm.app.nightly" {
             return "/tmp/cmux-nightly.sock"
         }
@@ -431,7 +453,33 @@ struct SocketControlSettings {
         if isStagingBundleIdentifier(bundleIdentifier) {
             return "/tmp/cmux-staging.sock"
         }
-        return "/tmp/cmux.sock"
+        return resolvedStableDefaultSocketPath(
+            currentUserID: currentUserID,
+            probeStableDefaultPathEntry: probeStableDefaultPathEntry
+        )
+    }
+
+    static func userScopedStableSocketPath(currentUserID: uid_t = getuid()) -> String {
+        "/tmp/cmux-\(currentUserID).sock"
+    }
+
+    static func resolvedStableDefaultSocketPath(
+        currentUserID: uid_t = getuid(),
+        probeStableDefaultPathEntry: (String) -> StableDefaultSocketPathEntry = inspectStableDefaultSocketPathEntry
+    ) -> String {
+        switch probeStableDefaultPathEntry(stableDefaultSocketPath) {
+        case .missing:
+            return stableDefaultSocketPath
+        case .socket(let ownerUserID) where ownerUserID == currentUserID:
+            return stableDefaultSocketPath
+        case .socket, .other, .inaccessible:
+            return userScopedStableSocketPath(currentUserID: currentUserID)
+        }
+    }
+
+    static func recordLastSocketPath(_ path: String, filePath: String = lastSocketPathFile) {
+        let payload = Data((path + "\n").utf8)
+        try? payload.write(to: URL(fileURLWithPath: filePath), options: .atomic)
     }
 
     static func shouldHonorSocketPathOverride(
@@ -458,6 +506,23 @@ struct SocketControlSettings {
         guard let bundleIdentifier else { return false }
         return bundleIdentifier == "com.cmuxterm.app.staging"
             || bundleIdentifier.hasPrefix("com.cmuxterm.app.staging.")
+    }
+
+    private static func inspectStableDefaultSocketPathEntry(_ path: String) -> StableDefaultSocketPathEntry {
+        var st = stat()
+        guard lstat(path, &st) == 0 else {
+            let errnoCode = errno
+            if errnoCode == ENOENT {
+                return .missing
+            }
+            return .inaccessible(errnoCode: errnoCode)
+        }
+
+        let fileType = st.st_mode & mode_t(S_IFMT)
+        if fileType == mode_t(S_IFSOCK) {
+            return .socket(ownerUserID: st.st_uid)
+        }
+        return .other(ownerUserID: st.st_uid)
     }
 
     static func isTruthy(_ raw: String?) -> Bool {

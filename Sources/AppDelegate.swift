@@ -2924,13 +2924,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func restartSocketListenerIfEnabled(source: String) {
         guard let tabManager,
               let config = socketListenerConfigurationIfEnabled() else { return }
+        let restartPath = TerminalController.shared.activeSocketPath(preferredPath: config.path)
         sentryBreadcrumb("socket.listener.restart", category: "socket", data: [
             "mode": config.mode.rawValue,
-            "path": config.path,
+            "path": restartPath,
             "source": source
         ])
         TerminalController.shared.stop()
-        TerminalController.shared.start(tabManager: tabManager, socketPath: config.path, accessMode: config.mode)
+        TerminalController.shared.start(tabManager: tabManager, socketPath: restartPath, accessMode: config.mode)
     }
 
     private func startSocketListenerHealthMonitorIfNeeded() {
@@ -2958,8 +2959,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func restartSocketListenerIfNeededForHealthCheck(source: String) {
         guard !socketListenerHealthCheckInFlight,
               let config = socketListenerConfigurationIfEnabled() else { return }
-        let expectedSocketPath = config.path
         let terminalController = TerminalController.shared
+        let expectedSocketPath = terminalController.activeSocketPath(preferredPath: config.path)
         socketListenerHealthCheckInFlight = true
         Thread.detachNewThread { [weak self, expectedSocketPath, source, terminalController] in
             let health = terminalController.socketListenerHealth(expectedSocketPath: expectedSocketPath)
