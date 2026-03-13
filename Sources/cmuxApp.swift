@@ -4917,8 +4917,9 @@ private struct ThemePickerRow: View {
                                 .fontWeight(isSelected ? .semibold : .regular)
                                 .foregroundColor(isSelected ? .primary : .secondary)
                         }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(isSelected
@@ -4931,6 +4932,7 @@ private struct ThemePickerRow: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                 }
             }
             .layoutPriority(1)
@@ -4996,8 +4998,9 @@ private struct AppIconPickerRow: View {
                                 .font(.system(size: 10))
                                 .foregroundColor(isSelected ? .primary : .secondary)
                         }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(isSelected
@@ -5010,6 +5013,7 @@ private struct AppIconPickerRow: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                 }
             }
             .layoutPriority(1)
