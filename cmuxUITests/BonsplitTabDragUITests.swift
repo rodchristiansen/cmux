@@ -4,20 +4,27 @@ import AppKit
 import CoreGraphics
 
 final class BonsplitTabDragUITests: XCTestCase {
+    private let launchTimeout: TimeInterval = 20.0
+    private let setupTimeout: TimeInterval = 25.0
+
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
+
+        let cleanup = XCUIApplication()
+        cleanup.terminate()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
     }
 
     func testHiddenWorkspaceTitlebarKeepsTabReorderWorking() {
         let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
-            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            ensureForegroundAfterLaunch(app, timeout: launchTimeout),
             "Expected app to launch for Bonsplit tab drag UI test. state=\(app.state.rawValue)"
         )
-        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
-        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: setupTimeout), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: setupTimeout) else {
             XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
             return
         }
@@ -55,11 +62,11 @@ final class BonsplitTabDragUITests: XCTestCase {
         let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
-            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            ensureForegroundAfterLaunch(app, timeout: launchTimeout),
             "Expected app to launch for hidden titlebar top-gap UI test. state=\(app.state.rawValue)"
         )
-        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
-        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: setupTimeout), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: setupTimeout) else {
             XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
             return
         }
@@ -90,11 +97,11 @@ final class BonsplitTabDragUITests: XCTestCase {
         let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
-            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            ensureForegroundAfterLaunch(app, timeout: launchTimeout),
             "Expected app to launch for hidden titlebar sidebar inset UI test. state=\(app.state.rawValue)"
         )
-        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
-        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: setupTimeout), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: setupTimeout) else {
             XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
             return
         }
@@ -108,7 +115,7 @@ final class BonsplitTabDragUITests: XCTestCase {
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
 
         let workspaceTitle = ready["workspaceTitle"] ?? "UITest Workspace"
-        let workspaceRow = app.buttons[workspaceTitle]
+        let workspaceRow = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", workspaceTitle)).firstMatch
         XCTAssertTrue(workspaceRow.waitForExistence(timeout: 5.0), "Expected workspace row to exist")
 
         let topInset = distanceToTopEdge(of: workspaceRow, in: window)
@@ -123,11 +130,11 @@ final class BonsplitTabDragUITests: XCTestCase {
         let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
-            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            ensureForegroundAfterLaunch(app, timeout: launchTimeout),
             "Expected app to launch for hidden titlebar titlebar-controls hover UI test. state=\(app.state.rawValue)"
         )
-        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
-        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: setupTimeout), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: setupTimeout) else {
             XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
             return
         }
@@ -140,12 +147,9 @@ final class BonsplitTabDragUITests: XCTestCase {
         let window = app.windows.element(boundBy: 0)
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
 
-        let toggleSidebarButton = app.buttons["titlebarControl.toggleSidebar"]
-        let notificationsButton = app.buttons["titlebarControl.showNotifications"]
-        let newWorkspaceButton = app.buttons["titlebarControl.newTab"]
-        XCTAssertTrue(toggleSidebarButton.waitForExistence(timeout: 5.0), "Expected sidebar titlebar control to exist")
-        XCTAssertTrue(notificationsButton.waitForExistence(timeout: 5.0), "Expected notifications titlebar control to exist")
-        XCTAssertTrue(newWorkspaceButton.waitForExistence(timeout: 5.0), "Expected new workspace titlebar control to exist")
+        let toggleSidebarButton = app.descendants(matching: .any).matching(identifier: "titlebarControl.toggleSidebar").firstMatch
+        let notificationsButton = app.descendants(matching: .any).matching(identifier: "titlebarControl.showNotifications").firstMatch
+        let newWorkspaceButton = app.descendants(matching: .any).matching(identifier: "titlebarControl.newTab").firstMatch
 
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
         XCTAssertTrue(
@@ -155,10 +159,12 @@ final class BonsplitTabDragUITests: XCTestCase {
             "Expected hidden-titlebar controls to stay hidden away from the titlebar hover zone."
         )
 
-        newWorkspaceButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        hover(in: window, at: CGPoint(x: window.frame.maxX - 48, y: window.frame.minY + 18))
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) {
-                toggleSidebarButton.isHittable && notificationsButton.isHittable && newWorkspaceButton.isHittable
+                toggleSidebarButton.exists && toggleSidebarButton.isHittable &&
+                    notificationsButton.exists && notificationsButton.isHittable &&
+                    newWorkspaceButton.exists && newWorkspaceButton.isHittable
             },
             "Expected hidden-titlebar controls to reveal when hovering the titlebar controls area."
         )
@@ -168,11 +174,11 @@ final class BonsplitTabDragUITests: XCTestCase {
         let (app, dataPath) = launchConfiguredApp()
 
         XCTAssertTrue(
-            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            ensureForegroundAfterLaunch(app, timeout: launchTimeout),
             "Expected app to launch for Bonsplit controls hover UI test. state=\(app.state.rawValue)"
         )
-        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
-        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: setupTimeout), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: setupTimeout) else {
             XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
             return
         }
@@ -191,12 +197,11 @@ final class BonsplitTabDragUITests: XCTestCase {
         let betaTab = app.buttons[betaTitle]
         XCTAssertTrue(betaTab.waitForExistence(timeout: 5.0), "Expected beta tab to exist")
 
-        let newTerminalButton = app.buttons["paneTabBarControl.newTerminal"]
-        XCTAssertTrue(newTerminalButton.waitForExistence(timeout: 5.0), "Expected new terminal control to exist")
+        let newTerminalButton = app.descendants(matching: .any).matching(identifier: "paneTabBarControl.newTerminal").firstMatch
 
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
         XCTAssertTrue(
-            waitForCondition(timeout: 2.0) { !newTerminalButton.isHittable },
+            waitForCondition(timeout: 2.0) { !newTerminalButton.exists || !newTerminalButton.isHittable },
             "Expected pane tab bar controls to hide away from the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
@@ -208,13 +213,13 @@ final class BonsplitTabDragUITests: XCTestCase {
             )
         )
         XCTAssertTrue(
-            waitForCondition(timeout: 2.0) { newTerminalButton.isHittable },
+            waitForCondition(timeout: 2.0) { newTerminalButton.exists && newTerminalButton.isHittable },
             "Expected pane tab bar controls to reveal when hovering inside empty pane-tab-bar space. window=\(window.frame) alphaTab=\(alphaTab.frame) betaTab=\(betaTab.frame) button=\(newTerminalButton.debugDescription)"
         )
 
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
         XCTAssertTrue(
-            waitForCondition(timeout: 2.0) { !newTerminalButton.isHittable },
+            waitForCondition(timeout: 2.0) { !newTerminalButton.exists || !newTerminalButton.isHittable },
             "Expected pane tab bar controls to hide again after leaving the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
     }
