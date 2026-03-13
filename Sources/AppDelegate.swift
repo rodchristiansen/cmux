@@ -6558,6 +6558,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if ProcessInfo.processInfo.environment["CMUX_UI_TEST_BROWSER_KEY_CAPTURE_SETUP"] == "1" {
                 setupBrowserKeyboardCaptureUITest(panel: browserPanel)
             }
+            if ProcessInfo.processInfo.environment["CMUX_UI_TEST_BROWSER_KEY_CAPTURE_AUTO_ENTER"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak browserPanel] in
+                    _ = browserPanel?.setKeyboardCaptureActive(
+                        true,
+                        reason: "uiTest.autoEnter",
+                        focusWebView: true
+                    )
+                }
+            }
             return
         }
 
