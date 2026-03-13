@@ -14374,12 +14374,12 @@ final class TerminalControllerSocketListenerHealthTests: XCTestCase {
     func testStableSocketBindPermissionFailureFallsBackToUserScopedSocket() {
         XCTAssertEqual(
             TerminalController.fallbackSocketPathAfterBindFailure(
-                requestedPath: "/tmp/cmux.sock",
+                requestedPath: SocketControlSettings.stableDefaultSocketPath,
                 stage: "bind",
                 errnoCode: EACCES,
                 currentUserID: 501
             ),
-            "/tmp/cmux-501.sock"
+            SocketControlSettings.userScopedStableSocketPath(currentUserID: 501)
         )
     }
 

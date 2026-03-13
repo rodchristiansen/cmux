@@ -1037,7 +1037,7 @@ final class SocketControlSettingsTests: XCTestCase {
             probeStableDefaultPathEntry: { _ in .missing }
         )
 
-        XCTAssertEqual(path, "/tmp/cmux.sock")
+        XCTAssertEqual(path, SocketControlSettings.stableDefaultSocketPath)
     }
 
     func testNightlyReleaseUsesDedicatedDefaultAndIgnoresAmbientSocketOverride() {
@@ -1098,7 +1098,7 @@ final class SocketControlSettingsTests: XCTestCase {
                 isDebugBuild: false,
                 probeStableDefaultPathEntry: { _ in .missing }
             ),
-            "/tmp/cmux.sock"
+            SocketControlSettings.stableDefaultSocketPath
         )
         XCTAssertEqual(
             SocketControlSettings.defaultSocketPath(
@@ -1134,7 +1134,7 @@ final class SocketControlSettingsTests: XCTestCase {
             probeStableDefaultPathEntry: { _ in .socket(ownerUserID: 0) }
         )
 
-        XCTAssertEqual(path, "/tmp/cmux-501.sock")
+        XCTAssertEqual(path, SocketControlSettings.userScopedStableSocketPath(currentUserID: 501))
     }
 
     func testStableReleaseFallsBackToUserScopedSocketWhenStablePathIsBlockedByNonSocketEntry() {
@@ -1145,7 +1145,7 @@ final class SocketControlSettingsTests: XCTestCase {
             probeStableDefaultPathEntry: { _ in .other(ownerUserID: 501) }
         )
 
-        XCTAssertEqual(path, "/tmp/cmux-501.sock")
+        XCTAssertEqual(path, SocketControlSettings.userScopedStableSocketPath(currentUserID: 501))
     }
 
     func testUntaggedDebugBundleBlockedWithoutLaunchTag() {
