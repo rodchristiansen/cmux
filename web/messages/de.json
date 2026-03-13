@@ -442,7 +442,13 @@
       "pythonClient": "Python-Client",
       "shellScript": "Shell-Skript",
       "buildScriptNotification": "Build-Skript mit Benachrichtigung",
-      "metaTitle": "API-Referenz"
+      "metaTitle": "API-Referenz",
+      "setMetaDesc": "Setze einen allgemeinen Sidebar-Metadateneintrag für Details wie Host, Laufzeit, Tags oder Deeplinks.",
+      "clearMetaDesc": "Entferne einen allgemeinen Sidebar-Metadateneintrag per Schlüssel.",
+      "listMetaDesc": "Liste alle allgemeinen Sidebar-Metadateneinträge für einen Workspace auf.",
+      "setMetaBlockDesc": "Setze einen freien Markdown-Block in der Sidebar für ausführlichere Zusammenfassungen.",
+      "clearMetaBlockDesc": "Entferne einen Sidebar-Markdown-Block per Schlüssel.",
+      "listMetaBlocksDesc": "Liste alle Sidebar-Markdown-Blöcke für einen Workspace auf."
     },
     "notifications": {
       "title": "Benachrichtigungen",
