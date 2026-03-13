@@ -145,6 +145,75 @@ That keeps the integration honest:
 
 If the design works, add bash support later through a different shell-side contract. Do not force a fake shell-agnostic abstraction too early.
 
+## Coexistence and Settings
+
+cmux should not blindly enable its own autosuggestions when the user already has `zsh-autosuggestions` or a similar zle-based plugin active.
+
+There are two constraints in the current startup flow:
+
+1. cmux injects its zsh wrapper before the user's normal interactive startup completes.
+2. the user's `zsh-autosuggestions` plugin usually loads from their real `.zshrc`.
+
+That means startup-time detection in the app is too early. The decision has to come from zsh after the user's startup files have finished.
+
+### Recommended setting
+
+Expose a dedicated setting in Settings, under Automation:
+
+1. `Off`
+2. `Automatic`
+3. `Force On`
+
+Behavior:
+
+1. `Off`: cmux never renders terminal autosuggestions and never binds accept/dismiss actions for them.
+2. `Automatic`: cmux enables autosuggestions only if the shell reports that no external autosuggestion plugin owns the command line.
+3. `Force On`: cmux enables its autosuggestions even if the shell reports another autosuggestion plugin. This is mainly for testing and advanced users.
+
+This should be a new setting key. Do not reuse the existing shell integration kill switch, because that would also disable unrelated sidebar features like cwd, git, PR, and port reporting.
+
+### Recommended detection contract
+
+Add a one-time or low-frequency zsh handshake after user startup, for example on the first prompt and whenever widget bindings are rebuilt.
+
+The shell should report whether external autosuggestions are active for the current shell session:
+
+`report_autosuggestion_provider --shell=zsh --provider=external:zsh-autosuggestions --tab=<id> --panel=<id>`
+
+or
+
+`report_autosuggestion_provider --shell=zsh --provider=cmux --tab=<id> --panel=<id>`
+
+At minimum, `Automatic` mode should back off when zsh reports a known external provider.
+
+### What to detect in zsh
+
+Prefer behavior-level detection over dotfile-string matching.
+
+Good signals:
+
+1. known autosuggestion widgets such as `autosuggest-accept`, `autosuggest-disable`, or `autosuggest-toggle`
+2. known autosuggestion variables such as `ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE`
+3. other future provider markers if we add support for more plugins
+
+Weak signals to avoid:
+
+1. grepping `.zshrc` for plugin names
+2. checking install paths under Oh My Zsh, Homebrew, or plugin managers
+3. assuming that a sourced file path means the plugin is actually active
+
+The official `zsh-autosuggestions` README documents both the `ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE` variable and widgets such as `autosuggest-accept`, `autosuggest-disable`, and `autosuggest-toggle`, which makes them reasonable runtime markers for `Automatic` mode.
+
+### Default policy
+
+The safest default is:
+
+1. Settings default = `Automatic`
+2. Per-shell default provider = external plugin wins
+3. cmux shows nothing unless it has positive ownership for that session
+
+This avoids double ghost text, conflicting acceptance bindings, and user confusion.
+
 ## Risks
 
 1. Input latency if shell hooks report too often or the app does expensive ranking on every change.
