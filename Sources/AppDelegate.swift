@@ -8116,10 +8116,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 
-        if let handled = handleCapturedBrowserKeyboardShortcutBypass(event: event) {
-            return handled
-        }
-
         // Guard against stale browserAddressBarFocusedPanelId after focus transitions
         // (e.g., split that doesn't properly blur the address bar). If the first responder
         // is a terminal surface, the address bar can't be focused.
@@ -8135,6 +8131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
             browserAddressBarFocusedPanelId = nil
             stopBrowserOmnibarSelectionRepeat()
+        }
+
+        if let handled = handleCapturedBrowserKeyboardShortcutBypass(event: event) {
+            return handled
         }
 
         // Keep Cmd+P/Cmd+N inside the focused browser omnibar for Chrome-like
