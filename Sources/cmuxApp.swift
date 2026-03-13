@@ -4765,8 +4765,13 @@ private struct AppIconPickerRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(String(localized: "settings.app.appIcon", defaultValue: "App Icon"))
-                .font(.system(size: 13, weight: .medium))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(String(localized: "settings.app.appIcon", defaultValue: "App Icon"))
+                    .font(.system(size: 13, weight: .medium))
+                Text(String(localized: "settings.app.appIcon.subtitle", defaultValue: "Dock and app switcher"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             HStack(spacing: 12) {
                 ForEach(AppIconMode.allCases) { mode in
