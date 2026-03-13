@@ -79,6 +79,84 @@ final class BonsplitTabDragUITests: XCTestCase {
         )
     }
 
+    func testHiddenWorkspaceTitlebarKeepsSidebarRowsBelowTrafficLights() {
+        let (app, dataPath) = launchConfiguredApp()
+
+        XCTAssertTrue(
+            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            "Expected app to launch for hidden titlebar sidebar inset UI test. state=\(app.state.rawValue)"
+        )
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+            XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
+            return
+        }
+
+        if let setupError = ready["setupError"], !setupError.isEmpty {
+            XCTFail("Setup failed: \(setupError)")
+            return
+        }
+
+        let window = app.windows.element(boundBy: 0)
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
+
+        let workspaceTitle = ready["workspaceTitle"] ?? "UITest Workspace"
+        let workspaceRow = app.buttons[workspaceTitle]
+        XCTAssertTrue(workspaceRow.waitForExistence(timeout: 5.0), "Expected workspace row to exist")
+
+        let topInset = distanceToTopEdge(of: workspaceRow, in: window)
+        XCTAssertGreaterThanOrEqual(
+            topInset,
+            14,
+            "Expected hidden-titlebar sidebar rows to stay below the traffic lights. window=\(window.frame) workspaceRow=\(workspaceRow.frame) topInset=\(topInset)"
+        )
+    }
+
+    func testHiddenWorkspaceTitlebarTitlebarControlsRevealOnHover() {
+        let (app, dataPath) = launchConfiguredApp()
+
+        XCTAssertTrue(
+            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            "Expected app to launch for hidden titlebar titlebar-controls hover UI test. state=\(app.state.rawValue)"
+        )
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: 12.0), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: 12.0) else {
+            XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
+            return
+        }
+
+        if let setupError = ready["setupError"], !setupError.isEmpty {
+            XCTFail("Setup failed: \(setupError)")
+            return
+        }
+
+        let window = app.windows.element(boundBy: 0)
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
+
+        let toggleSidebarButton = app.buttons["titlebarControl.toggleSidebar"]
+        let notificationsButton = app.buttons["titlebarControl.showNotifications"]
+        let newWorkspaceButton = app.buttons["titlebarControl.newTab"]
+        XCTAssertTrue(toggleSidebarButton.waitForExistence(timeout: 5.0), "Expected sidebar titlebar control to exist")
+        XCTAssertTrue(notificationsButton.waitForExistence(timeout: 5.0), "Expected notifications titlebar control to exist")
+        XCTAssertTrue(newWorkspaceButton.waitForExistence(timeout: 5.0), "Expected new workspace titlebar control to exist")
+
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
+        XCTAssertTrue(
+            waitForCondition(timeout: 2.0) {
+                !toggleSidebarButton.isHittable && !notificationsButton.isHittable && !newWorkspaceButton.isHittable
+            },
+            "Expected hidden-titlebar controls to stay hidden away from the titlebar hover zone."
+        )
+
+        newWorkspaceButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        XCTAssertTrue(
+            waitForCondition(timeout: 2.0) {
+                toggleSidebarButton.isHittable && notificationsButton.isHittable && newWorkspaceButton.isHittable
+            },
+            "Expected hidden-titlebar controls to reveal when hovering the titlebar controls area."
+        )
+    }
+
     func testPaneTabBarControlsRevealWhenHoveringAnywhereOnPaneTabBar() {
         let (app, dataPath) = launchConfiguredApp()
 
@@ -142,6 +220,7 @@ final class BonsplitTabDragUITests: XCTestCase {
         app.launchEnvironment["CMUX_UI_TEST_BONSPLIT_TAB_DRAG_SETUP"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_BONSPLIT_TAB_DRAG_PATH"] = dataPath
         app.launchArguments += ["-workspaceTitlebarVisible", "NO"]
+        app.launchArguments += ["-titlebarControlsVisibilityMode", "onHover"]
         app.launchArguments += ["-paneTabBarControlsVisibilityMode", "onHover"]
         app.launch()
         app.activate()
@@ -207,5 +286,11 @@ final class BonsplitTabDragUITests: XCTestCase {
                 dy: point.y - window.frame.minY
             )
         ).hover()
+    }
+
+    private func distanceToTopEdge(of element: XCUIElement, in window: XCUIElement) -> CGFloat {
+        let gapIfOriginIsBottomLeft = abs(window.frame.maxY - element.frame.maxY)
+        let gapIfOriginIsTopLeft = abs(element.frame.minY - window.frame.minY)
+        return min(gapIfOriginIsBottomLeft, gapIfOriginIsTopLeft)
     }
 }

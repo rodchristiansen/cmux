@@ -6496,8 +6496,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 return
             }
 
+            let workspaceTitle = "UITest Workspace"
             let alphaTitle = "UITest Alpha"
             let betaTitle = "UITest Beta"
+            tabManager.setCustomTitle(tabId: workspace.id, title: workspaceTitle)
             workspace.setPanelCustomTitle(panelId: alphaPanelId, title: alphaTitle)
             tabManager.newSurface()
 
@@ -6509,6 +6511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             workspace.setPanelCustomTitle(panelId: betaPanelId, title: betaTitle)
             self.writeBonsplitTabDragUITestData([
                 "ready": "1",
+                "workspaceTitle": workspaceTitle,
                 "alphaTitle": alphaTitle,
                 "betaTitle": betaTitle,
                 "alphaPanelId": alphaPanelId.uuidString,
