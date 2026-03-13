@@ -1996,6 +1996,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var jumpUnreadFocusObserver: NSObjectProtocol?
     private var didSetupGotoSplitUITest = false
     private var didSetupBonsplitTabDragUITest = false
+    private var bonsplitTabDragUITestRecorder: DispatchSourceTimer?
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
     private var didSetupMultiWindowNotificationsUITest = false
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
@@ -6517,6 +6518,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 "alphaPanelId": alphaPanelId.uuidString,
                 "betaPanelId": betaPanelId.uuidString,
             ])
+            self.startBonsplitTabDragUITestRecorder(
+                workspaceId: workspace.id,
+                alphaPanelId: alphaPanelId,
+                betaPanelId: betaPanelId
+            )
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -6533,6 +6539,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return nil
         }
         return path
+    }
+
+    private func startBonsplitTabDragUITestRecorder(
+        workspaceId: UUID,
+        alphaPanelId: UUID,
+        betaPanelId: UUID
+    ) {
+        bonsplitTabDragUITestRecorder?.cancel()
+        bonsplitTabDragUITestRecorder = nil
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            self?.recordBonsplitTabDragUITestState(
+                workspaceId: workspaceId,
+                alphaPanelId: alphaPanelId,
+                betaPanelId: betaPanelId
+            )
+        }
+        bonsplitTabDragUITestRecorder = timer
+        timer.resume()
+    }
+
+    private func recordBonsplitTabDragUITestState(
+        workspaceId: UUID,
+        alphaPanelId: UUID,
+        betaPanelId: UUID
+    ) {
+        guard let tabManager else { return }
+        guard let workspace = (tabManager.tabs.first { $0.id == workspaceId } ?? tabManager.selectedWorkspace ?? tabManager.tabs.first) else {
+            return
+        }
+
+        let trackedPaneId = workspace.paneId(forPanelId: alphaPanelId)
+            ?? workspace.paneId(forPanelId: betaPanelId)
+            ?? workspace.bonsplitController.focusedPaneId
+            ?? workspace.bonsplitController.allPaneIds.first
+        guard let trackedPaneId else { return }
+
+        let titles: [String] = workspace.bonsplitController.tabs(inPane: trackedPaneId).compactMap { tab in
+            guard let panelId = workspace.panelIdFromSurfaceId(tab.id) else { return nil }
+            return workspace.panelTitle(panelId: panelId)
+        }
+        let selectedTitle = workspace.bonsplitController.selectedTab(inPane: trackedPaneId)
+            .flatMap { workspace.panelIdFromSurfaceId($0.id) }
+            .flatMap { workspace.panelTitle(panelId: $0) } ?? ""
+
+        writeBonsplitTabDragUITestData([
+            "trackedPaneId": trackedPaneId.description,
+            "trackedPaneTabTitles": titles.joined(separator: "|"),
+            "trackedPaneTabCount": String(titles.count),
+            "trackedPaneSelectedTitle": selectedTitle,
+        ])
     }
 
     private func writeBonsplitTabDragUITestData(_ updates: [String: String]) {

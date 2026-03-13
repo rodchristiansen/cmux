@@ -39,20 +39,36 @@ final class BonsplitTabDragUITests: XCTestCase {
         let window = app.windows.element(boundBy: 0)
         let alphaTab = app.buttons[alphaTitle]
         let betaTab = app.buttons[betaTitle]
+        let initialOrder = "\(alphaTitle)|\(betaTitle)"
+        let reorderedOrder = "\(betaTitle)|\(alphaTitle)"
 
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
         XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
         XCTAssertTrue(betaTab.waitForExistence(timeout: 5.0), "Expected beta tab to exist")
+        XCTAssertTrue(
+            waitForJSONKey("trackedPaneTabTitles", equals: initialOrder, atPath: dataPath, timeout: 5.0) != nil,
+            "Expected initial tracked tab order to be \(initialOrder). data=\(loadJSON(atPath: dataPath) ?? [:])"
+        )
         XCTAssertLessThan(alphaTab.frame.minX, betaTab.frame.minX, "Expected beta tab to start to the right of alpha")
         let windowFrameBeforeDrag = window.frame
 
         let start = CGPoint(x: betaTab.frame.midX, y: betaTab.frame.midY)
-        let destination = CGPoint(x: alphaTab.frame.minX + 10, y: alphaTab.frame.midY)
-        dragMouse(fromAccessibilityPoint: start, toAccessibilityPoint: destination)
+        let destination = CGPoint(x: alphaTab.frame.midX - 14, y: alphaTab.frame.midY)
+        dragMouse(
+            fromAccessibilityPoint: start,
+            toAccessibilityPoint: destination,
+            steps: 28,
+            holdDuration: 0.20,
+            dragDuration: 0.45
+        )
 
         XCTAssertTrue(
+            waitForJSONKey("trackedPaneTabTitles", equals: reorderedOrder, atPath: dataPath, timeout: 5.0) != nil,
+            "Expected tracked tab order to become \(reorderedOrder). data=\(loadJSON(atPath: dataPath) ?? [:])"
+        )
+        XCTAssertTrue(
             waitForCondition(timeout: 5.0) { betaTab.frame.minX < alphaTab.frame.minX },
-            "Expected dragging beta onto alpha to reorder tabs. alpha=\(alphaTab.frame) beta=\(betaTab.frame)"
+            "Expected dragging beta onto alpha to reorder tab frames. alpha=\(alphaTab.frame) beta=\(betaTab.frame)"
         )
         XCTAssertEqual(window.frame.origin.x, windowFrameBeforeDrag.origin.x, accuracy: 2.0, "Expected tab drag not to move the window horizontally")
         XCTAssertEqual(window.frame.origin.y, windowFrameBeforeDrag.origin.y, accuracy: 2.0, "Expected tab drag not to move the window vertically")
