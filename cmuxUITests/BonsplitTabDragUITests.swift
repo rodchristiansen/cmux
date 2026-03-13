@@ -27,12 +27,15 @@ final class BonsplitTabDragUITests: XCTestCase {
 
         let alphaTitle = ready["alphaTitle"] ?? "UITest Alpha"
         let betaTitle = ready["betaTitle"] ?? "UITest Beta"
+        let window = app.windows.element(boundBy: 0)
         let alphaTab = app.buttons[alphaTitle]
         let betaTab = app.buttons[betaTitle]
 
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
         XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
         XCTAssertTrue(betaTab.waitForExistence(timeout: 5.0), "Expected beta tab to exist")
         XCTAssertLessThan(alphaTab.frame.minX, betaTab.frame.minX, "Expected beta tab to start to the right of alpha")
+        let windowFrameBeforeDrag = window.frame
 
         let start = betaTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = alphaTab.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
@@ -42,6 +45,8 @@ final class BonsplitTabDragUITests: XCTestCase {
             waitForCondition(timeout: 5.0) { betaTab.frame.minX < alphaTab.frame.minX },
             "Expected dragging beta onto alpha to reorder tabs. alpha=\(alphaTab.frame) beta=\(betaTab.frame)"
         )
+        XCTAssertEqual(window.frame.origin.x, windowFrameBeforeDrag.origin.x, accuracy: 2.0, "Expected tab drag not to move the window horizontally")
+        XCTAssertEqual(window.frame.origin.y, windowFrameBeforeDrag.origin.y, accuracy: 2.0, "Expected tab drag not to move the window vertically")
     }
 
     func testHiddenWorkspaceTitlebarPlacesPaneTabBarAtTopEdge() {
