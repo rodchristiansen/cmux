@@ -585,6 +585,56 @@ final class CmuxWebViewKeyEquivalentTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowFirstResponderGuardAllowsPortalHostedTextFieldSiblingWithoutPointerClickContext() {
+        _ = NSApplication.shared
+        AppDelegate.installWindowResponderSwizzlesForTesting()
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let contentView = NSView(frame: window.contentRect(forFrameRect: window.frame))
+        window.contentView = contentView
+
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            AppDelegate.clearWindowFirstResponderGuardTesting()
+            window.orderOut(nil)
+        }
+
+        guard let container = contentView.superview else {
+            XCTFail("Expected content container")
+            return
+        }
+
+        let hostFrame = container.convert(contentView.bounds, from: contentView)
+        let host = WindowBrowserHostView(frame: hostFrame)
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host, positioned: .above, relativeTo: contentView)
+
+        let slot = WindowBrowserSlotView(frame: host.bounds)
+        slot.autoresizingMask = [.width, .height]
+        host.addSubview(slot)
+
+        let webView = CmuxWebView(frame: slot.bounds, configuration: WKWebViewConfiguration())
+        webView.autoresizingMask = [.width, .height]
+        slot.addSubview(webView)
+
+        let textField = NSTextField(frame: NSRect(x: 40, y: 40, width: 220, height: 24))
+        textField.isEditable = true
+        slot.addSubview(textField)
+
+        webView.allowsFirstResponderAcquisition = false
+        _ = window.makeFirstResponder(nil)
+        XCTAssertTrue(
+            window.makeFirstResponder(textField),
+            "Expected editable portal chrome to remain focusable when web capture policy is blocked"
+        )
+    }
+
+    @MainActor
     func testWindowFirstResponderGuardAvoidsTextViewDelegateLookupForWebViewResolution() {
         _ = NSApplication.shared
         AppDelegate.installWindowResponderSwizzlesForTesting()
