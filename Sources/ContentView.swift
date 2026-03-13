@@ -7180,10 +7180,11 @@ struct VerticalTabsSidebar: View {
 
     /// Space at top of sidebar for traffic light buttons
     private let trafficLightPadding: CGFloat = 28
+    private let hiddenTitlebarTrafficLightPadding: CGFloat = 18
     private let tabRowSpacing: CGFloat = 2
 
     private var effectiveTrafficLightPadding: CGFloat {
-        showWorkspaceTitlebar ? trafficLightPadding : 0
+        showWorkspaceTitlebar ? trafficLightPadding : hiddenTitlebarTrafficLightPadding
     }
 
     private var showsSidebarNotificationMessage: Bool {
@@ -7233,7 +7234,7 @@ struct VerticalTabsSidebar: View {
                                 .equatable()
                             }
                         }
-                        .padding(.top, showWorkspaceTitlebar ? 8 : 0)
+                        .padding(.top, showWorkspaceTitlebar ? 8 : 4)
                         .padding(.bottom, 8)
 
                         SidebarEmptyArea(

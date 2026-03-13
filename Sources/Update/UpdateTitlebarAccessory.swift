@@ -1220,11 +1220,6 @@ final class UpdateTitlebarAccessoryController {
 
         pendingAttachRetries.removeValue(forKey: ObjectIdentifier(window))
 
-        guard WorkspaceTitlebarSettings.isVisible() else {
-            removeAccessoryIfPresent(from: window)
-            return
-        }
-
         guard !attachedWindows.contains(window) else { return }
 
         if !window.titlebarAccessoryViewControllers.contains(where: { $0.view.identifier == controlsIdentifier }) {
