@@ -64,17 +64,12 @@ export default function NightlyPage() {
           {t("download")}
         </a>
 
-        {/* Warning */}
-        <section className="mt-10">
-          <div className="border border-border rounded-xl p-5 bg-code-bg">
-            <p
-              className="text-[15px] text-muted"
-              style={{ lineHeight: 1.5 }}
-            >
-              {t("warning")}
-            </p>
-          </div>
-        </section>
+        <p
+          className="text-[15px] text-muted mt-8"
+          style={{ lineHeight: 1.5 }}
+        >
+          {t("warning")}
+        </p>
       </main>
     </div>
   );
