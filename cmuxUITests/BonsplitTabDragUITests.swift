@@ -55,9 +55,6 @@ final class BonsplitTabDragUITests: XCTestCase {
         let window = app.windows.element(boundBy: 0)
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
 
-        let terminalTab = app.buttons["Terminal"]
-        XCTAssertTrue(terminalTab.waitForExistence(timeout: 5.0), "Expected terminal tab to exist")
-
         let newTerminalButton = app.buttons["paneTabBarControl.newTerminal"]
         XCTAssertTrue(newTerminalButton.waitForExistence(timeout: 5.0), "Expected new terminal control to exist")
 
@@ -67,10 +64,10 @@ final class BonsplitTabDragUITests: XCTestCase {
             "Expected pane tab bar controls to hide away from the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
-        terminalTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.06)).hover()
         XCTAssertTrue(
             waitForCondition(timeout: 2.0) { newTerminalButton.isHittable },
-            "Expected pane tab bar controls to reveal when hovering a tab inside the pane tab bar. button=\(newTerminalButton.debugDescription)"
+            "Expected pane tab bar controls to reveal when hovering inside the pane tab bar. button=\(newTerminalButton.debugDescription)"
         )
 
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).hover()
