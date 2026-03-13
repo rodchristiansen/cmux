@@ -91,11 +91,14 @@ import sys
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: launcher.py <binary> <prompt>")
+    if len(sys.argv) != 4:
+        raise SystemExit("usage: launcher.py <cwd> <binary> <prompt>")
 
-    binary = sys.argv[1]
-    prompt = sys.argv[2]
+    cwd = sys.argv[1]
+    binary = sys.argv[2]
+    prompt = sys.argv[3]
+    os.makedirs(cwd, exist_ok=True)
+    os.chdir(cwd)
     sys.stdout.write(f"CMUX_REAL_AGENT_LAUNCHED_{binary}\r\n")
     sys.stdout.flush()
     os.execvp(binary, [binary, prompt])
@@ -296,6 +299,12 @@ def _real_agent_launcher_path() -> Path:
     return path
 
 
+def _real_agent_workdir() -> Path:
+    path = Path("/tmp") / f"cmux-real-agent-workdir-{os.getpid()}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _fixture_command(fixture_path: Path, label: str, required_interrupts: int) -> str:
     return (
         f"python3 {fixture_path} "
@@ -371,6 +380,7 @@ def main() -> int:
     snapshot = _snapshot_path(bundle_id)
     fixture_path = _fixture_script_path()
     real_agent_launcher_path = _real_agent_launcher_path()
+    real_agent_workdir = _real_agent_workdir()
     failures: list[str] = []
 
     cases: list[dict[str, object]] = [
@@ -397,7 +407,7 @@ def main() -> int:
         cases.extend([
             {
                 "label": "real-codex",
-                "command": f'python3 {real_agent_launcher_path} codex "say hi in one sentence and then wait for more input"',
+                "command": f'python3 {real_agent_launcher_path} {real_agent_workdir} codex "say hi in one sentence and then wait for more input"',
                 "ready_marker": "CMUX_REAL_AGENT_LAUNCHED_codex",
                 "expected_markers": ["To continue this session, run codex resume"],
                 "ready_timeout": 8.0,
@@ -406,7 +416,7 @@ def main() -> int:
             },
             {
                 "label": "real-claude",
-                "command": f'python3 {real_agent_launcher_path} claude "say hi in one sentence and then wait for more input"',
+                "command": f'python3 {real_agent_launcher_path} {real_agent_workdir} claude "say hi in one sentence and then wait for more input"',
                 "ready_marker": "CMUX_REAL_AGENT_LAUNCHED_claude",
                 "expected_markers": ["Resume this session with:", "claude --resume"],
                 "ready_timeout": 8.0,
@@ -441,6 +451,7 @@ def main() -> int:
     finally:
         fixture_path.unlink(missing_ok=True)
         real_agent_launcher_path.unlink(missing_ok=True)
+        shutil.rmtree(real_agent_workdir, ignore_errors=True)
 
     if failures:
         print("FAIL:")
