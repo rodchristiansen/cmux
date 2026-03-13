@@ -1291,7 +1291,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
         XCTAssertEqual(color.alphaComponent, 0.65, accuracy: 0.001)
     }
 }
-final class BrowserDeveloperToolsShortcutDefaultsTests: XCTestCase {
+final class BrowserShortcutDefaultsTests: XCTestCase {
     func testDefaultShortcutForShowNotifications() {
         let shortcut = KeyboardShortcutSettings.Action.showNotifications.defaultShortcut
         XCTAssertEqual(shortcut.key, "i")
