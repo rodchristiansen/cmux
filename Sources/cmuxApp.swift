@@ -4757,6 +4757,47 @@ private struct SettingsCardNote: View {
     }
 }
 
+private struct Squircle: Shape {
+    var cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let n: CGFloat = 4
+        let a = rect.width / 2
+        let b = rect.height / 2
+        let cx = rect.midX
+        let cy = rect.midY
+        let r = min(cornerRadius / min(a, b), 1.0)
+        let blend = r
+
+        var path = Path()
+        let steps = 360
+        for i in 0...steps {
+            let angle = CGFloat(i) / CGFloat(steps) * 2 * .pi
+            let cosA = cos(angle)
+            let sinA = sin(angle)
+
+            // Superellipse point
+            let sx = a * copysign(pow(abs(cosA), 2.0 / n), cosA)
+            let sy = b * copysign(pow(abs(sinA), 2.0 / n), sinA)
+
+            // Ellipse point
+            let ex = a * cosA
+            let ey = b * sinA
+
+            let x = cx + blend * sx + (1 - blend) * ex
+            let y = cy + blend * sy + (1 - blend) * ey
+
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
 private struct ThemeWindowThumbnail: View {
     let isDark: Bool
 
@@ -4852,9 +4893,9 @@ private struct ThemeWindowThumbnail: View {
                 .offset(x: width * 0.12, y: height * 0.2)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(Squircle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            Squircle(cornerRadius: 14)
                 .stroke(Color.primary.opacity(0.1), lineWidth: 1)
         )
     }
