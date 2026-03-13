@@ -4370,7 +4370,7 @@ class TerminalController {
         }
 
         var includeScrollback = v2Bool(params, "scrollback") ?? false
-        let preserveANSI = v2Bool(params, "ansi") ?? false
+        let preserveANSI = (v2Bool(params, "ansi") ?? false) || (v2Bool(params, "escapes") ?? false)
         let lineLimit = v2Int(params, "lines")
         if let lineLimit, lineLimit <= 0 {
             return .err(code: "invalid_params", message: "lines must be greater than 0", data: nil)
@@ -9573,12 +9573,12 @@ class TerminalController {
                 lineLimit = parsed
                 includeScrollback = true
                 idx += 2
-            case "--ansi":
+            case "--ansi", "--escapes":
                 preserveANSI = true
                 idx += 1
             default:
                 guard surfaceArg == nil else {
-                    return .failure(ReadScreenParseError(message: "ERROR: Usage: read_screen [id|idx] [--scrollback] [--lines <n>] [--ansi]"))
+                    return .failure(ReadScreenParseError(message: "ERROR: Usage: read_screen [id|idx] [--scrollback] [--lines <n>] [--ansi|--escapes]"))
                 }
                 surfaceArg = token
                 idx += 1
@@ -9702,7 +9702,7 @@ class TerminalController {
           send_key <key>                  - Send special key (ctrl-c, ctrl-d, enter, tab, escape)
           send_surface <id|idx> <text>    - Send text to a specific terminal
           send_key_surface <id|idx> <key> - Send special key to a specific terminal
-          read_screen [id|idx] [--scrollback] [--lines N] [--ansi] - Read terminal text
+          read_screen [id|idx] [--scrollback] [--lines N] [--ansi|--escapes] - Read terminal text
 
         Notification commands:
           notify <title>|<subtitle>|<body>   - Notify focused panel

@@ -159,6 +159,10 @@ def main() -> int:
         _must(ansi_token in cli_ansi, f"cmux read-screen --ansi missing token {ansi_token!r}: {cli_ansi!r}")
         _must("\x1b[" in cli_ansi, f"cmux read-screen --ansi should preserve ANSI escapes: {cli_ansi!r}")
 
+        cli_escapes = _run_cli(cli, ["read-screen", "--workspace", ws_target, "--surface", surface_target, "--escapes"])
+        _must(ansi_token in cli_escapes, f"cmux read-screen --escapes missing ANSI token {ansi_token!r}: {cli_escapes!r}")
+        _must("\x1b[" in cli_escapes, f"cmux read-screen --escapes should preserve ANSI escapes: {cli_escapes!r}")
+
         capture_plain = _run_cli(cli, ["capture-pane", "--workspace", ws_target, "--surface", surface_target])
         _must(ansi_token in capture_plain, f"cmux capture-pane plain output missing ANSI token {ansi_token!r}: {capture_plain!r}")
         _must("\x1b[" not in capture_plain, f"cmux capture-pane plain output should strip ANSI escapes: {capture_plain!r}")
@@ -167,11 +171,24 @@ def main() -> int:
         _must(ansi_token in capture_ansi, f"cmux capture-pane --ansi missing token {ansi_token!r}: {capture_ansi!r}")
         _must("\x1b[" in capture_ansi, f"cmux capture-pane --ansi should preserve ANSI escapes: {capture_ansi!r}")
 
+        capture_escapes = _run_cli(cli, ["capture-pane", "--workspace", ws_target, "--surface", surface_target, "--escapes"])
+        _must(ansi_token in capture_escapes, f"cmux capture-pane --escapes missing ANSI token {ansi_token!r}: {capture_escapes!r}")
+        _must("\x1b[" in capture_escapes, f"cmux capture-pane --escapes should preserve ANSI escapes: {capture_escapes!r}")
+
         cli_ansi_json = _run_cli(cli, ["--json", "read-screen", "--workspace", ws_target, "--surface", surface_target, "--ansi"])
         ansi_json_payload = json.loads(cli_ansi_json or "{}")
         ansi_json_text = str(ansi_json_payload.get("text") or "")
         _must(ansi_token in ansi_json_text, f"cmux --json read-screen --ansi missing token {ansi_token!r}: {ansi_json_payload}")
         _must("\x1b[" in ansi_json_text, f"cmux --json read-screen --ansi should preserve ANSI escapes: {ansi_json_payload}")
+
+        escapes_payload = c._call("surface.read_text", {
+            "workspace_id": ws_target,
+            "surface_id": surface_target,
+            "escapes": True,
+        }) or {}
+        escapes_text = str(escapes_payload.get("text") or "")
+        _must(ansi_token in escapes_text, f"surface.read_text escapes alias missing token {ansi_token!r}: {escapes_payload}")
+        _must("\x1b[" in escapes_text, f"surface.read_text escapes alias should preserve ANSI escapes: {escapes_payload}")
 
         invalid = subprocess.run(
             [cli, "--socket", SOCKET_PATH, "read-screen", "--workspace", ws_target, "--surface", surface_target, "--lines", "0"],

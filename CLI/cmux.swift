@@ -1410,7 +1410,7 @@ struct CMUXCLI {
             let (wsArg, rem0) = parseOption(commandArgs, name: "--workspace")
             let (sfArg, rem1) = parseOption(rem0, name: "--surface")
             let (linesArg, rem2) = parseOption(rem1, name: "--lines")
-            let trailing = rem2.filter { $0 != "--scrollback" && $0 != "--ansi" }
+            let trailing = rem2.filter { $0 != "--scrollback" && $0 != "--ansi" && $0 != "--escapes" }
             if !trailing.isEmpty {
                 throw CLIError(message: "read-screen: unexpected arguments: \(trailing.joined(separator: " "))")
             }
@@ -1428,7 +1428,7 @@ struct CMUXCLI {
             if includeScrollback {
                 params["scrollback"] = true
             }
-            if rem2.contains("--ansi") {
+            if rem2.contains("--ansi") || rem2.contains("--escapes") {
                 params["ansi"] = true
             }
             if let linesArg {
@@ -4771,7 +4771,7 @@ struct CMUXCLI {
             """
         case "capture-pane":
             return """
-            Usage: cmux capture-pane [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>] [--ansi]
+            Usage: cmux capture-pane [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>] [--ansi|--escapes]
 
             tmux-compatible alias for reading terminal text from a pane.
 
@@ -4780,10 +4780,10 @@ struct CMUXCLI {
               --surface <id|ref>     Surface context (default: $CMUX_SURFACE_ID)
               --scrollback           Include scrollback
               --lines <n>            Return only the last N lines (implies --scrollback)
-              --ansi                 Preserve ANSI escape sequences in text output
+              --ansi, --escapes      Preserve ANSI escape sequences in text output
 
             Example:
-              cmux capture-pane --workspace workspace:2 --surface surface:1 --scrollback --lines 200
+              cmux capture-pane --workspace workspace:2 --surface surface:1 --scrollback --lines 200 --ansi
             """
         case "resize-pane":
             return """
@@ -4968,7 +4968,7 @@ struct CMUXCLI {
               --surface <id|ref>     Target surface (default: $CMUX_SURFACE_ID)
               --scrollback           Include scrollback (not just visible viewport)
               --lines <n>            Limit to the last n lines (implies --scrollback)
-              --ansi                 Preserve ANSI escape sequences in text output
+              --ansi, --escapes      Preserve ANSI escape sequences in text output
 
             Example:
               cmux read-screen
@@ -7190,7 +7190,7 @@ struct CMUXCLI {
             let (wsArg, rem0) = parseOption(commandArgs, name: "--workspace")
             let (sfArg, rem1) = parseOption(rem0, name: "--surface")
             let (linesArg, rem2) = parseOption(rem1, name: "--lines")
-            let trailing = rem2.filter { $0 != "--scrollback" && $0 != "--ansi" }
+            let trailing = rem2.filter { $0 != "--scrollback" && $0 != "--ansi" && $0 != "--escapes" }
             if !trailing.isEmpty {
                 throw CLIError(message: "capture-pane: unexpected arguments: \(trailing.joined(separator: " "))")
             }
@@ -7207,7 +7207,7 @@ struct CMUXCLI {
             if includeScrollback {
                 params["scrollback"] = true
             }
-            if rem2.contains("--ansi") {
+            if rem2.contains("--ansi") || rem2.contains("--escapes") {
                 params["ansi"] = true
             }
             if let linesArg {
@@ -8432,7 +8432,7 @@ struct CMUXCLI {
           rename-workspace [--workspace <id|ref>] <title>
           rename-window [--workspace <id|ref>] <title>
           current-workspace
-          read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>] [--ansi]
+          read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>] [--ansi|--escapes]
           send [--workspace <id|ref>] [--surface <id|ref>] <text>
           send-key [--workspace <id|ref>] [--surface <id|ref>] <key>
           send-panel --panel <id|ref> [--workspace <id|ref>] <text>
@@ -8457,7 +8457,7 @@ struct CMUXCLI {
           simulate-app-active
 
           # tmux compatibility commands
-          capture-pane [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>] [--ansi]
+          capture-pane [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>] [--ansi|--escapes]
           resize-pane --pane <id|ref> [--workspace <id|ref>] (-L|-R|-U|-D) [--amount <n>]
           pipe-pane --command <shell-command> [--workspace <id|ref>] [--surface <id|ref>]
           wait-for [-S|--signal] <name> [--timeout <seconds>]
