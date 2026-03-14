@@ -4357,14 +4357,37 @@ extension BrowserPanel {
         runtime.attachmentState
     }
 
-    func isSurfaceHostedInWindowPortal() -> Bool {
+    func isSurfacePortalAnchorReady() -> Bool {
         let anchorView = portalAnchorView
-        let anchorReady =
+        return
             anchorView.window != nil &&
             anchorView.superview != nil &&
             anchorView.bounds.width > 1 &&
             anchorView.bounds.height > 1
-        guard anchorReady else { return false }
+    }
+
+    func updateSurfacePortalVisibility(visibleInUI: Bool, zPriority: Int) {
+        BrowserWindowPortalRegistry.updateEntryVisibility(
+            for: webView,
+            visibleInUI: visibleInUI,
+            zPriority: zPriority
+        )
+    }
+
+    @discardableResult
+    func refreshSurfacePortalIfAnchorReady(reason: String) -> Bool {
+        guard isSurfacePortalAnchorReady() else { return false }
+        BrowserWindowPortalRegistry.synchronizeForAnchor(portalAnchorView)
+        BrowserWindowPortalRegistry.refresh(webView: webView, reason: reason)
+        return true
+    }
+
+    func hideSurfacePortal(source: String) {
+        BrowserWindowPortalRegistry.hide(webView: webView, source: source)
+    }
+
+    func isSurfaceHostedInWindowPortal() -> Bool {
+        guard isSurfacePortalAnchorReady() else { return false }
 
         let attachmentState = runtime.attachmentState
         guard attachmentState.isAttachedToSuperview,
@@ -4372,7 +4395,7 @@ extension BrowserPanel {
             return false
         }
 
-        return BrowserWindowPortalRegistry.isWebView(webView, boundTo: anchorView)
+        return BrowserWindowPortalRegistry.isWebView(webView, boundTo: portalAnchorView)
     }
 
     func resolvedCurrentSurfaceURL() -> URL? {
