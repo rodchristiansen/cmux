@@ -19,7 +19,6 @@ import statistics
 import subprocess
 import sys
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -55,6 +54,7 @@ MIN_BASELINE_VISIBLE_P95_MS_FOR_RATIO = float(
 
 ALLOW_MAIN_SOCKET = os.environ.get("CMUX_TYPING_LAG_ALLOW_MAIN_SOCKET", "0") == "1"
 CAPTURE_SAMPLE_ON_FAILURE = os.environ.get("CMUX_TYPING_LAG_CAPTURE_SAMPLE_ON_FAILURE", "1") == "1"
+_TOKEN_COUNTER = 0
 
 
 @dataclass
@@ -261,18 +261,14 @@ def build_workspace_grid(client: cmux) -> list[str]:
     if len(panes) != 1:
         raise cmuxError(f"Expected a fresh workspace with 1 pane, got {panes}")
 
-    client.new_pane("right")
-    time.sleep(SETUP_DELAY_S)
-
-    client.focus_pane(0)
-    time.sleep(FOCUS_DELAY_S)
-    client.new_pane("down")
-    time.sleep(SETUP_DELAY_S)
-
-    client.focus_pane(1)
-    time.sleep(FOCUS_DELAY_S)
-    client.new_pane("down")
-    time.sleep(SETUP_DELAY_S)
+    split_directions = ("right", "down")
+    while len(client.list_panes()) < PANES_PER_WORKSPACE:
+        current_panes = client.list_panes()
+        client.focus_pane(len(current_panes) - 1)
+        time.sleep(FOCUS_DELAY_S)
+        direction = split_directions[(len(current_panes) - 1) % len(split_directions)]
+        client.new_pane(direction)
+        time.sleep(SETUP_DELAY_S)
 
     wait_for(lambda: len(client.list_panes()) == PANES_PER_WORKSPACE, timeout_s=8.0)
     return [pane_id for _index, pane_id, _surface_count, _focused in client.list_panes()]
@@ -316,13 +312,14 @@ def create_surface_targets(client: cmux, total_workspaces: int) -> list[SurfaceT
 
 
 def make_token(prefix: str) -> str:
+    global _TOKEN_COUNTER
     if TOKEN_LENGTH <= 1:
         return prefix[:1]
-    suffix = uuid.uuid4().hex[: max(1, TOKEN_LENGTH - len(prefix))]
-    token = (prefix + suffix)[:TOKEN_LENGTH]
-    if len(token) < TOKEN_LENGTH:
-        token = (token + uuid.uuid4().hex)[:TOKEN_LENGTH]
-    return token
+
+    suffix_length = max(1, TOKEN_LENGTH - len(prefix))
+    _TOKEN_COUNTER += 1
+    suffix = f"{_TOKEN_COUNTER:0{suffix_length}x}"[-suffix_length:]
+    return (prefix + suffix)[:TOKEN_LENGTH]
 
 
 def panel_snapshot_retry(
@@ -393,14 +390,14 @@ def type_token_into_visible_terminal(
         return token in last_tail
 
     try:
-        wait_for(token_visible, timeout_s=3.5)
+        wait_for(token_visible, timeout_s=3.5, step_s=0.01)
     except cmuxError:
         client.activate_app()
         time.sleep(FOCUS_DELAY_S)
         focus_target()
         wait_for_visible_terminal(client, target)
         try:
-            wait_for(token_visible, timeout_s=2.0)
+            wait_for(token_visible, timeout_s=2.0, step_s=0.01)
         except cmuxError as exc:
             raise cmuxError(
                 "Timed out waiting for typed token to appear in terminal text.\n"
