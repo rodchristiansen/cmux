@@ -190,17 +190,26 @@ _cmux_detect_unknown_autosuggestion_provider() {
         return 0
     fi
 
-    if _cmux_assoc_contains_match functions \
-        "_*autosuggest*" \
-        "_*autocomplete*" \
-        "_*auto-suggest*" \
-        ".autocomplete*" \
-        "*autosuggest*" \
-        "*autocomplete*" \
-        "*auto-suggest*"; then
-        print -r -- "external:unknown"
-        return 0
-    fi
+    local key
+    for key in "${(@k)functions}"; do
+        case "$key" in
+            _cmux_*)
+                continue
+                ;;
+        esac
+        if _cmux_name_matches_any \
+            "$key" \
+            "_*autosuggest*" \
+            "_*autocomplete*" \
+            "_*auto-suggest*" \
+            ".autocomplete*" \
+            "*autosuggest*" \
+            "*autocomplete*" \
+            "*auto-suggest*"; then
+            print -r -- "external:unknown"
+            return 0
+        fi
+    done
 
     return 1
 }
