@@ -1578,9 +1578,10 @@ struct CMUXCLI {
             let (priority, r4) = parseOption(r3, name: "--priority")
             let (format, r5) = parseOption(r4, name: "--format")
             let (wsFlag, r6) = parseOption(r5, name: "--workspace")
-            guard let key = r6.first else {
+            guard let rawKey = r6.first else {
                 throw CLIError(message: "\(command) requires <key> and <value>")
             }
+            let key = try validatedSidebarMetadataKey(rawKey, command: command)
             let valueParts = stripLeadingTerminator(Array(r6.dropFirst()))
             let value = valueParts.joined(separator: " ")
             guard !value.isEmpty else {
@@ -1593,24 +1594,26 @@ struct CMUXCLI {
             if let url { socketCmd += " --url=\(socketQuote(url))" }
             if let priority { socketCmd += " --priority=\(socketQuote(priority))" }
             if let format { socketCmd += " --format=\(socketQuote(format))" }
-            socketCmd += " --tab=\(wsId) -- \(socketQuote(value))"
+            socketCmd += " --tab=\(wsId) -- \(socketLiteralPayload(value))"
             let response = try sendV1Command(socketCmd, client: client)
             print(response)
 
         case "clear-status":
             let (wsFlag, csRemaining) = parseOption(commandArgs, name: "--workspace")
-            guard let key = csRemaining.first else {
+            guard let rawKey = csRemaining.first else {
                 throw CLIError(message: "clear-status requires a <key>")
             }
+            let key = try validatedSidebarMetadataKey(rawKey, command: "clear-status")
             let wsId = try resolveSidebarWorkspaceId(workspaceFlag: wsFlag, windowId: windowId, client: client)
             let response = try sendV1Command("clear_status \(key) --tab=\(wsId)", client: client)
             print(response)
 
         case "clear-meta":
             let (wsFlag, cmRemaining) = parseOption(commandArgs, name: "--workspace")
-            guard let key = cmRemaining.first else {
+            guard let rawKey = cmRemaining.first else {
                 throw CLIError(message: "clear-meta requires a <key>")
             }
+            let key = try validatedSidebarMetadataKey(rawKey, command: "clear-meta")
             let wsId = try resolveSidebarWorkspaceId(workspaceFlag: wsFlag, windowId: windowId, client: client)
             let response = try sendV1Command("clear_meta \(key) --tab=\(wsId)", client: client)
             print(response)
@@ -1630,9 +1633,10 @@ struct CMUXCLI {
         case "set-meta-block":
             let (priority, r1) = parseOption(commandArgs, name: "--priority")
             let (wsFlag, r2) = parseOption(r1, name: "--workspace")
-            guard let key = r2.first else {
+            guard let rawKey = r2.first else {
                 throw CLIError(message: "set-meta-block requires <key> and <markdown>")
             }
+            let key = try validatedSidebarMetadataKey(rawKey, command: "set-meta-block")
             let markdownParts = stripLeadingTerminator(Array(r2.dropFirst()))
             let markdown = markdownParts.joined(separator: " ")
             guard !markdown.isEmpty else {
@@ -1647,9 +1651,10 @@ struct CMUXCLI {
 
         case "clear-meta-block":
             let (wsFlag, cmbRemaining) = parseOption(commandArgs, name: "--workspace")
-            guard let key = cmbRemaining.first else {
+            guard let rawKey = cmbRemaining.first else {
                 throw CLIError(message: "clear-meta-block requires a <key>")
             }
+            let key = try validatedSidebarMetadataKey(rawKey, command: "clear-meta-block")
             let wsId = try resolveSidebarWorkspaceId(workspaceFlag: wsFlag, windowId: windowId, client: client)
             let response = try sendV1Command("clear_meta_block \(key) --tab=\(wsId)", client: client)
             print(response)
@@ -5484,6 +5489,17 @@ struct CMUXCLI {
             .replacingOccurrences(of: "\r", with: "\\r")
             .replacingOccurrences(of: "\t", with: "\\t")
             + String(repeating: "\\s", count: trailingSpaceCount)
+    }
+
+    private func validatedSidebarMetadataKey(_ raw: String, command: String) throws -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let isValid = !raw.isEmpty && raw.unicodeScalars.allSatisfy { allowed.contains($0) }
+        guard isValid else {
+            throw CLIError(
+                message: "\(command) requires a key containing only letters, numbers, '.', '_' or '-'"
+            )
+        }
+        return raw
     }
 
     private func parseOption(_ args: [String], name: String) -> (String?, [String]) {
