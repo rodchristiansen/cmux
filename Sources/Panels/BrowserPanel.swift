@@ -4305,6 +4305,10 @@ extension BrowserPanel {
         runtime.state.pageZoom
     }
 
+    func setSurfacePageZoom(_ pageZoom: CGFloat) {
+        runtime.setPageZoom(pageZoom)
+    }
+
     func isSurfaceBlankForAutofocus() -> Bool {
         guard let url = runtime.state.currentURL else { return true }
         return url.absoluteString == blankURLString
@@ -4347,6 +4351,39 @@ extension BrowserPanel {
 
     func debugPortalSnapshot() -> BrowserWindowPortalRegistry.DebugSnapshot? {
         BrowserWindowPortalRegistry.debugSnapshot(for: webView)
+    }
+
+    func surfaceAttachmentState() -> BrowserSurfaceRuntimeAttachmentState {
+        runtime.attachmentState
+    }
+
+    func isSurfaceHostedInWindowPortal() -> Bool {
+        let anchorView = portalAnchorView
+        let anchorReady =
+            anchorView.window != nil &&
+            anchorView.superview != nil &&
+            anchorView.bounds.width > 1 &&
+            anchorView.bounds.height > 1
+        guard anchorReady else { return false }
+
+        let attachmentState = runtime.attachmentState
+        guard attachmentState.isAttachedToSuperview,
+              attachmentState.isInWindow else {
+            return false
+        }
+
+        return BrowserWindowPortalRegistry.isWebView(webView, boundTo: anchorView)
+    }
+
+    func resolvedCurrentSurfaceURL() -> URL? {
+        resolvedCurrentSessionHistoryURL()
+            ?? preferredURLStringForOmnibar().flatMap(URL.init(string:))
+    }
+
+    func debugSurfaceHostingSummary() -> String {
+        let attachmentState = runtime.attachmentState
+        let frame = String(format: "%.1fx%.1f", webView.frame.width, webView.frame.height)
+        return "webInWindow=\(attachmentState.isInWindow ? 1 : 0) webHasSuperview=\(attachmentState.isAttachedToSuperview ? 1 : 0) frame=\(frame)"
     }
 
     func suppressOmnibarAutofocus(for seconds: TimeInterval) {

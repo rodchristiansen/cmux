@@ -336,7 +336,7 @@ extension Workspace {
             browserSnapshot = SessionBrowserPanelSnapshot(
                 urlString: browserPanel.preferredURLStringForOmnibar(),
                 shouldRenderWebView: browserPanel.shouldRenderWebView,
-                pageZoom: Double(browserPanel.webView.pageZoom),
+                pageZoom: Double(browserPanel.surfacePageZoom()),
                 developerToolsVisible: browserPanel.isDeveloperToolsVisible(),
                 backHistoryURLStrings: historySnapshot.backHistoryURLStrings,
                 forwardHistoryURLStrings: historySnapshot.forwardHistoryURLStrings
@@ -580,7 +580,7 @@ extension Workspace {
 
             let pageZoom = CGFloat(max(0.25, min(5.0, browserSnapshot.pageZoom)))
             if pageZoom.isFinite {
-                browserPanel.webView.pageZoom = pageZoom
+                browserPanel.setSurfacePageZoom(pageZoom)
             }
 
             if browserSnapshot.developerToolsVisible {
@@ -2585,11 +2585,9 @@ final class Workspace: Identifiable, ObservableObject {
                 "hidden=\(hosted.isHidden ? 1 : 0) frame=\(frame) bounds=\(bounds)"
         }
         if let browser = panel as? BrowserPanel {
-            let webView = browser.webView
-            let frame = String(format: "%.1fx%.1f", webView.frame.width, webView.frame.height)
             return
                 "panelState=browser panel=\(panelId.uuidString.prefix(5)) " +
-                "webInWindow=\(webView.window != nil ? 1 : 0) webHasSuperview=\(webView.superview != nil ? 1 : 0) frame=\(frame)"
+                browser.debugSurfaceHostingSummary()
         }
         return "panelState=\(String(describing: type(of: panel))) panel=\(panelId.uuidString.prefix(5))"
     }
@@ -2801,9 +2799,7 @@ final class Workspace: Identifiable, ObservableObject {
             forPaneId: pane.id.uuidString,
             in: bonsplitController.treeSnapshot()
         )
-        let resolvedURL = browserPanel.currentURL
-            ?? browserPanel.webView.url
-            ?? browserPanel.preferredURLStringForOmnibar().flatMap(URL.init(string:))
+        let resolvedURL = browserPanel.resolvedCurrentSurfaceURL()
 
         pendingClosedBrowserRestoreSnapshots[tab.id] = ClosedBrowserPanelRestoreSnapshot(
             workspaceId: id,
@@ -3811,10 +3807,7 @@ final class Workspace: Identifiable, ObservableObject {
                 anchorView.superview != nil &&
                 anchorView.bounds.width > 1 &&
                 anchorView.bounds.height > 1
-            if !anchorReady ||
-                browserPanel.webView.window == nil ||
-                browserPanel.webView.superview == nil ||
-                !BrowserWindowPortalRegistry.isWebView(browserPanel.webView, boundTo: anchorView) {
+            if !anchorReady || !browserPanel.isSurfaceHostedInWindowPortal() {
                 return true
             }
         }
@@ -3873,10 +3866,7 @@ final class Workspace: Identifiable, ObservableObject {
                 )
             }
 
-            let portalNeedsFollowUpPass =
-                !anchorReady ||
-                browserPanel.webView.window == nil ||
-                browserPanel.webView.superview == nil
+            let portalNeedsFollowUpPass = !anchorReady || !browserPanel.isSurfaceHostedInWindowPortal()
             if portalNeedsFollowUpPass {
                 self.scheduleBrowserPortalReconcileAfterSplitZoom(
                     panelId: panelId,
@@ -4452,7 +4442,7 @@ extension Workspace: BonsplitDelegate {
             return terminalPanel.hostedView.window ?? NSApp.keyWindow ?? NSApp.mainWindow
         }
         if let browserPanel = panel as? BrowserPanel {
-            return browserPanel.webView.window ?? browserPanel.portalAnchorView.window ?? NSApp.keyWindow ?? NSApp.mainWindow
+            return browserPanel.surfaceWindow() ?? browserPanel.portalAnchorView.window ?? NSApp.keyWindow ?? NSApp.mainWindow
         }
         return NSApp.keyWindow ?? NSApp.mainWindow
     }

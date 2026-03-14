@@ -15891,6 +15891,56 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(panel.surfacePageZoom(), 1.65, accuracy: 0.001)
     }
 
+    func testBrowserPanelSetSurfacePageZoomUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        panel.setSurfacePageZoom(1.9)
+
+        XCTAssertEqual(runtime.state.pageZoom, 1.9, accuracy: 0.001)
+        XCTAssertEqual(panel.surfacePageZoom(), 1.9, accuracy: 0.001)
+    }
+
+    func testBrowserPanelResolvedCurrentSurfaceURLPrefersRuntimeState() {
+        let runtimeURL = URL(string: "https://example.com/runtime-current")!
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.state = makeRuntimeState(currentURL: runtimeURL)
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        panel.restoreSessionNavigationHistory(
+            backHistoryURLStrings: [],
+            forwardHistoryURLStrings: [],
+            currentURLString: "https://example.com/restored-current"
+        )
+
+        XCTAssertEqual(panel.resolvedCurrentSurfaceURL(), runtimeURL)
+    }
+
+    func testBrowserPanelResolvedCurrentSurfaceURLFallsBackToRestoredHistory() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        panel.restoreSessionNavigationHistory(
+            backHistoryURLStrings: ["https://example.com/restored-previous"],
+            forwardHistoryURLStrings: [],
+            currentURLString: "https://example.com/restored-current"
+        )
+
+        XCTAssertEqual(
+            panel.resolvedCurrentSurfaceURL(),
+            URL(string: "https://example.com/restored-current")
+        )
+    }
+
     func testBrowserPanelDebugPortalSnapshotUsesPanelSurface() {
         let panel = BrowserPanel(workspaceId: UUID())
         let window = NSWindow(
@@ -15917,6 +15967,42 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(snapshot?.frameInWindow.origin.y ?? 0, 30, accuracy: 0.5)
         XCTAssertEqual(snapshot?.frameInWindow.width ?? 0, 140, accuracy: 0.5)
         XCTAssertEqual(snapshot?.frameInWindow.height ?? 0, 90, accuracy: 0.5)
+    }
+
+    func testBrowserPanelSurfaceHostedInWindowPortalUsesRuntimeAttachmentState() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 180),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let host = NSView(frame: window.contentView?.bounds ?? .zero)
+        host.autoresizingMask = [.width, .height]
+        let anchor = panel.portalAnchorView
+        anchor.frame = NSRect(x: 20, y: 30, width: 140, height: 90)
+        host.addSubview(anchor)
+        window.contentView = host
+
+        runtime.currentAttachmentState = BrowserSurfaceRuntimeAttachmentState(
+            isAttachedToSuperview: true,
+            isInWindow: true
+        )
+        BrowserWindowPortalRegistry.bind(webView: panel.webView, to: anchor, visibleInUI: true, zPriority: 1)
+        BrowserWindowPortalRegistry.synchronizeForAnchor(anchor)
+        defer { BrowserWindowPortalRegistry.detach(webView: panel.webView) }
+
+        XCTAssertTrue(panel.isSurfaceHostedInWindowPortal())
+
+        runtime.currentAttachmentState = BrowserSurfaceRuntimeAttachmentState(
+            isAttachedToSuperview: false,
+            isInWindow: true
+        )
+        XCTAssertFalse(panel.isSurfaceHostedInWindowPortal())
     }
 
     func testBrowserPanelResponderPolicyUsesRuntimeBoundary() {
