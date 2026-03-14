@@ -221,6 +221,7 @@ final class CmuxWebViewKeyEquivalentTests: XCTestCase {
         XCTAssertFalse(spy.invoked)
     }
 
+    @MainActor
     func testCapturedBrowserDoesNotRouteShortcutProbesToMainMenu() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
