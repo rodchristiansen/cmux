@@ -3765,7 +3765,7 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
         XCTAssertNotNil(panel.searchState, "Repeated menu terminal Find should keep the existing overlay visible")
     }
 
-    func testStartOrFocusTerminalSearchDoesNotRepostWhenSearchAlreadyExists() {
+    func testStartOrFocusTerminalSearchRefocusesWhenSearchAlreadyExists() {
         let surface = TerminalSurface(
             tabId: UUID(),
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
@@ -3782,8 +3782,8 @@ final class TerminalFindShortcutRoutingTests: XCTestCase {
         )
         XCTAssertEqual(
             focusNotificationCount,
-            0,
-            "Repeated terminal Find should keep the existing overlay without reposting focus"
+            1,
+            "Repeated terminal Find should refocus the existing terminal search field"
         )
     }
 }
