@@ -350,9 +350,8 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
             renameWorkspace(secondaryWorkspaceId, title: secondaryWorkspaceTitle),
             "Expected to rename the secondary workspace for deterministic switcher rows"
         )
-        XCTAssertEqual(
-            socketCommand("select_workspace \(primaryWorkspaceId)"),
-            "OK",
+        XCTAssertTrue(
+            selectWorkspace(primaryWorkspaceId),
             "Expected to restore the primary workspace before opening the command palette"
         )
 
@@ -656,6 +655,16 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
             params: [
                 "workspace_id": workspaceId,
                 "title": title,
+            ]
+        )
+        return (envelope?["ok"] as? Bool) == true
+    }
+
+    private func selectWorkspace(_ workspaceId: String) -> Bool {
+        let envelope = socketJSON(
+            method: "workspace.select",
+            params: [
+                "workspace_id": workspaceId,
             ]
         )
         return (envelope?["ok"] as? Bool) == true
