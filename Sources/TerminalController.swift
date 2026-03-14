@@ -13001,6 +13001,43 @@ class TerminalController {
         return (optionsPart, markdownPart)
     }
 
+    private func decodeSocketLiteralPayload(_ raw: String) -> String {
+        var result = ""
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            let character = raw[index]
+            guard character == "\\" else {
+                result.append(character)
+                index = raw.index(after: index)
+                continue
+            }
+
+            let nextIndex = raw.index(after: index)
+            guard nextIndex < raw.endIndex else {
+                result.append(character)
+                break
+            }
+
+            switch raw[nextIndex] {
+            case "\\":
+                result.append("\\")
+            case "n":
+                result.append("\n")
+            case "r":
+                result.append("\r")
+            case "t":
+                result.append("\t")
+            case "s":
+                result.append(" ")
+            default:
+                result.append("\\")
+                result.append(raw[nextIndex])
+            }
+            index = raw.index(after: nextIndex)
+        }
+        return result
+    }
+
     private func sidebarMetadataBlockLine(_ block: SidebarMetadataBlock) -> String {
         var line = "\(block.key)=\(block.markdown.replacingOccurrences(of: "\n", with: "\\n"))"
         if block.priority != 0 { line += " priority=\(block.priority)" }
@@ -13025,10 +13062,8 @@ class TerminalController {
             return "ERROR: Missing metadata markdown — usage: report_meta_block <key> [--priority=N] [--tab=X] -- <markdown>"
         }
 
-        let normalizedMarkdown = markdown
-            .replacingOccurrences(of: "\\r\\n", with: "\n")
-            .replacingOccurrences(of: "\\n", with: "\n")
-            .replacingOccurrences(of: "\\t", with: "\t")
+        let normalizedMarkdown = decodeSocketLiteralPayload(markdown)
+            .replacingOccurrences(of: "\r\n", with: "\n")
 
         let trimmedMarkdown = normalizedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMarkdown.isEmpty else {

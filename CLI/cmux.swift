@@ -5476,9 +5476,14 @@ struct CMUXCLI {
     /// Preserve literal markdown after a ` -- ` separator while still keeping
     /// the single-line socket framing intact.
     private func socketLiteralPayload(_ s: String) -> String {
-        s
+        let trailingSpaceCount = s.reversed().prefix { $0 == " " }.count
+        let core = trailingSpaceCount == 0 ? s : String(s.dropLast(trailingSpaceCount))
+        return core
+            .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+            + String(repeating: "\\s", count: trailingSpaceCount)
     }
 
     private func parseOption(_ args: [String], name: String) -> (String?, [String]) {
