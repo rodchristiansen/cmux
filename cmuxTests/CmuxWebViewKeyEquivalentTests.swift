@@ -14557,6 +14557,39 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         )
     }
 
+    private func makePNGData(
+        color: NSColor = .systemBlue,
+        size: Int = 24
+    ) throws -> Data {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: size,
+            pixelsHigh: size,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            XCTFail("Expected bitmap rep")
+            throw NSError(domain: "cmuxTests", code: 1)
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        color.setFill()
+        NSRect(x: 0, y: 0, width: size, height: size).fill()
+
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            XCTFail("Expected PNG data")
+            throw NSError(domain: "cmuxTests", code: 2)
+        }
+        return data
+    }
+
     func testFactoryUsesSharedProcessPoolAcrossSurfaces() {
         let factory = LocalWebKitBrowserSurfaceRuntimeFactory.shared
 
@@ -14725,6 +14758,57 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertEqual(selectionEndValue?.intValue, 4)
     }
 
+    func testFetchFaviconPNGDataUsesRuntimeIconDiscoveryAndCacheInvalidation() async throws {
+        let expectedIconURL = URL(string: "https://example.com/icons/runtime-64.png")!
+        let iconData = try makePNGData()
+        var requestedURLs: [URL] = []
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration(scriptSources: []),
+            faviconDataLoader: { request in
+                requestedURLs.append(try XCTUnwrap(request.url))
+                let response = try XCTUnwrap(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )
+                )
+                return (iconData, response)
+            }
+        )
+        let navigationFinished = expectation(description: "favicon page loaded")
+        surface.eventHandlers = BrowserSurfaceRuntimeEventHandlers(
+            didFinishNavigation: {
+                navigationFinished.fulfill()
+            }
+        )
+
+        surface.loadHTMLString(
+            """
+            <html>
+            <head>
+            <link rel="icon" href="\(expectedIconURL.absoluteString)" sizes="64x64" />
+            </head>
+            <body>favicon</body>
+            </html>
+            """,
+            baseURL: URL(string: "https://example.com/page")!
+        )
+        await fulfillment(of: [navigationFinished], timeout: 5)
+
+        let firstFetch = await surface.fetchFaviconPNGData()
+        let secondFetch = await surface.fetchFaviconPNGData()
+        surface.invalidateFaviconCache()
+        let thirdFetch = await surface.fetchFaviconPNGData()
+
+        XCTAssertNotNil(firstFetch)
+        XCTAssertNil(secondFetch)
+        XCTAssertNotNil(thirdFetch)
+        XCTAssertEqual(requestedURLs, [expectedIconURL, expectedIconURL])
+    }
+
     func testStateObserverReceivesImmediateAndMutatedRuntimeState() {
         let surface = LocalWebKitBrowserSurfaceRuntime(
             processPool: WKProcessPool(),
@@ -14851,8 +14935,12 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         private(set) var stopLoadingCallCount = 0
         private(set) var captureAddressBarPageFocusCallCount = 0
         private(set) var restoreAddressBarPageFocusCallCount = 0
+        private(set) var invalidateFaviconCacheCallCount = 0
+        private(set) var fetchFaviconPNGDataCallCount = 0
         var captureAddressBarPageFocusStatus: BrowserAddressBarPageFocusCaptureStatus = .clearedNone
         var restoreAddressBarPageFocusStatuses: [BrowserAddressBarPageFocusRestoreStatus] = [.noState]
+        var fetchedFaviconPNGData: Data?
+        var onFetchFaviconPNGData: (() -> Void)?
 
         init() {
             let configuration = WKWebViewConfiguration()
@@ -14966,8 +15054,23 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             completion(status)
         }
 
+        func invalidateFaviconCache() {
+            invalidateFaviconCacheCallCount += 1
+        }
+
+        func fetchFaviconPNGData() async -> Data? {
+            fetchFaviconPNGDataCallCount += 1
+            onFetchFaviconPNGData?()
+            return fetchedFaviconPNGData
+        }
+
         func sessionHistorySnapshot() -> (backHistoryURLs: [URL], forwardHistoryURLs: [URL]) {
             ([], [])
+        }
+
+        func emitState(_ state: BrowserSurfaceRuntimeState) {
+            self.state = state
+            onStateChange?(state)
         }
     }
 
@@ -15076,6 +15179,50 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             updatedColor.withAlphaComponent(updatedOpacity)
         )
         _ = panel
+    }
+
+    func testBrowserPanelDidFinishNavigationFetchesFaviconThroughRuntime() async {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let expectedPNG = Data([0x89, 0x50, 0x4E, 0x47])
+        runtime.fetchedFaviconPNGData = expectedPNG
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let fetchedFavicon = expectation(description: "favicon fetched")
+        runtime.onFetchFaviconPNGData = {
+            fetchedFavicon.fulfill()
+        }
+
+        runtime.eventHandlers.didFinishNavigation?()
+        await fulfillment(of: [fetchedFavicon], timeout: 1)
+        await Task.yield()
+
+        XCTAssertEqual(runtime.fetchFaviconPNGDataCallCount, 1)
+        XCTAssertEqual(panel.faviconPNGData, expectedPNG)
+    }
+
+    func testBrowserPanelLoadingStartInvalidatesRuntimeFaviconCache() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: "https://example.com/favicon")!,
+                title: "Example",
+                isLoading: true,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0.2,
+                pageZoom: 1.0
+            )
+        )
+
+        XCTAssertEqual(runtime.invalidateFaviconCacheCallCount, 1)
+        XCTAssertNil(panel.faviconPNGData)
     }
 
     func testBrowserPanelAddressBarSuppressionCapturesPageFocusViaRuntimeOnce() {

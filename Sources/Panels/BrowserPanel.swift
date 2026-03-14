@@ -1554,6 +1554,32 @@ fileprivate enum BrowserAddressBarPageFocusScripts {
     """
 }
 
+fileprivate enum BrowserSurfaceFaviconScripts {
+    static let discoverBestIconURL = """
+    (() => {
+      const links = Array.from(document.querySelectorAll(
+        'link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"]'
+      ));
+      function score(link) {
+        const value = (link.sizes && link.sizes.value) ? link.sizes.value : '';
+        if (value === 'any') return 1000;
+        let max = 0;
+        for (const part of value.split(/\\s+/)) {
+          const match = part.match(/(\\d+)x(\\d+)/);
+          if (!match) continue;
+          const width = parseInt(match[1], 10);
+          const height = parseInt(match[2], 10);
+          if (Number.isFinite(width)) max = Math.max(max, width);
+          if (Number.isFinite(height)) max = Math.max(max, height);
+        }
+        return max;
+      }
+      links.sort((lhs, rhs) => score(rhs) - score(lhs));
+      return links[0]?.href || '';
+    })();
+    """
+}
+
 struct BrowserSurfaceRuntimeState: Equatable {
     let currentURL: URL?
     let title: String?
@@ -1606,6 +1632,8 @@ protocol BrowserSurfaceRuntime: AnyObject {
     func evaluateJavaScript(_ script: String) async throws -> Any?
     func captureAddressBarPageFocus(completion: @escaping (BrowserAddressBarPageFocusCaptureStatus) -> Void)
     func restoreAddressBarPageFocus(completion: @escaping (BrowserAddressBarPageFocusRestoreStatus) -> Void)
+    func invalidateFaviconCache()
+    func fetchFaviconPNGData() async -> Data?
     func sessionHistorySnapshot() -> (backHistoryURLs: [URL], forwardHistoryURLs: [URL])
 }
 
@@ -1633,6 +1661,7 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
     let backendKind: BrowserRuntimeBackendKind = .localWebKit
 
     private let processPool: WKProcessPool
+    private let faviconDataLoader: (URLRequest) async throws -> (Data, URLResponse)
     private(set) var webView: WKWebView
     private(set) var webViewInstanceID: UUID
     private var observations: [NSKeyValueObservation] = []
@@ -1640,6 +1669,7 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
     private let uiDelegate = BrowserUIDelegate()
     private let downloadDelegate = BrowserDownloadDelegate()
     private var browserThemeMode: BrowserThemeMode = .system
+    private var lastFaviconURLString: String?
     private var lastEmittedState: BrowserSurfaceRuntimeState?
     var eventHandlers = BrowserSurfaceRuntimeEventHandlers() {
         didSet {
@@ -1666,9 +1696,13 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
 
     init(
         processPool: WKProcessPool,
-        configuration: BrowserRuntimeSurfaceConfiguration
+        configuration: BrowserRuntimeSurfaceConfiguration,
+        faviconDataLoader: @escaping (URLRequest) async throws -> (Data, URLResponse) = { request in
+            try await URLSession.shared.data(for: request)
+        }
     ) {
         self.processPool = processPool
+        self.faviconDataLoader = faviconDataLoader
         let webView = Self.makeWebView(
             processPool: processPool,
             configuration: configuration
@@ -1696,6 +1730,7 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         }
         webView = replacement
         webViewInstanceID = UUID()
+        lastFaviconURLString = nil
         bindWebView(replacement)
         applyStoredBrowserThemeMode(to: replacement)
         emitStateChange(force: true)
@@ -1775,6 +1810,53 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         webView.evaluateJavaScript(BrowserAddressBarPageFocusScripts.restore) { result, error in
             completion(BrowserAddressBarPageFocusRestoreStatus(result: result, error: error))
         }
+    }
+
+    func invalidateFaviconCache() {
+        lastFaviconURLString = nil
+    }
+
+    func fetchFaviconPNGData() async -> Data? {
+        let webView = self.webView
+        guard let pageURL = webView.url else { return nil }
+        guard let scheme = pageURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+
+        var discoveredURL: URL?
+        if let href = try? await webView.evaluateJavaScript(BrowserSurfaceFaviconScripts.discoverBestIconURL) as? String {
+            let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, let url = URL(string: trimmed) {
+                discoveredURL = url
+            }
+        }
+
+        let fallbackURL = URL(string: "/favicon.ico", relativeTo: pageURL)
+        guard let iconURL = discoveredURL ?? fallbackURL else { return nil }
+
+        let iconURLString = iconURL.absoluteString
+        if iconURLString == lastFaviconURLString {
+            return nil
+        }
+        lastFaviconURLString = iconURLString
+
+        var request = URLRequest(url: iconURL)
+        request.timeoutInterval = 2.0
+        request.cachePolicy = .returnCacheDataElseLoad
+        request.setValue(BrowserUserAgentSettings.safariUserAgent, forHTTPHeaderField: "User-Agent")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await faviconDataLoader(request)
+        } catch {
+            return nil
+        }
+
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            return nil
+        }
+
+        return Self.makeFaviconPNGData(from: data, targetPx: 32)
     }
 
     func sessionHistorySnapshot() -> (backHistoryURLs: [URL], forwardHistoryURLs: [URL]) {
@@ -1987,6 +2069,63 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
           }
         })();
         """
+    }
+
+    @MainActor
+    private static func makeFaviconPNGData(from raw: Data, targetPx: Int) -> Data? {
+        guard let image = NSImage(data: raw) else { return nil }
+
+        let px = max(16, min(128, targetPx))
+        let size = NSSize(width: px, height: px)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: px,
+            pixelsHigh: px,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let ctx = NSGraphicsContext(bitmapImageRep: rep)
+        ctx?.imageInterpolation = .high
+        ctx?.shouldAntialias = true
+        NSGraphicsContext.current = ctx
+
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: size).fill()
+
+        let sourceSize = image.size
+        let scale = min(size.width / max(1, sourceSize.width), size.height / max(1, sourceSize.height))
+        let drawSize = NSSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+        let drawOrigin = NSPoint(
+            x: (size.width - drawSize.width) / 2.0,
+            y: (size.height - drawSize.height) / 2.0
+        )
+        let drawRect = NSRect(
+            x: round(drawOrigin.x),
+            y: round(drawOrigin.y),
+            width: round(drawSize.width),
+            height: round(drawSize.height)
+        )
+
+        image.draw(
+            in: drawRect,
+            from: NSRect(origin: .zero, size: sourceSize),
+            operation: .sourceOver,
+            fraction: 1.0,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+
+        return rep.representation(using: .png, properties: [:])
     }
 
     private func emitStateChange(force: Bool = false) {
@@ -2289,7 +2428,6 @@ final class BrowserPanel: Panel, ObservableObject {
 
     private var faviconTask: Task<Void, Never>?
     private var faviconRefreshGeneration: Int = 0
-    private var lastFaviconURLString: String?
     private var lastRuntimeState: BrowserSurfaceRuntimeState?
     private let minPageZoom: CGFloat = 0.25
     private let maxPageZoom: CGFloat = 5.0
@@ -2518,12 +2656,6 @@ final class BrowserPanel: Panel, ObservableObject {
             .store(in: &webViewCancellables)
     }
 
-    private func isCurrentWebView(_ candidate: WKWebView, instanceID: UUID? = nil) -> Bool {
-        guard candidate === webView else { return false }
-        guard let instanceID else { return true }
-        return instanceID == webViewInstanceID
-    }
-
     init(
         workspaceId: UUID,
         initialURL: URL? = nil,
@@ -2545,8 +2677,9 @@ final class BrowserPanel: Panel, ObservableObject {
         runtime.eventHandlers = BrowserSurfaceRuntimeEventHandlers(
             didFinishNavigation: { [weak self] in
                 guard let self else { return }
-                BrowserHistoryStore.shared.recordVisit(url: self.webView.url, title: self.webView.title)
-                self.refreshFavicon(from: self.webView)
+                let runtimeState = self.runtime.state
+                BrowserHistoryStore.shared.recordVisit(url: runtimeState.currentURL, title: runtimeState.title)
+                self.refreshFaviconFromRuntime()
                 self.applyBrowserThemeModeIfNeeded()
                 // Keep find-in-page open through load completion and refresh matches for the new DOM.
                 self.restoreFindStateAfterNavigation(replaySearch: true)
@@ -2557,7 +2690,7 @@ final class BrowserPanel: Panel, ObservableObject {
                 // shows the failed URL instead of the old page's branding.
                 self.pageTitle = failedURL.isEmpty ? "" : failedURL
                 self.faviconPNGData = nil
-                self.lastFaviconURLString = nil
+                self.runtime.invalidateFaviconCache()
                 // Keep find-in-page open and clear stale counters on failed loads.
                 self.restoreFindStateAfterNavigation(replaySearch: false)
             },
@@ -2784,91 +2917,24 @@ final class BrowserPanel: Panel, ObservableObject {
         faviconTask = nil
     }
 
-    private func refreshFavicon(from webView: WKWebView) {
+    private func refreshFaviconFromRuntime() {
         faviconTask?.cancel()
         faviconTask = nil
-
-        guard let pageURL = webView.url else { return }
-        guard let scheme = pageURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
         faviconRefreshGeneration &+= 1
         let refreshGeneration = faviconRefreshGeneration
         let refreshWebViewInstanceID = webViewInstanceID
 
-        faviconTask = Task { @MainActor [weak self, weak webView] in
-            guard let self, let webView else { return }
-            guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
+        faviconTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard self.webViewInstanceID == refreshWebViewInstanceID else { return }
             guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
 
-            // Try to discover the best icon URL from the document.
-            let js = """
-            (() => {
-              const links = Array.from(document.querySelectorAll(
-                'link[rel~=\"icon\"], link[rel=\"shortcut icon\"], link[rel=\"apple-touch-icon\"], link[rel=\"apple-touch-icon-precomposed\"]'
-              ));
-              function score(link) {
-                const v = (link.sizes && link.sizes.value) ? link.sizes.value : '';
-                if (v === 'any') return 1000;
-                let max = 0;
-                for (const part of v.split(/\\s+/)) {
-                  const m = part.match(/(\\d+)x(\\d+)/);
-                  if (!m) continue;
-                  const a = parseInt(m[1], 10);
-                  const b = parseInt(m[2], 10);
-                  if (Number.isFinite(a)) max = Math.max(max, a);
-                  if (Number.isFinite(b)) max = Math.max(max, b);
-                }
-                return max;
-              }
-              links.sort((a, b) => score(b) - score(a));
-              return links[0]?.href || '';
-            })();
-            """
-
-            var discoveredURL: URL?
-            if let href = try? await webView.evaluateJavaScript(js) as? String {
-                let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty, let u = URL(string: trimmed) {
-                    discoveredURL = u
-                }
-            }
-            guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
+            let png = await self.runtime.fetchFaviconPNGData()
+            guard self.webViewInstanceID == refreshWebViewInstanceID else { return }
             guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
-
-            let fallbackURL = URL(string: "/favicon.ico", relativeTo: pageURL)
-            let iconURL = discoveredURL ?? fallbackURL
-            guard let iconURL else { return }
-
-            // Avoid repeated fetches.
-            let iconURLString = iconURL.absoluteString
-            if iconURLString == lastFaviconURLString, faviconPNGData != nil {
-                return
-            }
-            lastFaviconURLString = iconURLString
-
-            var req = URLRequest(url: iconURL)
-            req.timeoutInterval = 2.0
-            req.cachePolicy = .returnCacheDataElseLoad
-            req.setValue(BrowserUserAgentSettings.safariUserAgent, forHTTPHeaderField: "User-Agent")
-
-            let data: Data
-            let response: URLResponse
-            do {
-                (data, response) = try await URLSession.shared.data(for: req)
-            } catch {
-                return
-            }
-            guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
-            guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
-
-            guard let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode) else {
-                return
-            }
-
-            // Use >= 2x the rendered point size so we don't upscale (blurry) on Retina.
-            guard let png = Self.makeFaviconPNGData(from: data, targetPx: 32) else { return }
             // Only update if we got a real icon; keep the old one otherwise to avoid flashes.
-            faviconPNGData = png
+            guard let png else { return }
+            self.faviconPNGData = png
         }
     }
 
@@ -2877,69 +2943,13 @@ final class BrowserPanel: Panel, ObservableObject {
         return generation == faviconRefreshGeneration
     }
 
-    @MainActor
-    private static func makeFaviconPNGData(from raw: Data, targetPx: Int) -> Data? {
-        guard let image = NSImage(data: raw) else { return nil }
-
-        let px = max(16, min(128, targetPx))
-        let size = NSSize(width: px, height: px)
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: px,
-            pixelsHigh: px,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            return nil
-        }
-
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        let ctx = NSGraphicsContext(bitmapImageRep: rep)
-        ctx?.imageInterpolation = .high
-        ctx?.shouldAntialias = true
-        NSGraphicsContext.current = ctx
-
-        NSColor.clear.setFill()
-        NSRect(origin: .zero, size: size).fill()
-
-        // Aspect-fit into the target square.
-        let srcSize = image.size
-        let scale = min(size.width / max(1, srcSize.width), size.height / max(1, srcSize.height))
-        let drawSize = NSSize(width: srcSize.width * scale, height: srcSize.height * scale)
-        let drawOrigin = NSPoint(x: (size.width - drawSize.width) / 2.0, y: (size.height - drawSize.height) / 2.0)
-        // Align to integral pixels to avoid soft edges at small sizes.
-        let drawRect = NSRect(
-            x: round(drawOrigin.x),
-            y: round(drawOrigin.y),
-            width: round(drawSize.width),
-            height: round(drawSize.height)
-        )
-
-        image.draw(
-            in: drawRect,
-            from: NSRect(origin: .zero, size: srcSize),
-            operation: .sourceOver,
-            fraction: 1.0,
-            respectFlipped: true,
-            hints: [.interpolation: NSImageInterpolation.high]
-        )
-
-        return rep.representation(using: .png, properties: [:])
-    }
-
     private func handleWebViewLoadingChanged(_ newValue: Bool) {
         if newValue {
             // Any new load invalidates older favicon fetches, even for same-URL reloads.
             faviconRefreshGeneration &+= 1
             faviconTask?.cancel()
             faviconTask = nil
-            lastFaviconURLString = nil
+            runtime.invalidateFaviconCache()
             // Clear the previous page's favicon so it never persists across navigations.
             // The loading spinner covers this gap; didFinish will fetch the new favicon.
             faviconPNGData = nil
@@ -3209,6 +3219,7 @@ extension BrowserPanel {
         nativeCanGoBack = false
         nativeCanGoForward = false
         runtime.setLastAttemptedNavigationURL(nil)
+        runtime.invalidateFaviconCache()
         abandonRestoredSessionHistoryIfNeeded()
 
         pendingAddressBarFocusRequestId = nil
@@ -3223,7 +3234,6 @@ extension BrowserPanel {
         pageTitle = ""
         currentURL = nil
         faviconPNGData = nil
-        lastFaviconURLString = nil
         lastRuntimeState = nil
         activePortalHostLease = nil
         pendingDistinctPortalHostReplacementPaneId = nil
