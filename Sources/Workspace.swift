@@ -3481,10 +3481,7 @@ final class Workspace: Identifiable, ObservableObject {
     func hideAllBrowserPortalViews() {
         for panel in panels.values {
             guard let browser = panel as? BrowserPanel else { continue }
-            BrowserWindowPortalRegistry.hide(
-                webView: browser.webView,
-                source: "workspaceRetire"
-            )
+            browser.hideSurfacePortal(source: "workspaceRetire")
         }
     }
 
@@ -3763,34 +3760,11 @@ final class Workspace: Identifiable, ObservableObject {
             guard let browserPanel = panel as? BrowserPanel else { continue }
             let shouldBeVisible = visiblePanelIds.contains(browserPanel.id)
             if shouldBeVisible {
-                BrowserWindowPortalRegistry.updateEntryVisibility(
-                    for: browserPanel.webView,
-                    visibleInUI: true,
-                    zPriority: 2
-                )
-                let anchorView = browserPanel.portalAnchorView
-                let anchorReady =
-                    anchorView.window != nil &&
-                    anchorView.superview != nil &&
-                    anchorView.bounds.width > 1 &&
-                    anchorView.bounds.height > 1
-                if anchorReady {
-                    BrowserWindowPortalRegistry.synchronizeForAnchor(anchorView)
-                    BrowserWindowPortalRegistry.refresh(
-                        webView: browserPanel.webView,
-                        reason: reason
-                    )
-                }
+                browserPanel.updateSurfacePortalVisibility(visibleInUI: true, zPriority: 2)
+                _ = browserPanel.refreshSurfacePortalIfAnchorReady(reason: reason)
             } else {
-                BrowserWindowPortalRegistry.updateEntryVisibility(
-                    for: browserPanel.webView,
-                    visibleInUI: false,
-                    zPriority: 0
-                )
-                BrowserWindowPortalRegistry.hide(
-                    webView: browserPanel.webView,
-                    source: reason
-                )
+                browserPanel.updateSurfacePortalVisibility(visibleInUI: false, zPriority: 0)
+                browserPanel.hideSurfacePortal(source: reason)
             }
         }
     }
@@ -3801,13 +3775,7 @@ final class Workspace: Identifiable, ObservableObject {
         for panel in panels.values {
             guard let browserPanel = panel as? BrowserPanel else { continue }
             guard visiblePanelIds.contains(browserPanel.id) else { continue }
-            let anchorView = browserPanel.portalAnchorView
-            let anchorReady =
-                anchorView.window != nil &&
-                anchorView.superview != nil &&
-                anchorView.bounds.width > 1 &&
-                anchorView.bounds.height > 1
-            if !anchorReady || !browserPanel.isSurfaceHostedInWindowPortal() {
+            if !browserPanel.isSurfacePortalAnchorReady() || !browserPanel.isSurfaceHostedInWindowPortal() {
                 return true
             }
         }
@@ -3851,22 +3819,10 @@ final class Workspace: Identifiable, ObservableObject {
                 window.contentView?.displayIfNeeded()
             }
 
-            let anchorView = browserPanel.portalAnchorView
-            let anchorReady =
-                anchorView.window != nil &&
-                anchorView.superview != nil &&
-                anchorView.bounds.width > 1 &&
-                anchorView.bounds.height > 1
-
-            if anchorReady {
-                BrowserWindowPortalRegistry.synchronizeForAnchor(anchorView)
-                BrowserWindowPortalRegistry.refresh(
-                    webView: browserPanel.webView,
-                    reason: "workspace.toggleSplitZoom"
-                )
-            }
-
-            let portalNeedsFollowUpPass = !anchorReady || !browserPanel.isSurfaceHostedInWindowPortal()
+            let portalRefreshed = browserPanel.refreshSurfacePortalIfAnchorReady(
+                reason: "workspace.toggleSplitZoom"
+            )
+            let portalNeedsFollowUpPass = !portalRefreshed || !browserPanel.isSurfaceHostedInWindowPortal()
             if portalNeedsFollowUpPass {
                 self.scheduleBrowserPortalReconcileAfterSplitZoom(
                     panelId: panelId,

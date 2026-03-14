@@ -15969,6 +15969,77 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(snapshot?.frameInWindow.height ?? 0, 90, accuracy: 0.5)
     }
 
+    func testBrowserPanelRefreshSurfacePortalIfAnchorReadyRequiresReadyAnchor() {
+        let panel = BrowserPanel(workspaceId: UUID())
+
+        XCTAssertFalse(panel.refreshSurfacePortalIfAnchorReady(reason: "unitTest"))
+    }
+
+    func testBrowserPanelRefreshSurfacePortalIfAnchorReadyUsesPanelAnchor() {
+        let panel = BrowserPanel(workspaceId: UUID())
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        let host = NSView(frame: window.contentView?.bounds ?? .zero)
+        host.autoresizingMask = [.width, .height]
+        window.contentView = host
+
+        let anchor = panel.portalAnchorView
+        anchor.frame = NSRect(x: 20, y: 30, width: 140, height: 90)
+        host.addSubview(anchor)
+
+        BrowserWindowPortalRegistry.bind(webView: panel.webView, to: anchor, visibleInUI: true, zPriority: 1)
+        defer { BrowserWindowPortalRegistry.detach(webView: panel.webView) }
+
+        XCTAssertTrue(panel.refreshSurfacePortalIfAnchorReady(reason: "unitTest.initial"))
+        XCTAssertEqual(panel.debugPortalSnapshot()?.frameInWindow.origin.x ?? 0, 20, accuracy: 0.5)
+
+        anchor.frame = NSRect(x: 48, y: 44, width: 150, height: 96)
+
+        XCTAssertTrue(panel.refreshSurfacePortalIfAnchorReady(reason: "unitTest.moved"))
+        XCTAssertEqual(panel.debugPortalSnapshot()?.frameInWindow.origin.x ?? 0, 48, accuracy: 0.5)
+        XCTAssertEqual(panel.debugPortalSnapshot()?.frameInWindow.origin.y ?? 0, 44, accuracy: 0.5)
+        XCTAssertEqual(panel.debugPortalSnapshot()?.frameInWindow.width ?? 0, 150, accuracy: 0.5)
+        XCTAssertEqual(panel.debugPortalSnapshot()?.frameInWindow.height ?? 0, 96, accuracy: 0.5)
+    }
+
+    func testBrowserPanelUpdateAndHideSurfacePortalUsePanelSurface() {
+        let panel = BrowserPanel(workspaceId: UUID())
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        let host = NSView(frame: window.contentView?.bounds ?? .zero)
+        host.autoresizingMask = [.width, .height]
+        window.contentView = host
+
+        let anchor = panel.portalAnchorView
+        anchor.frame = NSRect(x: 20, y: 30, width: 140, height: 90)
+        host.addSubview(anchor)
+
+        BrowserWindowPortalRegistry.bind(webView: panel.webView, to: anchor, visibleInUI: true, zPriority: 1)
+        defer { BrowserWindowPortalRegistry.detach(webView: panel.webView) }
+
+        XCTAssertTrue(panel.refreshSurfacePortalIfAnchorReady(reason: "unitTest.initial"))
+        XCTAssertEqual(panel.debugPortalSnapshot()?.visibleInUI, true)
+
+        panel.updateSurfacePortalVisibility(visibleInUI: false, zPriority: 0)
+        XCTAssertEqual(panel.debugPortalSnapshot()?.visibleInUI, false)
+
+        panel.hideSurfacePortal(source: "unitTest")
+        drainMainQueue()
+
+        XCTAssertEqual(panel.debugPortalSnapshot()?.visibleInUI, false)
+        XCTAssertEqual(panel.debugPortalSnapshot()?.containerHidden, true)
+    }
+
     func testBrowserPanelSurfaceHostedInWindowPortalUsesRuntimeAttachmentState() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panel = BrowserPanel(
