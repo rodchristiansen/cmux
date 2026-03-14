@@ -14525,6 +14525,60 @@ final class GhosttyTerminalViewVisibilityPolicyTests: XCTestCase {
 
 @MainActor
 final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
+    private final class RuntimeFakeInspector: NSObject {
+        enum HideBehavior {
+            case hides
+            case noEffect
+        }
+
+        private let hideBehavior: HideBehavior
+        private var visible = false
+        private(set) var attachCount = 0
+        private(set) var showCount = 0
+        private(set) var hideCount = 0
+        private(set) var closeCount = 0
+        private(set) var showConsoleCount = 0
+
+        init(hideBehavior: HideBehavior = .hides) {
+            self.hideBehavior = hideBehavior
+            super.init()
+        }
+
+        @objc func isVisible() -> Bool {
+            visible
+        }
+
+        @objc func attach() {
+            attachCount += 1
+        }
+
+        @objc func show() {
+            showCount += 1
+            visible = true
+        }
+
+        @objc func hide() {
+            hideCount += 1
+            if hideBehavior == .hides {
+                visible = false
+            }
+        }
+
+        @objc func close() {
+            closeCount += 1
+            visible = false
+        }
+
+        @objc func showConsole() {
+            showConsoleCount += 1
+        }
+    }
+
+    override class func setUp() {
+        super.setUp()
+        installCmuxUnitTestInspectorOverride()
+    }
+
     private func assertColorsEqual(
         _ lhs: NSColor?,
         _ rhs: NSColor,
@@ -14809,6 +14863,29 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertEqual(requestedURLs, [expectedIconURL, expectedIconURL])
     }
 
+    func testDeveloperToolsAdapterUsesRuntimeOwnedInspectorOperations() {
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+        let inspector = RuntimeFakeInspector(hideBehavior: .noEffect)
+        surface.webView.cmuxSetUnitTestInspector(inspector)
+
+        XCTAssertEqual(surface.developerToolsVisibilityState(), .hidden)
+        XCTAssertTrue(surface.revealDeveloperTools(attachIfNeeded: true))
+        XCTAssertEqual(surface.developerToolsVisibilityState(), .visible)
+        XCTAssertEqual(inspector.attachCount, 1)
+        XCTAssertEqual(inspector.showCount, 1)
+
+        surface.showDeveloperToolsConsole()
+        XCTAssertEqual(inspector.showConsoleCount, 1)
+
+        XCTAssertTrue(surface.concealDeveloperTools())
+        XCTAssertEqual(surface.developerToolsVisibilityState(), .hidden)
+        XCTAssertEqual(inspector.hideCount, 1)
+        XCTAssertEqual(inspector.closeCount, 1)
+    }
+
     func testStateObserverReceivesImmediateAndMutatedRuntimeState() {
         let surface = LocalWebKitBrowserSurfaceRuntime(
             processPool: WKProcessPool(),
@@ -14937,10 +15014,15 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         private(set) var restoreAddressBarPageFocusCallCount = 0
         private(set) var invalidateFaviconCacheCallCount = 0
         private(set) var fetchFaviconPNGDataCallCount = 0
+        private(set) var revealDeveloperToolsCallCount = 0
+        private(set) var concealDeveloperToolsCallCount = 0
+        private(set) var showDeveloperToolsConsoleCallCount = 0
+        private(set) var lastRevealDeveloperToolsAttachIfNeeded: Bool?
         var captureAddressBarPageFocusStatus: BrowserAddressBarPageFocusCaptureStatus = .clearedNone
         var restoreAddressBarPageFocusStatuses: [BrowserAddressBarPageFocusRestoreStatus] = [.noState]
         var fetchedFaviconPNGData: Data?
         var onFetchFaviconPNGData: (() -> Void)?
+        var currentDeveloperToolsVisibilityState: BrowserSurfaceDeveloperToolsVisibilityState = .unavailable
 
         init() {
             let configuration = WKWebViewConfiguration()
@@ -15064,6 +15146,31 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             return fetchedFaviconPNGData
         }
 
+        func developerToolsVisibilityState() -> BrowserSurfaceDeveloperToolsVisibilityState {
+            currentDeveloperToolsVisibilityState
+        }
+
+        @discardableResult
+        func revealDeveloperTools(attachIfNeeded: Bool) -> Bool {
+            revealDeveloperToolsCallCount += 1
+            lastRevealDeveloperToolsAttachIfNeeded = attachIfNeeded
+            guard currentDeveloperToolsVisibilityState != .unavailable else { return false }
+            currentDeveloperToolsVisibilityState = .visible
+            return true
+        }
+
+        @discardableResult
+        func concealDeveloperTools() -> Bool {
+            concealDeveloperToolsCallCount += 1
+            guard currentDeveloperToolsVisibilityState != .unavailable else { return false }
+            currentDeveloperToolsVisibilityState = .hidden
+            return true
+        }
+
+        func showDeveloperToolsConsole() {
+            showDeveloperToolsConsoleCallCount += 1
+        }
+
         func sessionHistorySnapshot() -> (backHistoryURLs: [URL], forwardHistoryURLs: [URL]) {
             ([], [])
         }
@@ -15176,6 +15283,96 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
 
         XCTAssertNil(panel.currentURL)
         XCTAssertEqual(panel.preferredURLStringForOmnibar(), runtimeURL.absoluteString)
+    }
+
+    func testBrowserPanelKeepsExistingTitleDuringLoadingWhenRuntimeTitleIsEmpty() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: "https://example.com/original"),
+                title: "Original Title",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: "https://example.com/reload"),
+                title: nil,
+                isLoading: true,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0.3,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+
+        XCTAssertEqual(panel.pageTitle, "Original Title")
+    }
+
+    func testBrowserPanelClearsStaleTitleAfterFinishedUntitledNavigation() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: "https://example.com/original"),
+                title: "Original Title",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+        runtime.state = BrowserSurfaceRuntimeState(
+            currentURL: URL(string: "https://example.com/untitled"),
+            title: nil,
+            isLoading: false,
+            canGoBack: false,
+            canGoForward: false,
+            estimatedProgress: 1.0,
+            pageZoom: runtime.state.pageZoom
+        )
+
+        runtime.eventHandlers.didFinishNavigation?()
+
+        XCTAssertEqual(panel.pageTitle, "")
+    }
+
+    func testBrowserPanelKeepsFailedURLTitleWhenRuntimeStateTitleIsEmpty() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let failedURL = "https://example.com/failed"
+
+        runtime.eventHandlers.didFailNavigation?(failedURL)
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: nil,
+                title: nil,
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+
+        XCTAssertEqual(panel.pageTitle, failedURL)
     }
 
     func testBrowserPanelRestoredSessionHistoryUsesRuntimeStateCurrentURL() {
