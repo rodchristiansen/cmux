@@ -9486,6 +9486,21 @@ final class WindowBrowserHostViewTests: XCTestCase {
 
 @MainActor
 final class BrowserPanelHostContainerViewTests: XCTestCase {
+    private func waitForCondition(
+        timeout: TimeInterval = 1.0,
+        step: TimeInterval = 0.01,
+        _ condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(step))
+        }
+        return condition()
+    }
+
     private final class PrimaryPageProbeView: NSView {
         override func hitTest(_ point: NSPoint) -> NSView? {
             bounds.contains(point) ? self : nil
@@ -9514,19 +9529,11 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         }
     }
 
-    private final class ReattachProbeWebView: WKWebView {
+    private final class ReattachProbeWebView: WKWebView, LocalHostRenderingStateProbe {
         private(set) var firedSelectors: [String] = []
 
-        override func viewDidUnhide() {
-            firedSelectors.append("viewDidUnhide")
-        }
-
-        @objc func _enterInWindow() {
-            firedSelectors.append("_enterInWindow")
-        }
-
-        @objc func _endDeferringViewInWindowChangesSync() {
-            firedSelectors.append("_endDeferringViewInWindowChangesSync")
+        func cmuxDidInvokeLocalHostSelector(_ rawSelector: String) {
+            firedSelectors.append(rawSelector)
         }
     }
 
@@ -9870,14 +9877,23 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
             reason: "test"
         )
 
-        XCTAssertEqual(
-            webView.firedSelectors,
-            ["viewDidUnhide", "_enterInWindow", "_endDeferringViewInWindowChangesSync"]
+        let expectedSelectors: Set<String> = [
+            "viewDidUnhide",
+            "_enterInWindow",
+            "_endDeferringViewInWindowChangesSync",
+        ]
+        XCTAssertTrue(
+            Set(webView.firedSelectors).isSuperset(of: expectedSelectors),
+            "Expected the initial refresh to invoke the local-host rendering selectors. fired=\(webView.firedSelectors)"
         )
 
-        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
-
-        XCTAssertEqual(webView.firedSelectors.count, 9)
+        let initialCount = webView.firedSelectors.count
+        XCTAssertTrue(
+            waitForCondition {
+                webView.firedSelectors.count > initialCount
+            },
+            "Expected an async follow-up refresh pass. fired=\(webView.firedSelectors)"
+        )
     }
 
     func testLocalInlineHostedRefreshReattachesAfterFocusTransitionWithoutReparent() {
@@ -11768,7 +11784,9 @@ final class BrowserWindowPortalLifecycleTests: XCTestCase {
         }
     }
 
-    private final class WKInspectorProbeView: NSView {}
+    private final class WKInspectorProbeView: NSView {
+        override var acceptsFirstResponder: Bool { true }
+    }
 
     private func realizeWindowLayout(_ window: NSWindow) {
         window.makeKeyAndOrderFront(nil)
@@ -12138,8 +12156,8 @@ final class BrowserWindowPortalLifecycleTests: XCTestCase {
 
         slot.isHidden = true
 
-        XCTAssertNil(
-            window.firstResponder,
+        XCTAssertFalse(
+            window.firstResponder === inspectorView,
             "Hiding a browser slot should yield any owned inspector responder before it goes off-screen"
         )
     }

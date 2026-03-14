@@ -2272,6 +2272,11 @@ final class BrowserPanel: Panel, ObservableObject {
         viewReattachToken &+= 1
     }
 
+    func ownsUsableLocalInlineHost(for paneId: PaneID) -> Bool {
+        guard let lease = activeLocalInlineHostLease else { return false }
+        return lease.paneId == paneId.id && Self.localInlineHostIsUsable(lease)
+    }
+
     func sessionNavigationHistorySnapshot() -> (
         backHistoryURLStrings: [String],
         forwardHistoryURLStrings: [String]

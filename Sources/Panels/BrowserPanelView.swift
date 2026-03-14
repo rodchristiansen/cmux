@@ -3,6 +3,10 @@ import SwiftUI
 import WebKit
 import AppKit
 
+protocol LocalHostRenderingStateProbe: AnyObject {
+    func cmuxDidInvokeLocalHostSelector(_ rawSelector: String)
+}
+
 private extension NSObject {
     @discardableResult
     func cmuxLocalHostCallVoidIfAvailable(_ rawSelector: String) -> Bool {
@@ -11,6 +15,7 @@ private extension NSObject {
         typealias Fn = @convention(c) (AnyObject, Selector) -> Void
         let fn = unsafeBitCast(method(for: selector), to: Fn.self)
         fn(self, selector)
+        (self as? LocalHostRenderingStateProbe)?.cmuxDidInvokeLocalHostSelector(rawSelector)
         return true
     }
 }
@@ -19,6 +24,9 @@ private extension WKWebView {
     func cmuxReattachLocalHostRenderingState(reason: String) {
         guard window != nil else { return }
 
+        // These optional private WebKit selectors repair visibility and in-window
+        // state after a locally hosted browser view is reattached. The debug log
+        // records which ones still exist so future WebKit changes are diagnosable.
         let firedSelectors = [
             "viewDidUnhide",
             "_enterInWindow",
@@ -4667,17 +4675,17 @@ struct WebViewRepresentable: NSViewRepresentable {
         refreshToken: UInt64,
         reason: String
     ) {
-        defer { coordinator.lastLocalInlineRefreshToken = refreshToken }
-
         guard !container.isHidden, container.window != nil else { return }
-        guard let lastRefreshToken = coordinator.lastLocalInlineRefreshToken else { return }
-        guard lastRefreshToken != refreshToken else { return }
+        if let lastRefreshToken = coordinator.lastLocalInlineRefreshToken,
+           lastRefreshToken == refreshToken {
+            return
+        }
 
 #if DEBUG
         dlog(
             "browser.localHost.tokenRefresh web=\(ObjectIdentifier(webView)) " +
             "container=\(Self.objectID(container)) reason=\(reason) " +
-            "oldToken=\(lastRefreshToken) newToken=\(refreshToken)"
+            "oldToken=\(String(describing: coordinator.lastLocalInlineRefreshToken)) newToken=\(refreshToken)"
         )
 #endif
         refreshLocalInlineHostedWebViewPresentation(
@@ -4685,6 +4693,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             in: container,
             reason: reason
         )
+        coordinator.lastLocalInlineRefreshToken = refreshToken
     }
 
     static func refreshLocalInlineHostedWebViewPresentationAfterFocusChangeIfNeeded(
@@ -4784,11 +4793,9 @@ struct WebViewRepresentable: NSViewRepresentable {
             // workspace pane mapping converges to the destination pane. Once this host
             // successfully owns the local inline lease, trust that lease instead of
             // re-checking the potentially stale pane mapping here.
-            guard host.window != nil else { return }
-            guard webView.superview !== slotView else { return }
-
             host.layoutSubtreeIfNeeded()
             slotView.layoutSubtreeIfNeeded()
+            guard host.window != nil else { return }
             guard slotView.bounds.width > 1, slotView.bounds.height > 1 else { return }
 
 #if DEBUG
@@ -4817,9 +4824,10 @@ struct WebViewRepresentable: NSViewRepresentable {
             )
 #endif
         }
-        host.onDidMoveToWindow = { [weak host, weak browserPanel = panel] in
+        host.onDidMoveToWindow = { [weak host, weak coordinator, weak browserPanel = panel] in
             DispatchQueue.main.async {
-                guard let host, let browserPanel else { return }
+                guard let host, let coordinator, let browserPanel else { return }
+                guard coordinator.attachGeneration == generation else { return }
                 _ = browserPanel.claimLocalInlineHost(
                     hostId: ObjectIdentifier(host),
                     paneId: paneId,
@@ -4899,6 +4907,14 @@ struct WebViewRepresentable: NSViewRepresentable {
                 details: Self.attachContext(webView: webView, host: host)
             )
 #endif
+            return false
+        }
+
+        host.layoutSubtreeIfNeeded()
+        slotView.layoutSubtreeIfNeeded()
+        guard slotView.bounds.width > 1, slotView.bounds.height > 1 else {
+            host.setLocalInlineSlotHidden(true)
+            host.releaseHostedWebViewConstraints()
             return false
         }
 

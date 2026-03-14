@@ -3811,6 +3811,9 @@ final class Workspace: Identifiable, ObservableObject {
 
     private func scheduleMovedBrowserRefresh(panelId: UUID, remainingPasses: Int = 8) {
         guard let browser = browserPanel(for: panelId) else { return }
+        let paneOwnsUsableLocalHost = paneId(forPanelId: panelId).map {
+            browser.ownsUsableLocalInlineHost(for: $0)
+        } ?? false
 
         // Tab drag/move can leave the replacement browser host off-window for a few turns.
         // Keep nudging SwiftUI until the WKWebView is reattached to a live host again.
@@ -3818,6 +3821,7 @@ final class Workspace: Identifiable, ObservableObject {
         browser.requestDeveloperToolsRefreshAfterNextAttach(reason: "workspace.movedBrowserRefresh")
 
         let webViewAttached =
+            paneOwnsUsableLocalHost &&
             browser.webView.superview != nil &&
             browser.webView.window != nil &&
             browser.webView.bounds.width > 1 &&
