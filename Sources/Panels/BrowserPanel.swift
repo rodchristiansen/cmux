@@ -2643,6 +2643,7 @@ final class BrowserPanel: Panel, ObservableObject {
 
     /// Published page title
     @Published private(set) var pageTitle: String = ""
+    private var preservesFailedNavigationTitleUntilRuntimeChange = false
 
     /// Published favicon (PNG data). When present, the tab bar can render it instead of a SF symbol.
     @Published private(set) var faviconPNGData: Data?
@@ -2956,7 +2957,13 @@ final class BrowserPanel: Panel, ObservableObject {
             handleWebViewLoadingChanged(state.isLoading)
         }
         let trimmedTitle = (state.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedTitle.isEmpty {
+        let previousTrimmedTitle = (lastRuntimeState?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if preservesFailedNavigationTitleUntilRuntimeChange {
+            if !trimmedTitle.isEmpty, trimmedTitle != previousTrimmedTitle {
+                pageTitle = trimmedTitle
+                preservesFailedNavigationTitleUntilRuntimeChange = false
+            }
+        } else if !trimmedTitle.isEmpty {
             pageTitle = trimmedTitle
         }
         nativeCanGoBack = state.canGoBack
@@ -2998,6 +3005,7 @@ final class BrowserPanel: Panel, ObservableObject {
             didFinishNavigation: { [weak self] in
                 guard let self else { return }
                 let runtimeState = self.runtime.state
+                self.preservesFailedNavigationTitleUntilRuntimeChange = false
                 self.pageTitle = (runtimeState.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 BrowserHistoryStore.shared.recordVisit(url: runtimeState.currentURL, title: runtimeState.title)
                 self.refreshFaviconFromRuntime()
@@ -3009,6 +3017,7 @@ final class BrowserPanel: Panel, ObservableObject {
                 guard let self else { return }
                 // Clear stale title/favicon from the previous page so the tab
                 // shows the failed URL instead of the old page's branding.
+                self.preservesFailedNavigationTitleUntilRuntimeChange = true
                 self.pageTitle = failedURL.isEmpty ? "" : failedURL
                 self.faviconPNGData = nil
                 self.runtime.invalidateFaviconCache()
@@ -3896,7 +3905,7 @@ extension BrowserPanel {
             forceDeveloperToolsRefreshOnNextAttach = false
         }
 
-        if visible != targetVisible {
+        if source.hasPrefix("toggle"), visible != targetVisible {
             scheduleDeveloperToolsTransitionSettle(source: source)
         } else {
             developerToolsTransitionTargetVisible = nil

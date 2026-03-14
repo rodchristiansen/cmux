@@ -16170,6 +16170,55 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(panel.pageTitle, failedURL)
     }
 
+    func testBrowserPanelKeepsFailedURLTitleWhenRuntimeStateReplaysPreviousTitle() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let failedURL = "https://example.com/failed"
+
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: "https://example.com/original"),
+                title: "Original Title",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+        runtime.eventHandlers.didFailNavigation?(failedURL)
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: failedURL),
+                title: "Original Title",
+                isLoading: true,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0.4,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+
+        XCTAssertEqual(panel.pageTitle, failedURL)
+
+        runtime.emitState(
+            BrowserSurfaceRuntimeState(
+                currentURL: URL(string: failedURL),
+                title: "Recovered Title",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 1.0,
+                pageZoom: runtime.state.pageZoom
+            )
+        )
+
+        XCTAssertEqual(panel.pageTitle, "Recovered Title")
+    }
+
     func testBrowserPanelRestoredSessionHistoryUsesRuntimeStateCurrentURL() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panel = BrowserPanel(
