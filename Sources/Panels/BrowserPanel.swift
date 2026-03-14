@@ -2881,11 +2881,8 @@ final class BrowserPanel: Panel, ObservableObject {
         guard let window = webView.window, !webView.isHiddenOrHasHiddenAncestor else { return }
 
         // If nothing meaningful is loaded yet, prefer letting the omnibar take focus.
-        if !webView.isLoading {
-            let urlString = webView.url?.absoluteString ?? currentURL?.absoluteString
-            if urlString == nil || urlString == "about:blank" {
-                return
-            }
+        if !runtime.state.isLoading, preferredURLStringForOmnibar() == nil {
+            return
         }
 
         if Self.responderChainContains(window.firstResponder, target: webView) {
@@ -4420,33 +4417,27 @@ extension BrowserPanel {
     }
 
     /// Returns the most reliable URL string for omnibar-related matching and UI decisions.
-    /// `currentURL` can lag behind navigation changes, so prefer the live WKWebView URL.
+    /// `currentURL` can lag behind runtime state changes, so prefer the runtime's current URL.
     func preferredURLStringForOmnibar() -> String? {
-        if let webViewURL = webView.url?.absoluteString
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !webViewURL.isEmpty,
-           webViewURL != blankURLString {
-            return webViewURL
-        }
-
-        if let current = currentURL?.absoluteString
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !current.isEmpty,
-           current != blankURLString {
-            return current
+        for candidate in [runtime.state.currentURL?.absoluteString, currentURL?.absoluteString] {
+            guard let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty,
+                  trimmed != blankURLString else {
+                continue
+            }
+            return trimmed
         }
 
         return nil
     }
 
     private func resolvedCurrentSessionHistoryURL() -> URL? {
-        if let webViewURL = webView.url,
-           Self.serializableSessionHistoryURLString(webViewURL) != nil {
-            return webViewURL
-        }
-        if let currentURL,
-           Self.serializableSessionHistoryURLString(currentURL) != nil {
-            return currentURL
+        for candidate in [runtime.state.currentURL, currentURL] {
+            guard let candidate,
+                  Self.serializableSessionHistoryURLString(candidate) != nil else {
+                continue
+            }
+            return candidate
         }
         return restoredHistoryCurrentURL
     }

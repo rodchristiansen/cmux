@@ -15156,6 +15156,61 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(lastCustomUserAgent, BrowserUserAgentSettings.safariUserAgent)
     }
 
+    func testBrowserPanelPreferredURLStringForOmnibarUsesRuntimeStateBeforePublishedCurrentURL() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let runtimeURL = URL(string: "https://example.com/runtime-current")!
+
+        runtime.state = BrowserSurfaceRuntimeState(
+            currentURL: runtimeURL,
+            title: nil,
+            isLoading: false,
+            canGoBack: false,
+            canGoForward: false,
+            estimatedProgress: 0,
+            pageZoom: runtime.state.pageZoom
+        )
+
+        XCTAssertNil(panel.currentURL)
+        XCTAssertEqual(panel.preferredURLStringForOmnibar(), runtimeURL.absoluteString)
+    }
+
+    func testBrowserPanelRestoredSessionHistoryUsesRuntimeStateCurrentURL() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let runtimeURL = URL(string: "https://example.com/runtime-current")!
+        let previousURL = URL(string: "https://example.com/runtime-previous")!
+
+        runtime.state = BrowserSurfaceRuntimeState(
+            currentURL: runtimeURL,
+            title: nil,
+            isLoading: false,
+            canGoBack: false,
+            canGoForward: false,
+            estimatedProgress: 0,
+            pageZoom: runtime.state.pageZoom
+        )
+        panel.restoreSessionNavigationHistory(
+            backHistoryURLStrings: [previousURL.absoluteString],
+            forwardHistoryURLStrings: [],
+            currentURLString: nil
+        )
+
+        XCTAssertNil(panel.currentURL)
+        XCTAssertTrue(panel.canGoBack)
+
+        panel.goBack()
+
+        XCTAssertEqual(runtime.loadedRequests.last?.url, previousURL)
+        XCTAssertTrue(panel.canGoForward)
+    }
+
     func testBrowserPanelBackgroundRefreshUsesRuntimeBoundary() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panel = BrowserPanel(
