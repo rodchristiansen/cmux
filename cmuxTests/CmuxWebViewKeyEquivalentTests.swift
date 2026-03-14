@@ -14778,6 +14778,7 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
 
         let attachedState = surface.developerToolsHostState()
         XCTAssertTrue(attachedState.hasAttachedInspectorLayout)
+        XCTAssertFalse(attachedState.hasSideDockedInspectorLayout)
         XCTAssertEqual(attachedState.detachedWindowCount, baselineDetachedWindowCount)
 
         let detachedWindow = NSWindow(
@@ -14802,8 +14803,32 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
 
         let detachedState = surface.developerToolsHostState()
         XCTAssertTrue(detachedState.hasAttachedInspectorLayout)
+        XCTAssertFalse(detachedState.hasSideDockedInspectorLayout)
         XCTAssertEqual(detachedState.detachedWindowCount, baselineDetachedWindowCount + 1)
         XCTAssertTrue(detachedState.hasDetachedInspectorWindows)
+    }
+
+    func testDeveloperToolsHostStateDetectsSideDockedInspectorLayout() {
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        surface.webView.frame = NSRect(x: 0, y: 0, width: 120, height: host.bounds.height)
+        host.addSubview(surface.webView)
+
+        let inspectorContainer = NSView(
+            frame: NSRect(x: 120, y: 0, width: host.bounds.width - 120, height: host.bounds.height)
+        )
+        let inspectorView = RuntimeWKInspectorProbeView(frame: inspectorContainer.bounds)
+        inspectorView.autoresizingMask = [.width, .height]
+        inspectorContainer.addSubview(inspectorView)
+        host.addSubview(inspectorContainer)
+
+        let hostState = surface.developerToolsHostState()
+        XCTAssertTrue(hostState.hasAttachedInspectorLayout)
+        XCTAssertTrue(hostState.hasSideDockedInspectorLayout)
     }
 
     func testReplaceWebViewCreatesNewInstanceAndPreservesRequestedPageZoom() {
@@ -15754,6 +15779,31 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             detachedWindowCount: 0
         )
         XCTAssertTrue(panel.shouldUseLocalInlineDeveloperToolsHosting())
+    }
+
+    func testBrowserPanelTransientHideAttachmentPreserveUsesRuntimeHostStateBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.currentDeveloperToolsVisibilityState = .hidden
+        runtime.currentDeveloperToolsHostState = BrowserSurfaceDeveloperToolsHostState(
+            hasAttachedInspectorLayout: true,
+            detachedWindowCount: 0,
+            hasSideDockedInspectorLayout: false
+        )
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        XCTAssertTrue(panel.shouldPreserveWebViewAttachmentDuringTransientHide())
+
+        runtime.currentDeveloperToolsHostState = BrowserSurfaceDeveloperToolsHostState(
+            hasAttachedInspectorLayout: true,
+            detachedWindowCount: 0,
+            hasSideDockedInspectorLayout: true
+        )
+
+        XCTAssertFalse(panel.shouldPreserveWebViewAttachmentDuringTransientHide())
     }
 
     func testBrowserPanelDismissesDetachedDeveloperToolsWindowsThroughRuntimeBoundary() {
