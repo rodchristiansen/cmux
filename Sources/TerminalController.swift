@@ -13,6 +13,9 @@ class TerminalController {
         let acceptLoopAlive: Bool
         let socketPathMatches: Bool
         let socketPathExists: Bool
+        let socketProbePerformed: Bool
+        let socketConnectable: Bool?
+        let socketConnectErrno: Int32?
 
         var failureSignals: [String] {
             var signals: [String] = []
@@ -20,6 +23,9 @@ class TerminalController {
             if !acceptLoopAlive { signals.append("accept_loop_dead") }
             if !socketPathMatches { signals.append("socket_path_mismatch") }
             if !socketPathExists { signals.append("socket_missing") }
+            if socketProbePerformed && isRunning && acceptLoopAlive && socketPathMatches && socketPathExists && socketConnectable == false {
+                signals.append("socket_unreachable")
+            }
             return signals
         }
 
@@ -30,10 +36,15 @@ class TerminalController {
 
     static let shared = TerminalController()
 
-    private nonisolated(unsafe) var socketPath = "/tmp/cmux.sock"
+    private nonisolated(unsafe) var socketPath = SocketControlSettings.stableDefaultSocketPath
     private nonisolated(unsafe) var serverSocket: Int32 = -1
     private nonisolated(unsafe) var isRunning = false
     private nonisolated(unsafe) var acceptLoopAlive = false
+    private nonisolated(unsafe) var activeAcceptLoopGeneration: UInt64 = 0
+    private nonisolated(unsafe) var nextAcceptLoopGeneration: UInt64 = 0
+    private nonisolated(unsafe) var pendingAcceptLoopRearmGeneration: UInt64?
+    private nonisolated(unsafe) var listenerStartInProgress = false
+    private nonisolated let listenerStateLock = NSLock()
     private var clientHandlers: [Int32: Thread] = [:]
     private var tabManager: TabManager?
     private var accessMode: SocketControlMode = .cmuxOnly
@@ -41,6 +52,38 @@ class TerminalController {
     private nonisolated(unsafe) static var socketCommandPolicyDepth: Int = 0
     private nonisolated(unsafe) static var socketCommandFocusAllowanceStack: [Bool] = []
     private nonisolated static let socketCommandPolicyLock = NSLock()
+    private nonisolated static let socketListenBacklog: Int32 = 128
+    private nonisolated static let acceptFailureBaseBackoffMs = 10
+    private nonisolated static let acceptFailureMaxBackoffMs = 5_000
+    private nonisolated static let acceptFailureMinimumRearmDelayMs = 100
+    private nonisolated static let acceptFailureRearmThreshold = 50
+    private nonisolated static let socketProbePollTimeoutMs: Int32 = 100
+    private nonisolated static let socketProbePollAttempts = 3
+    private nonisolated static let socketProbePollRetryBackoffUs: useconds_t = 50_000
+    private nonisolated static let socketListenerFailureCaptureCooldown: TimeInterval = 60
+    private nonisolated static let socketListenerFailureCaptureLock = NSLock()
+    private nonisolated(unsafe) static var socketListenerFailureLastCapturedAt: [String: Date] = [:]
+    private nonisolated static let unixSocketPathMaxLength: Int = {
+        var addr = sockaddr_un()
+        // Reserve one byte for the null terminator.
+        return MemoryLayout.size(ofValue: addr.sun_path) - 1
+    }()
+
+    private struct ListenerStateSnapshot {
+        let socketPath: String
+        let serverSocket: Int32
+        let isRunning: Bool
+        let acceptLoopAlive: Bool
+        let activeGeneration: UInt64
+        let pendingRearmGeneration: UInt64?
+        let listenerStartInProgress: Bool
+    }
+
+    private enum SocketBindAttemptResult {
+        case success(path: String)
+        case pathTooLong(path: String)
+        case failure(path: String, stage: String, errnoCode: Int32)
+    }
 
     private static let focusIntentV1Commands: Set<String> = [
         "focus_window",
@@ -126,6 +169,40 @@ class TerminalController {
     private let v2BrowserUndefinedSentinel = V2BrowserUndefinedSentinel()
 
     private init() {}
+
+    private nonisolated func withListenerState<T>(_ body: () -> T) -> T {
+        listenerStateLock.lock()
+        defer { listenerStateLock.unlock() }
+        return body()
+    }
+
+    private nonisolated func listenerStateSnapshot() -> ListenerStateSnapshot {
+        withListenerState {
+            ListenerStateSnapshot(
+                socketPath: socketPath,
+                serverSocket: serverSocket,
+                isRunning: isRunning,
+                acceptLoopAlive: acceptLoopAlive,
+                activeGeneration: activeAcceptLoopGeneration,
+                pendingRearmGeneration: pendingAcceptLoopRearmGeneration,
+                listenerStartInProgress: listenerStartInProgress
+            )
+        }
+    }
+
+    nonisolated func activeSocketPath(preferredPath: String) -> String {
+        let snapshot = listenerStateSnapshot()
+        if snapshot.isRunning || snapshot.acceptLoopAlive || snapshot.listenerStartInProgress || snapshot.serverSocket >= 0 {
+            return snapshot.socketPath
+        }
+        return preferredPath
+    }
+
+    private nonisolated func shouldContinueAcceptLoop(generation: UInt64) -> Bool {
+        withListenerState {
+            isRunning && generation == activeAcceptLoopGeneration
+        }
+    }
 
     nonisolated static func shouldSuppressSocketCommandActivation() -> Bool {
         socketCommandPolicyLock.lock()
@@ -262,7 +339,9 @@ class TerminalController {
     private final class SocketFastPathState: @unchecked Sendable {
         private let queue = DispatchQueue(label: "com.cmux.socket-fast-path")
         private var lastReportedDirectories: [SocketSurfaceKey: String] = [:]
+        private var lastReportedShellStates: [SocketSurfaceKey: Workspace.PanelShellActivityState] = [:]
         private let maxTrackedDirectories = 4096
+        private let maxTrackedShellStates = 4096
 
         func shouldPublishDirectory(workspaceId: UUID, panelId: UUID, directory: String) -> Bool {
             let key = SocketSurfaceKey(workspaceId: workspaceId, panelId: panelId)
@@ -274,6 +353,24 @@ class TerminalController {
                     lastReportedDirectories.removeAll(keepingCapacity: true)
                 }
                 lastReportedDirectories[key] = directory
+                return true
+            }
+        }
+
+        func shouldPublishShellActivity(
+            workspaceId: UUID,
+            panelId: UUID,
+            state: Workspace.PanelShellActivityState
+        ) -> Bool {
+            let key = SocketSurfaceKey(workspaceId: workspaceId, panelId: panelId)
+            return queue.sync {
+                if lastReportedShellStates[key] == state {
+                    return false
+                }
+                if lastReportedShellStates.count >= maxTrackedShellStates {
+                    lastReportedShellStates.removeAll(keepingCapacity: true)
+                }
+                lastReportedShellStates[key] = state
                 return true
             }
         }
@@ -302,6 +399,21 @@ class TerminalController {
             return url.path
         }
         return trimmed
+    }
+
+    nonisolated static func parseReportedShellActivityState(
+        _ rawState: String
+    ) -> Workspace.PanelShellActivityState? {
+        switch rawState.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "prompt", "idle":
+            return .promptIdle
+        case "running", "busy", "command":
+            return .commandRunning
+        case "unknown", "clear":
+            return .unknown
+        default:
+            return nil
+        }
     }
 
     /// Update which window's TabManager receives socket commands.
@@ -369,12 +481,14 @@ class TerminalController {
         errnoCode: Int32? = nil,
         extra: [String: Any] = [:]
     ) -> [String: Any] {
+        let snapshot = listenerStateSnapshot()
         var data: [String: Any] = [
             "stage": stage,
-            "path": socketPath,
-            "isRunning": isRunning ? 1 : 0,
-            "acceptLoopAlive": acceptLoopAlive ? 1 : 0,
-            "serverSocket": Int(serverSocket)
+            "path": snapshot.socketPath,
+            "isRunning": snapshot.isRunning ? 1 : 0,
+            "acceptLoopAlive": snapshot.acceptLoopAlive ? 1 : 0,
+            "serverSocket": Int(snapshot.serverSocket),
+            "activeGeneration": snapshot.activeGeneration
         ]
         if let errnoCode {
             data["errno"] = Int(errnoCode)
@@ -394,30 +508,282 @@ class TerminalController {
     ) {
         let data = socketListenerEventData(stage: stage, errnoCode: errnoCode, extra: extra)
         sentryBreadcrumb(message, category: "socket", data: data)
+        guard Self.shouldCaptureSocketListenerFailure(
+            message: message,
+            stage: stage,
+            path: data["path"] as? String ?? "",
+            errnoCode: errnoCode
+        ) else {
+            return
+        }
         sentryCaptureError(message, category: "socket", data: data, contextKey: "socket_listener")
+    }
+
+    private nonisolated static func shouldCaptureSocketListenerFailure(
+        message: String,
+        stage: String,
+        path: String,
+        errnoCode: Int32?
+    ) -> Bool {
+        let key = "\(message)|\(stage)|\(path)|\(errnoCode.map(String.init) ?? "none")"
+        let now = Date()
+        socketListenerFailureCaptureLock.lock()
+        defer { socketListenerFailureCaptureLock.unlock() }
+        if let lastCapturedAt = socketListenerFailureLastCapturedAt[key],
+           now.timeIntervalSince(lastCapturedAt) < socketListenerFailureCaptureCooldown {
+            return false
+        }
+        socketListenerFailureLastCapturedAt[key] = now
+        return true
+    }
+
+    nonisolated static func acceptErrorClassification(errnoCode: Int32) -> String {
+        switch errnoCode {
+        case EINTR, ECONNABORTED, EAGAIN, EWOULDBLOCK:
+            return "immediate_retry"
+        case EMFILE, ENFILE, ENOBUFS, ENOMEM:
+            return "resource_pressure"
+        case EBADF, EINVAL, ENOTSOCK:
+            return "fatal"
+        default:
+            return "retry_with_backoff"
+        }
+    }
+
+    nonisolated static func shouldRearmListenerForAcceptError(errnoCode: Int32) -> Bool {
+        acceptErrorClassification(errnoCode: errnoCode) == "fatal"
+    }
+
+    nonisolated static func shouldRetryAcceptImmediately(errnoCode: Int32) -> Bool {
+        acceptErrorClassification(errnoCode: errnoCode) == "immediate_retry"
+    }
+
+    nonisolated static func shouldRearmForConsecutiveAcceptFailures(consecutiveFailures: Int) -> Bool {
+        consecutiveFailures >= acceptFailureRearmThreshold
+    }
+
+    nonisolated static func acceptFailureBackoffMilliseconds(consecutiveFailures: Int) -> Int {
+        guard consecutiveFailures > 0 else { return 0 }
+        var delay = acceptFailureBaseBackoffMs
+        var remaining = consecutiveFailures - 1
+        while remaining > 0 {
+            if delay >= acceptFailureMaxBackoffMs {
+                return acceptFailureMaxBackoffMs
+            }
+            delay = min(delay * 2, acceptFailureMaxBackoffMs)
+            remaining -= 1
+        }
+        return delay
+    }
+
+    nonisolated static func acceptFailureRearmDelayMilliseconds(consecutiveFailures: Int) -> Int {
+        max(
+            acceptFailureBackoffMilliseconds(consecutiveFailures: consecutiveFailures),
+            acceptFailureMinimumRearmDelayMs
+        )
+    }
+
+    nonisolated static func shouldEmitAcceptFailureBreadcrumb(consecutiveFailures: Int) -> Bool {
+        guard consecutiveFailures > 0 else { return false }
+        if consecutiveFailures <= 3 {
+            return true
+        }
+        return (consecutiveFailures & (consecutiveFailures - 1)) == 0
+    }
+
+    nonisolated static func shouldUnlinkSocketPathAfterAcceptLoopCleanup(
+        pathMatches: Bool,
+        isRunning: Bool,
+        activeGeneration: UInt64,
+        listenerStartInProgress: Bool
+    ) -> Bool {
+        guard pathMatches else { return false }
+        guard !listenerStartInProgress else { return false }
+        return !isRunning && activeGeneration == 0
+    }
+
+    private nonisolated static func unixSocketAddress(path: String) -> sockaddr_un? {
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+
+        let maxLength = unixSocketPathMaxLength + 1
+        var didFit = false
+        path.withCString { source in
+            let sourceLength = strlen(source)
+            guard sourceLength < maxLength else { return }
+
+            _ = withUnsafeMutableBytes(of: &addr.sun_path) { buffer in
+                buffer.initializeMemory(as: UInt8.self, repeating: 0)
+            }
+            withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
+                let destination = UnsafeMutableRawPointer(pathPtr).assumingMemoryBound(to: CChar.self)
+                strncpy(destination, source, maxLength - 1)
+            }
+            didFit = true
+        }
+        return didFit ? addr : nil
+    }
+
+    private nonisolated static func bindUnixSocket(_ socket: Int32, path: String) -> Int32? {
+        guard var addr = unixSocketAddress(path: path) else { return nil }
+        return withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                bind(socket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+    }
+
+    private nonisolated static func probeSocketConnectability(path: String) -> (isConnectable: Bool?, errnoCode: Int32?) {
+        let probeSocket = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probeSocket >= 0 else {
+            return (false, errno)
+        }
+        defer { close(probeSocket) }
+
+        let existingFlags = fcntl(probeSocket, F_GETFL, 0)
+        if existingFlags >= 0 {
+            _ = fcntl(probeSocket, F_SETFL, existingFlags | O_NONBLOCK)
+        }
+
+        guard var addr = unixSocketAddress(path: path) else {
+            return (false, ENAMETOOLONG)
+        }
+        let connectResult = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                connect(probeSocket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if connectResult == 0 {
+            return (true, nil)
+        }
+        let connectErrno = errno
+        if connectErrno == EINPROGRESS {
+            var pollDescriptor = pollfd(fd: probeSocket, events: Int16(POLLOUT), revents: 0)
+            for attempt in 0..<Self.socketProbePollAttempts {
+                pollDescriptor.revents = 0
+                let pollResult = poll(&pollDescriptor, 1, Self.socketProbePollTimeoutMs)
+                if pollResult > 0 {
+                    var socketError: Int32 = 0
+                    var socketErrorLength = socklen_t(MemoryLayout<Int32>.size)
+                    let status = getsockopt(
+                        probeSocket,
+                        SOL_SOCKET,
+                        SO_ERROR,
+                        &socketError,
+                        &socketErrorLength
+                    )
+                    if status == 0 && socketError == 0 {
+                        return (true, nil)
+                    }
+                    if status == 0 {
+                        return (false, socketError)
+                    }
+                    return (false, errno)
+                }
+
+                let pollErrno = errno
+                if pollResult == 0 || pollErrno == EINTR {
+                    if attempt + 1 < Self.socketProbePollAttempts {
+                        usleep(Self.socketProbePollRetryBackoffUs)
+                        continue
+                    }
+                    return (false, pollResult == 0 ? ETIMEDOUT : pollErrno)
+                }
+                return (false, pollErrno)
+            }
+        }
+        return (false, connectErrno)
+    }
+
+    private nonisolated static func bindListenerSocket(_ socket: Int32, path: String) -> SocketBindAttemptResult {
+        if let errnoCode = ensureSocketParentDirectoryExists(path: path) {
+            return .failure(path: path, stage: "create_directory", errnoCode: errnoCode)
+        }
+        if unlink(path) != 0, errno != ENOENT {
+            return .failure(path: path, stage: "unlink", errnoCode: errno)
+        }
+
+        guard let bindResult = bindUnixSocket(socket, path: path) else {
+            return .pathTooLong(path: path)
+        }
+        guard bindResult >= 0 else {
+            return .failure(path: path, stage: "bind", errnoCode: errno)
+        }
+        return .success(path: path)
+    }
+
+    private nonisolated static func ensureSocketParentDirectoryExists(path: String) -> Int32? {
+        let parentURL = URL(fileURLWithPath: path).deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: parentURL,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            return nil
+        } catch let error as NSError {
+            if error.domain == NSPOSIXErrorDomain {
+                return Int32(error.code)
+            }
+            return EIO
+        }
+    }
+
+    nonisolated static func fallbackSocketPathAfterBindFailure(
+        requestedPath: String,
+        stage: String,
+        errnoCode: Int32,
+        currentUserID: uid_t = getuid()
+    ) -> String? {
+        guard requestedPath == SocketControlSettings.stableDefaultSocketPath else {
+            return nil
+        }
+
+        switch stage {
+        case "unlink" where errnoCode == EACCES || errnoCode == EPERM:
+            return SocketControlSettings.userScopedStableSocketPath(currentUserID: currentUserID)
+        case "bind" where errnoCode == EACCES || errnoCode == EPERM || errnoCode == EADDRINUSE:
+            return SocketControlSettings.userScopedStableSocketPath(currentUserID: currentUserID)
+        default:
+            return nil
+        }
     }
 
     func start(tabManager: TabManager, socketPath: String, accessMode: SocketControlMode) {
         self.tabManager = tabManager
         self.accessMode = accessMode
 
-        if isRunning {
-            if self.socketPath == socketPath && acceptLoopAlive {
-                self.accessMode = accessMode
-                applySocketPermissions()
-                return
-            }
+        let existing = withListenerState {
+            (isRunning: isRunning, socketPath: self.socketPath, acceptLoopAlive: acceptLoopAlive)
+        }
+
+        if existing.isRunning && existing.socketPath == socketPath && existing.acceptLoopAlive {
+            self.accessMode = accessMode
+            applySocketPermissions()
+            return
+        }
+
+        if existing.isRunning {
             stop()
         }
 
-        self.socketPath = socketPath
-
-        // Remove existing socket file
-        unlink(socketPath)
+        var activeSocketPath = socketPath
+        withListenerState {
+            self.socketPath = activeSocketPath
+            listenerStartInProgress = true
+        }
+        var listenerActivated = false
+        defer {
+            if !listenerActivated {
+                withListenerState {
+                    listenerStartInProgress = false
+                }
+            }
+        }
 
         // Create socket
-        serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard serverSocket >= 0 else {
+        let newServerSocket = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard newServerSocket >= 0 else {
             let errnoCode = errno
             print("TerminalController: Failed to create socket")
             reportSocketListenerFailure(
@@ -428,30 +794,58 @@ class TerminalController {
             return
         }
 
-        // Bind to path
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        socketPath.withCString { ptr in
-            withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
-                let pathBuf = UnsafeMutableRawPointer(pathPtr).assumingMemoryBound(to: CChar.self)
-                strcpy(pathBuf, ptr)
+        var bindAttempt = Self.bindListenerSocket(newServerSocket, path: activeSocketPath)
+        if case .failure(let failedPath, let failedStage, let failedErrnoCode) = bindAttempt,
+           let fallbackPath = Self.fallbackSocketPathAfterBindFailure(
+               requestedPath: failedPath,
+               stage: failedStage,
+               errnoCode: failedErrnoCode
+           ),
+           fallbackPath != failedPath {
+            sentryBreadcrumb(
+                "socket.listener.path.fallback",
+                category: "socket",
+                data: [
+                    "requestedPath": failedPath,
+                    "fallbackPath": fallbackPath,
+                    "stage": failedStage,
+                    "errno": Int(failedErrnoCode)
+                ]
+            )
+            activeSocketPath = fallbackPath
+            withListenerState {
+                self.socketPath = activeSocketPath
             }
+            bindAttempt = Self.bindListenerSocket(newServerSocket, path: activeSocketPath)
         }
 
-        let bindResult = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                bind(serverSocket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        switch bindAttempt {
+        case .success(let boundPath):
+            activeSocketPath = boundPath
+            withListenerState {
+                self.socketPath = activeSocketPath
             }
-        }
-
-        guard bindResult >= 0 else {
-            let errnoCode = errno
-            print("TerminalController: Failed to bind socket")
-            close(serverSocket)
+        case .pathTooLong(let failedPath):
+            close(newServerSocket)
             reportSocketListenerFailure(
                 message: "socket.listener.start.failed",
-                stage: "bind",
-                errnoCode: errnoCode
+                stage: "bind_path_too_long",
+                errnoCode: ENAMETOOLONG,
+                extra: [
+                    "path": failedPath,
+                    "pathLength": failedPath.utf8.count,
+                    "maxPathLength": Self.unixSocketPathMaxLength
+                ]
+            )
+            return
+        case .failure(let failedPath, let failedStage, let failedErrnoCode):
+            print("TerminalController: Failed to bind socket")
+            close(newServerSocket)
+            reportSocketListenerFailure(
+                message: "socket.listener.start.failed",
+                stage: failedStage,
+                errnoCode: failedErrnoCode,
+                extra: ["path": failedPath]
             )
             return
         }
@@ -459,10 +853,10 @@ class TerminalController {
         applySocketPermissions()
 
         // Listen
-        guard listen(serverSocket, 5) >= 0 else {
+        guard listen(newServerSocket, Self.socketListenBacklog) >= 0 else {
             let errnoCode = errno
             print("TerminalController: Failed to listen on socket")
-            close(serverSocket)
+            close(newServerSocket)
             reportSocketListenerFailure(
                 message: "socket.listener.start.failed",
                 stage: "listen",
@@ -471,14 +865,29 @@ class TerminalController {
             return
         }
 
-        isRunning = true
-        print("TerminalController: Listening on \(socketPath)")
+        SocketControlSettings.recordLastSocketPath(activeSocketPath)
+
+        let generation = withListenerState {
+            isRunning = true
+            pendingAcceptLoopRearmGeneration = nil
+            nextAcceptLoopGeneration &+= 1
+            let generation = nextAcceptLoopGeneration
+            activeAcceptLoopGeneration = generation
+            serverSocket = newServerSocket
+            listenerStartInProgress = false
+            return generation
+        }
+        listenerActivated = true
+        let listenerSocket = newServerSocket
+        print("TerminalController: Listening on \(activeSocketPath)")
         sentryBreadcrumb(
             "socket.listener.listening",
             category: "socket",
             data: [
-                "path": socketPath,
-                "mode": accessMode.rawValue
+                "path": activeSocketPath,
+                "mode": accessMode.rawValue,
+                "generation": generation,
+                "backlog": Self.socketListenBacklog
             ]
         )
 
@@ -503,40 +912,166 @@ class TerminalController {
 
         // Accept connections in background thread
         Thread.detachNewThread { [weak self] in
-            self?.acceptLoop()
+            self?.acceptLoop(listenerSocket: listenerSocket, generation: generation)
         }
     }
 
     nonisolated func socketListenerHealth(expectedSocketPath: String) -> SocketListenerHealth {
-        let running = isRunning
-        let loopAlive = acceptLoopAlive
-        let pathMatches = socketPath == expectedSocketPath
+        let snapshot = listenerStateSnapshot()
+        let pathMatches = snapshot.socketPath == expectedSocketPath
 
         var st = stat()
         let exists = lstat(expectedSocketPath, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
+        let shouldProbeConnection = snapshot.isRunning && snapshot.acceptLoopAlive && pathMatches && exists
+        let connectability = shouldProbeConnection
+            ? Self.probeSocketConnectability(path: expectedSocketPath)
+            : (isConnectable: nil, errnoCode: nil)
 
         return SocketListenerHealth(
-            isRunning: running,
-            acceptLoopAlive: loopAlive,
+            isRunning: snapshot.isRunning,
+            acceptLoopAlive: snapshot.acceptLoopAlive,
             socketPathMatches: pathMatches,
-            socketPathExists: exists
+            socketPathExists: exists,
+            socketProbePerformed: shouldProbeConnection,
+            socketConnectable: connectability.isConnectable,
+            socketConnectErrno: connectability.errnoCode
         )
     }
 
-    nonisolated func stop() {
-        isRunning = false
-        if serverSocket >= 0 {
-            close(serverSocket)
-            serverSocket = -1
+    nonisolated static func probeSocketCommand(
+        _ command: String,
+        at socketPath: String,
+        timeout: TimeInterval
+    ) -> String? {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+
+#if os(macOS)
+        var noSigPipe: Int32 = 1
+        _ = withUnsafePointer(to: &noSigPipe) { ptr in
+            setsockopt(
+                fd,
+                SOL_SOCKET,
+                SO_NOSIGPIPE,
+                ptr,
+                socklen_t(MemoryLayout<Int32>.size)
+            )
         }
-        unlink(socketPath)
+#endif
+
+        var addr = sockaddr_un()
+        memset(&addr, 0, MemoryLayout<sockaddr_un>.size)
+        addr.sun_family = sa_family_t(AF_UNIX)
+
+        let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
+        let pathBytes = Array(socketPath.utf8CString)
+        guard pathBytes.count <= maxLen else { return nil }
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            let raw = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
+            memset(raw, 0, maxLen)
+            for index in 0..<pathBytes.count {
+                raw[index] = pathBytes[index]
+            }
+        }
+
+        let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
+        let addrLen = socklen_t(pathOffset + pathBytes.count)
+#if os(macOS)
+        addr.sun_len = UInt8(min(Int(addrLen), 255))
+#endif
+
+        let connectResult = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                connect(fd, sockaddrPtr, addrLen)
+            }
+        }
+        guard connectResult == 0 else { return nil }
+
+        let payload = command + "\n"
+        let wroteAll = payload.withCString { cString in
+            var remaining = strlen(cString)
+            var pointer = UnsafeRawPointer(cString)
+            while remaining > 0 {
+                let written = write(fd, pointer, remaining)
+                if written <= 0 { return false }
+                remaining -= written
+                pointer = pointer.advanced(by: written)
+            }
+            return true
+        }
+        guard wroteAll else { return nil }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        var response = ""
+
+        while Date() < deadline {
+            var pollDescriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&pollDescriptor, 1, 100)
+            if ready < 0 {
+                return nil
+            }
+            if ready == 0 {
+                continue
+            }
+
+            let count = read(fd, &buffer, buffer.count)
+            if count <= 0 {
+                break
+            }
+            if let chunk = String(bytes: buffer[0..<count], encoding: .utf8) {
+                response.append(chunk)
+                if let newlineIndex = response.firstIndex(of: "\n") {
+                    return String(response[..<newlineIndex])
+                }
+            }
+        }
+
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    nonisolated func stop() {
+        let (socketToClose, socketPathToUnlink) = withListenerState {
+            isRunning = false
+            acceptLoopAlive = false
+            pendingAcceptLoopRearmGeneration = nil
+            listenerStartInProgress = false
+            nextAcceptLoopGeneration &+= 1
+            activeAcceptLoopGeneration = 0
+            let socketToClose = serverSocket
+            serverSocket = -1
+            return (socketToClose, socketPath)
+        }
+        if socketToClose >= 0 {
+            close(socketToClose)
+        }
+        unlink(socketPathToUnlink)
+    }
+
+    private nonisolated func unlinkSocketPathIfListenerStillInactive(_ path: String) {
+        let shouldUnlink = withListenerState {
+            Self.shouldUnlinkSocketPathAfterAcceptLoopCleanup(
+                pathMatches: socketPath == path,
+                isRunning: isRunning,
+                activeGeneration: activeAcceptLoopGeneration,
+                listenerStartInProgress: listenerStartInProgress
+            )
+        }
+        if shouldUnlink {
+            unlink(path)
+        }
     }
 
     private func applySocketPermissions() {
         let permissions = mode_t(accessMode.socketFilePermissions)
-        if chmod(socketPath, permissions) != 0 {
+        let currentSocketPath = withListenerState { socketPath }
+        if chmod(currentSocketPath, permissions) != 0 {
             let errnoCode = errno
-            print("TerminalController: Failed to set socket permissions to \(String(permissions, radix: 8)) for \(socketPath)")
+            print(
+                "TerminalController: Failed to set socket permissions to \(String(permissions, radix: 8)) for \(currentSocketPath)"
+            )
             sentryBreadcrumb(
                 "socket.listener.permissions.failed",
                 category: "socket",
@@ -640,27 +1175,77 @@ class TerminalController {
         return nil
     }
 
-    private nonisolated func acceptLoop() {
-        acceptLoopAlive = true
+    private nonisolated func acceptLoop(listenerSocket: Int32, generation: UInt64) {
+        let armedAcceptLoop = withListenerState {
+            guard generation == activeAcceptLoopGeneration else { return false }
+            acceptLoopAlive = true
+            return true
+        }
+        guard armedAcceptLoop else {
+            return
+        }
+
         sentryBreadcrumb(
             "socket.listener.accept_loop.started",
             category: "socket",
-            data: socketListenerEventData(stage: "accept_loop_start")
+            data: socketListenerEventData(
+                stage: "accept_loop_start",
+                extra: [
+                    "generation": generation,
+                    "listenerSocket": Int(listenerSocket)
+                ]
+            )
         )
+
         var exitReason = "stopped"
         var lastAcceptErrno: Int32?
+        var lastAcceptErrnoClass = "none"
+        var rearmRequested = false
+
         defer {
-            if isRunning && exitReason == "stopped" {
-                exitReason = "unexpected_loop_exit"
+            let cleanup = withListenerState {
+                guard generation == activeAcceptLoopGeneration else {
+                    return (shouldCaptureExit: false, socketToClose: Int32(-1), pathToUnlink: nil as String?)
+                }
+
+                if isRunning && exitReason == "stopped" {
+                    exitReason = "unexpected_loop_exit"
+                }
+                let shouldCaptureExit = exitReason != "stopped"
+
+                acceptLoopAlive = false
+                isRunning = false
+                activeAcceptLoopGeneration = 0
+
+                var socketToClose: Int32 = -1
+                var pathToUnlink: String?
+                if serverSocket == listenerSocket {
+                    socketToClose = serverSocket
+                    serverSocket = -1
+                    if shouldCaptureExit {
+                        pathToUnlink = socketPath
+                    }
+                }
+                return (shouldCaptureExit, socketToClose, pathToUnlink)
             }
-            let shouldCaptureExit = exitReason != "stopped"
-            acceptLoopAlive = false
-            isRunning = false
-            if shouldCaptureExit {
+
+            if cleanup.socketToClose >= 0 {
+                close(cleanup.socketToClose)
+            }
+            if let pathToUnlink = cleanup.pathToUnlink {
+                unlinkSocketPathIfListenerStillInactive(pathToUnlink)
+            }
+
+            if cleanup.shouldCaptureExit {
                 let data = socketListenerEventData(
                     stage: "accept_loop_exit",
                     errnoCode: lastAcceptErrno,
-                    extra: ["reason": exitReason]
+                    extra: [
+                        "reason": exitReason,
+                        "generation": generation,
+                        "errnoClass": lastAcceptErrnoClass,
+                        "rearmRequested": rearmRequested ? 1 : 0
+                    ]
                 )
                 sentryBreadcrumb("socket.listener.accept_loop.exited", category: "socket", data: data)
                 sentryCaptureError(
@@ -673,39 +1258,81 @@ class TerminalController {
         }
 
         var consecutiveFailures = 0
-        while isRunning {
+
+        while shouldContinueAcceptLoop(generation: generation) {
             var clientAddr = sockaddr_un()
             var clientAddrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
 
             let clientSocket = withUnsafeMutablePointer(to: &clientAddr) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    accept(serverSocket, sockaddrPtr, &clientAddrLen)
+                    accept(listenerSocket, sockaddrPtr, &clientAddrLen)
                 }
             }
 
             guard clientSocket >= 0 else {
-                if isRunning {
-                    let errnoCode = errno
-                    lastAcceptErrno = errnoCode
-                    consecutiveFailures += 1
-                    print("TerminalController: Accept failed (\(consecutiveFailures) consecutive)")
-                    if consecutiveFailures == 1 || consecutiveFailures % 10 == 0 {
-                        sentryBreadcrumb(
-                            "socket.listener.accept.failed",
-                            category: "socket",
-                            data: socketListenerEventData(
-                                stage: "accept",
-                                errnoCode: errnoCode,
-                                extra: ["consecutiveFailures": consecutiveFailures]
-                            )
+                if !shouldContinueAcceptLoop(generation: generation) {
+                    exitReason = "stopped"
+                    break
+                }
+
+                let errnoCode = errno
+                lastAcceptErrno = errnoCode
+                let errnoClass = Self.acceptErrorClassification(errnoCode: errnoCode)
+                lastAcceptErrnoClass = errnoClass
+
+                if Self.shouldRetryAcceptImmediately(errnoCode: errnoCode) {
+                    continue
+                }
+
+                consecutiveFailures += 1
+                let backoffMs = Self.acceptFailureBackoffMilliseconds(
+                    consecutiveFailures: consecutiveFailures
+                )
+                let rearmDelayMs = Self.acceptFailureRearmDelayMilliseconds(
+                    consecutiveFailures: consecutiveFailures
+                )
+
+                if Self.shouldEmitAcceptFailureBreadcrumb(consecutiveFailures: consecutiveFailures) {
+                    sentryBreadcrumb(
+                        "socket.listener.accept.failed",
+                        category: "socket",
+                        data: socketListenerEventData(
+                            stage: "accept",
+                            errnoCode: errnoCode,
+                            extra: [
+                                "consecutiveFailures": consecutiveFailures,
+                                "generation": generation,
+                                "errnoClass": errnoClass,
+                                "backoffMs": backoffMs
+                            ]
                         )
+                    )
+                }
+
+                let shouldRearmForFatalErrno = Self.shouldRearmListenerForAcceptError(errnoCode: errnoCode)
+                let shouldRearmForPersistentFailures = Self.shouldRearmForConsecutiveAcceptFailures(
+                    consecutiveFailures: consecutiveFailures
+                )
+
+                if shouldRearmForFatalErrno || shouldRearmForPersistentFailures {
+                    exitReason = shouldRearmForFatalErrno
+                        ? "fatal_accept_error"
+                        : "persistent_accept_failures"
+                    rearmRequested = true
+                    withListenerState {
+                        pendingAcceptLoopRearmGeneration = generation
                     }
-                    if consecutiveFailures >= 50 {
-                        print("TerminalController: Too many consecutive accept failures, exiting accept loop")
-                        exitReason = "too_many_accept_failures"
-                        break
-                    }
-                    usleep(10_000) // 10ms backoff
+                    scheduleListenerRearm(
+                        generation: generation,
+                        errnoCode: errnoCode,
+                        consecutiveFailures: consecutiveFailures,
+                        delayMs: rearmDelayMs
+                    )
+                    break
+                }
+
+                if backoffMs > 0 {
+                    usleep(useconds_t(backoffMs * 1_000))
                 }
                 continue
             }
@@ -721,6 +1348,43 @@ class TerminalController {
             Thread.detachNewThread { [weak self] in
                 self?.handleClient(clientSocket, peerPid: peerPid)
             }
+        }
+    }
+
+    private nonisolated func scheduleListenerRearm(
+        generation: UInt64,
+        errnoCode: Int32,
+        consecutiveFailures: Int,
+        delayMs: Int
+    ) {
+        let deadline = DispatchTime.now() + .milliseconds(delayMs)
+        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+            guard let self else { return }
+            guard let tabManager = self.tabManager else { return }
+            guard let restartPath = self.withListenerState({ () -> String? in
+                guard self.pendingAcceptLoopRearmGeneration == generation else { return nil }
+                self.pendingAcceptLoopRearmGeneration = nil
+                return self.socketPath
+            }) else { return }
+
+            let restartMode = self.accessMode
+
+            sentryBreadcrumb(
+                "socket.listener.rearm.requested",
+                category: "socket",
+                data: self.socketListenerEventData(
+                    stage: "accept_rearm",
+                    errnoCode: errnoCode,
+                    extra: [
+                        "generation": generation,
+                        "consecutiveFailures": consecutiveFailures,
+                        "rearmDelayMs": delayMs
+                    ]
+                )
+            )
+
+            self.stop()
+            self.start(tabManager: tabManager, socketPath: restartPath, accessMode: restartMode)
         }
     }
 
@@ -760,7 +1424,7 @@ class TerminalController {
         var pending = ""
         var authenticated = false
 
-        while isRunning {
+        while withListenerState({ isRunning }) {
             let bytesRead = read(socket, &buffer, buffer.count - 1)
             guard bytesRead > 0 else { break }
 
@@ -955,6 +1619,9 @@ class TerminalController {
         case "ports_kick":
             return portsKick(args)
 
+        case "report_shell_state":
+            return reportShellState(args)
+
         case "report_pwd":
             return reportPwd(args)
 
@@ -969,6 +1636,9 @@ class TerminalController {
 
 
 #if DEBUG
+        case "send_workspace":
+            return sendInputToWorkspace(args)
+
         case "set_shortcut":
             return setShortcut(args)
 
@@ -1115,6 +1785,9 @@ class TerminalController {
         case "close_surface":
             return closeSurface(args)
 
+        case "reload_config":
+            return reloadConfig(args)
+
         case "refresh_surfaces":
             return refreshSurfaces()
 
@@ -1232,6 +1905,16 @@ class TerminalController {
             return v2Result(id: id, self.v2WorkspacePrevious(params: params))
         case "workspace.last":
             return v2Result(id: id, self.v2WorkspaceLast(params: params))
+
+        // Settings
+        case "settings.open":
+            return v2Result(id: id, self.v2SettingsOpen(params: params))
+
+        // Feedback
+        case "feedback.open":
+            return v2Result(id: id, self.v2FeedbackOpen(params: params))
+        case "feedback.submit":
+            return v2Result(id: id, self.v2FeedbackSubmit(params: params))
 
 
         // Surfaces / input
@@ -1477,6 +2160,11 @@ class TerminalController {
             return v2Result(id: id, self.v2BrowserInputKeyboard(params: params))
         case "browser.input_touch":
             return v2Result(id: id, self.v2BrowserInputTouch(params: params))
+
+        // Markdown
+        case "markdown.open":
+            return v2Result(id: id, self.v2MarkdownOpen(params: params))
+
         case "surface.read_text":
             return v2Result(id: id, self.v2SurfaceReadText(params: params))
 
@@ -1587,6 +2275,9 @@ class TerminalController {
             "workspace.next",
             "workspace.previous",
             "workspace.last",
+            "settings.open",
+            "feedback.open",
+            "feedback.submit",
             "surface.list",
             "surface.current",
             "surface.focus",
@@ -1621,6 +2312,7 @@ class TerminalController {
             "notification.clear",
             "app.focus_override.set",
             "app.simulate_active",
+            "markdown.open",
             "browser.open_split",
             "browser.navigate",
             "browser.back",
@@ -2354,7 +3046,9 @@ class TerminalController {
                     "index": index,
                     "title": ws.title,
                     "selected": ws.id == tabManager.selectedTabId,
-                    "pinned": ws.isPinned
+                    "pinned": ws.isPinned,
+                    "current_directory": v2OrNull(ws.currentDirectory),
+                    "custom_color": v2OrNull(ws.customColor)
                 ]
             }
         }
@@ -2387,7 +3081,11 @@ class TerminalController {
         let startedAt = ProcessInfo.processInfo.systemUptime
         #endif
         v2MainSync {
-            let ws = tabManager.addWorkspace(workingDirectory: cwd, select: shouldFocus)
+            let ws = tabManager.addWorkspace(
+                workingDirectory: cwd,
+                select: shouldFocus,
+                eagerLoadTerminal: !shouldFocus
+            )
             newId = ws.id
         }
         #if DEBUG
@@ -3142,6 +3840,9 @@ class TerminalController {
                     "index_in_pane": v2OrNull(indexInPaneByPanelId[panel.id]),
                     "selected_in_pane": v2OrNull(selectedInPaneByPanelId[panel.id])
                 ]
+                if let browserPanel = panel as? BrowserPanel {
+                    item["developer_tools_visible"] = browserPanel.isDeveloperToolsVisible()
+                }
                 return item
             }
 
@@ -3647,7 +4348,7 @@ class TerminalController {
             var refreshedCount = 0
             for panel in ws.panels.values {
                 if let terminalPanel = panel as? TerminalPanel {
-                    terminalPanel.surface.forceRefresh()
+                    terminalPanel.surface.forceRefresh(reason: "terminalController.v2SurfaceRefresh")
                     refreshedCount += 1
                 }
             }
@@ -3729,7 +4430,7 @@ class TerminalController {
                 // Ensure we present a new frame after injecting input so snapshot-based tests (and
                 // socket-driven agents) can observe the updated terminal without requiring a focus
                 // change to trigger a draw.
-                terminalPanel.surface.forceRefresh()
+                terminalPanel.surface.forceRefresh(reason: "terminalController.v2SurfaceSendText")
                 queued = false
             } else {
                 // Avoid blocking the main actor waiting for view/surface attachment.
@@ -3787,7 +4488,7 @@ class TerminalController {
                 result = .err(code: "invalid_params", message: "Unknown key", data: ["key": key])
                 return
             }
-            terminalPanel.surface.forceRefresh()
+            terminalPanel.surface.forceRefresh(reason: "terminalController.v2SurfaceSendKey")
             result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": v2Ref(kind: .surface, uuid: surfaceId), "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))])
         }
         return result
@@ -3819,7 +4520,7 @@ class TerminalController {
                 return
             }
 
-            terminalPanel.surface.forceRefresh()
+            terminalPanel.surface.forceRefresh(reason: "terminalController.v2SurfaceClearHistory")
             let windowId = v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
                 "workspace_id": ws.id.uuidString,
@@ -4865,6 +5566,109 @@ class TerminalController {
         return .ok([:])
     }
 
+    private func v2FeedbackOpen(params: [String: Any]) -> V2CallResult {
+        let workspaceId = v2UUID(params, "workspace_id")
+        let windowId = v2UUID(params, "window_id")
+        let shouldActivate = v2Bool(params, "activate") ?? false
+        DispatchQueue.main.async {
+            let targetWindow: NSWindow?
+            if let windowId, let app = AppDelegate.shared {
+                targetWindow = app.mainWindow(for: windowId)
+            } else if let workspaceId, let app = AppDelegate.shared {
+                targetWindow = app.mainWindowContainingWorkspace(workspaceId)
+            } else {
+                targetWindow = nil
+            }
+
+            if shouldActivate {
+                if let targetWindow {
+                    targetWindow.makeKeyAndOrderFront(nil)
+                    NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                } else {
+                    NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                }
+            }
+
+            FeedbackComposerBridge.openComposer(in: targetWindow)
+        }
+        return .ok(["opened": true])
+    }
+
+    private func v2SettingsOpen(params: [String: Any]) -> V2CallResult {
+        let targetRaw = v2String(params, "target")
+        let shouldActivate = v2Bool(params, "activate") ?? true
+
+        let navigationTarget: SettingsNavigationTarget?
+        switch targetRaw {
+        case nil:
+            navigationTarget = nil
+        case SettingsNavigationTarget.keyboardShortcuts.rawValue:
+            navigationTarget = .keyboardShortcuts
+        default:
+            return .err(code: "invalid_params", message: "Unknown settings target", data: ["target": targetRaw ?? ""])
+        }
+
+        DispatchQueue.main.async {
+            if shouldActivate {
+                AppDelegate.presentPreferencesWindow(navigationTarget: navigationTarget)
+            } else {
+                SettingsWindowController.shared.show(navigationTarget: navigationTarget)
+            }
+        }
+        return .ok([
+            "opened": true,
+            "target": navigationTarget?.rawValue ?? "general",
+        ])
+    }
+
+    private func v2FeedbackSubmit(params: [String: Any]) -> V2CallResult {
+        guard let email = params["email"] as? String else {
+            return .err(code: "invalid_params", message: "Missing email", data: ["field": "email"])
+        }
+        guard let body = params["body"] as? String else {
+            return .err(code: "invalid_params", message: "Missing body", data: ["field": "body"])
+        }
+        let imagePaths = params["image_paths"] as? [String] ?? []
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: V2CallResult = .err(code: "internal_error", message: "Feedback submission failed", data: nil)
+
+        Task {
+            let resolved: V2CallResult
+            do {
+                let attachmentCount = try await FeedbackComposerBridge.submit(
+                    email: email,
+                    message: body,
+                    imagePaths: imagePaths
+                )
+                resolved = .ok([
+                    "submitted": true,
+                    "attachment_count": attachmentCount,
+                ])
+            } catch let error as FeedbackComposerBridgeError {
+                let code: String
+                switch error {
+                case .invalidEmail, .emptyMessage, .messageTooLong, .tooManyImages, .invalidImagePath:
+                    code = "invalid_params"
+                case .submissionFailed:
+                    code = "request_failed"
+                }
+                resolved = .err(code: code, message: error.localizedDescription, data: nil)
+            } catch {
+                resolved = .err(code: "internal_error", message: error.localizedDescription, data: nil)
+            }
+
+            result = resolved
+            semaphore.signal()
+        }
+
+        if semaphore.wait(timeout: .now() + 35) == .timedOut {
+            return .err(code: "timeout", message: "Feedback submission timed out", data: nil)
+        }
+
+        return result
+    }
+
     // MARK: - V2 App Focus Methods
 
     private func v2AppFocusOverride(params: [String: Any]) -> V2CallResult {
@@ -4981,41 +5785,70 @@ class TerminalController {
         _ webView: WKWebView,
         script: String,
         timeout: TimeInterval = 5.0,
-        preferAsync: Bool = false
+        preferAsync: Bool = false,
+        contentWorld: WKContentWorld
     ) -> V2JavaScriptResult {
+        let timeoutSeconds = max(0.01, timeout)
+        let resultLock = NSLock()
+        let completionSignal = DispatchSemaphore(value: 0)
         var done = false
         var resultValue: Any?
         var resultError: String?
 
-        if preferAsync, #available(macOS 11.0, *) {
-            webView.callAsyncJavaScript(script, arguments: [:], in: nil, in: .page) { result in
-                switch result {
-                case .success(let value):
-                    resultValue = value
-                case .failure(let error):
-                    resultError = error.localizedDescription
-                }
+        let finish: (_ value: Any?, _ error: String?) -> Void = { value, error in
+            resultLock.lock()
+            if !done {
                 done = true
+                resultValue = value
+                resultError = error
+                completionSignal.signal()
+            }
+            resultLock.unlock()
+        }
+
+        let evaluator = {
+            if preferAsync, #available(macOS 11.0, *) {
+                webView.callAsyncJavaScript(script, arguments: [:], in: nil, in: contentWorld) { result in
+                    switch result {
+                    case .success(let value):
+                        finish(value, nil)
+                    case .failure(let error):
+                        finish(nil, error.localizedDescription)
+                    }
+                }
+            } else {
+                webView.evaluateJavaScript(script) { value, error in
+                    if let error {
+                        finish(nil, error.localizedDescription)
+                    } else {
+                        finish(value, nil)
+                    }
+                }
+            }
+        }
+
+        if Thread.isMainThread {
+            evaluator()
+            let deadline = Date().addingTimeInterval(timeoutSeconds)
+            while true {
+                resultLock.lock()
+                let isDone = done
+                resultLock.unlock()
+                if isDone {
+                    break
+                }
+                if Date() >= deadline {
+                    return .failure("Timed out waiting for JavaScript result")
+                }
+                _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
             }
         } else {
-            webView.evaluateJavaScript(script) { value, error in
-                if let error {
-                    resultError = error.localizedDescription
-                } else {
-                    resultValue = value
-                }
-                done = true
+            DispatchQueue.main.async(execute: evaluator)
+            if completionSignal.wait(timeout: .now() + timeoutSeconds) == .timedOut {
+                return .failure("Timed out waiting for JavaScript result")
             }
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while !done && Date() < deadline {
-            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
-        }
-
-        if !done {
-            return .failure("Timed out waiting for JavaScript result")
-        }
         if let resultError {
             return .failure(resultError)
         }
@@ -5065,7 +5898,8 @@ class TerminalController {
         _ webView: WKWebView,
         surfaceId: UUID,
         script: String,
-        timeout: TimeInterval = 5.0
+        timeout: TimeInterval = 5.0,
+        useEval: Bool = true
     ) -> V2JavaScriptResult {
         let scriptLiteral = v2JSONLiteral(script)
         let framePrelude: String
@@ -5084,6 +5918,13 @@ class TerminalController {
             framePrelude = "const __cmuxDoc = document;"
         }
 
+        let executionBlock: String
+        if useEval {
+            executionBlock = "const __r = eval(\(scriptLiteral));"
+        } else {
+            executionBlock = "const __r = \(script);"
+        }
+
         let asyncFunctionBody = """
         \(framePrelude)
 
@@ -5096,7 +5937,7 @@ class TerminalController {
 
         const __cmuxEvalInFrame = async function() {
           const document = __cmuxDoc;
-          const __r = eval(\(scriptLiteral));
+          \(executionBlock)
           const __value = await __cmuxMaybeAwait(__r);
           return {
             __cmux_t: (typeof __value === 'undefined') ? 'undefined' : 'value',
@@ -5107,16 +5948,40 @@ class TerminalController {
         return await __cmuxEvalInFrame();
         """
 
-        let rawResult: V2JavaScriptResult
+        var rawResult: V2JavaScriptResult
         if #available(macOS 11.0, *) {
-            rawResult = v2RunJavaScript(webView, script: asyncFunctionBody, timeout: timeout, preferAsync: true)
+            rawResult = v2RunJavaScript(
+                webView,
+                script: asyncFunctionBody,
+                timeout: timeout,
+                preferAsync: true,
+                contentWorld: .page
+            )
         } else {
             let evaluateFallback = """
             (async () => {
               \(asyncFunctionBody)
             })()
             """
-            rawResult = v2RunJavaScript(webView, script: evaluateFallback, timeout: timeout)
+            rawResult = v2RunJavaScript(webView, script: evaluateFallback, timeout: timeout, contentWorld: .page)
+        }
+
+        if !useEval, case .failure(let pageMessage) = rawResult, #available(macOS 11.0, *) {
+            let isolatedResult = v2RunJavaScript(
+                webView,
+                script: asyncFunctionBody,
+                timeout: timeout,
+                preferAsync: true,
+                contentWorld: .defaultClient
+            )
+            switch isolatedResult {
+            case .success:
+                rawResult = isolatedResult
+            case .failure(let isolatedMessage):
+                if isolatedMessage != pageMessage {
+                    rawResult = .failure("\(pageMessage) (isolated-world retry: \(isolatedMessage))")
+                }
+            }
         }
 
         switch rawResult {
@@ -5217,37 +6082,129 @@ class TerminalController {
         }
     }
 
-    private func v2BrowserWaitForCondition(
-        _ conditionScript: String,
-        webView: WKWebView,
-        surfaceId: UUID? = nil,
-        timeout: TimeInterval = 5.0,
-        pollInterval: TimeInterval = 0.05
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let wrapped = "(() => { try { return !!(\(conditionScript)); } catch (_) { return false; } })()"
-            let jsResult: V2JavaScriptResult
-            if let surfaceId {
-                jsResult = v2RunBrowserJavaScript(webView, surfaceId: surfaceId, script: wrapped, timeout: max(0.5, pollInterval + 0.25))
-            } else {
-                jsResult = v2RunJavaScript(webView, script: wrapped, timeout: max(0.5, pollInterval + 0.25))
-            }
-            if case let .success(value) = jsResult,
-               let ok = value as? Bool,
-               ok {
-                return true
-            }
-            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(pollInterval))
-        }
-        return false
-    }
-
     private func v2PNGData(from image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
     }
+
+    private func bestEffortPruneTemporaryFiles(
+        in directoryURL: URL,
+        keepingMostRecent maxCount: Int = 50,
+        maxAge: TimeInterval = 24 * 60 * 60
+    ) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .creationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let now = Date()
+        let datedEntries = entries.compactMap { url -> (url: URL, date: Date)? in
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .creationDateKey]),
+                  values.isRegularFile == true else {
+                return nil
+            }
+            return (url, values.contentModificationDate ?? values.creationDate ?? .distantPast)
+        }.sorted { $0.date > $1.date }
+
+        for (index, entry) in datedEntries.enumerated() {
+            if index >= maxCount || now.timeIntervalSince(entry.date) > maxAge {
+                try? FileManager.default.removeItem(at: entry.url)
+            }
+        }
+    }
+
+    // MARK: - Markdown
+
+    private func v2MarkdownOpen(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let rawPath = v2String(params, "path") else {
+            return .err(code: "invalid_params", message: "Missing 'path' parameter", data: nil)
+        }
+
+        // Resolve the path (expand ~ and standardize)
+        let expandedPath = NSString(string: rawPath).expandingTildeInPath
+        let filePath = NSString(string: expandedPath).standardizingPath
+
+        // Reject paths that aren't absolute after resolution
+        guard filePath.hasPrefix("/") else {
+            return .err(code: "invalid_params", message: "Path must be absolute: \(filePath)", data: ["path": filePath])
+        }
+
+        // Validate the file exists and is a regular file (not a directory)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: filePath, isDirectory: &isDir) else {
+            return .err(code: "not_found", message: "File not found: \(filePath)", data: ["path": filePath])
+        }
+        guard !isDir.boolValue else {
+            return .err(code: "invalid_params", message: "Path is a directory, not a file: \(filePath)", data: ["path": filePath])
+        }
+        guard FileManager.default.isReadableFile(atPath: filePath) else {
+            return .err(code: "permission_denied", message: "File not readable: \(filePath)", data: ["path": filePath])
+        }
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to create markdown panel", data: nil)
+        v2MainSync {
+            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                result = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+            v2MaybeFocusWindow(for: tabManager)
+            v2MaybeSelectWorkspace(tabManager, workspace: ws)
+
+            let sourceSurfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            guard let sourceSurfaceId else {
+                result = .err(code: "not_found", message: "No focused surface to split", data: nil)
+                return
+            }
+            guard ws.panels[sourceSurfaceId] != nil else {
+                result = .err(code: "not_found", message: "Source surface not found", data: ["surface_id": sourceSurfaceId.uuidString])
+                return
+            }
+
+            let sourcePaneUUID = ws.paneId(forPanelId: sourceSurfaceId)?.id
+
+            let createdPanel = ws.newMarkdownSplit(
+                from: sourceSurfaceId,
+                orientation: .horizontal,
+                filePath: filePath,
+                focus: v2FocusAllowed()
+            )
+
+            guard let markdownPanelId = createdPanel?.id else {
+                result = .err(code: "internal_error", message: "Failed to create markdown panel", data: nil)
+                return
+            }
+
+            let targetPaneUUID = ws.paneId(forPanelId: markdownPanelId)?.id
+            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            result = .ok([
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "workspace_id": ws.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "pane_id": v2OrNull(targetPaneUUID?.uuidString),
+                "pane_ref": v2Ref(kind: .pane, uuid: targetPaneUUID),
+                "surface_id": markdownPanelId.uuidString,
+                "surface_ref": v2Ref(kind: .surface, uuid: markdownPanelId),
+                "source_surface_id": sourceSurfaceId.uuidString,
+                "source_surface_ref": v2Ref(kind: .surface, uuid: sourceSurfaceId),
+                "source_pane_id": v2OrNull(sourcePaneUUID?.uuidString),
+                "source_pane_ref": v2Ref(kind: .pane, uuid: sourcePaneUUID),
+                "target_pane_id": v2OrNull(targetPaneUUID?.uuidString),
+                "target_pane_ref": v2Ref(kind: .pane, uuid: targetPaneUUID),
+                "path": filePath
+            ])
+        }
+        return result
+    }
+
+    // MARK: - Browser
 
     private func v2BrowserOpenSplit(params: [String: Any]) -> V2CallResult {
         guard let tabManager = v2ResolveTabManager(params: params) else {
@@ -5580,7 +6537,7 @@ class TerminalController {
             let retryAttempts = max(1, v2Int(params, "retry_attempts") ?? 3)
 
             for attempt in 1...retryAttempts {
-                switch v2RunBrowserJavaScript(browserPanel.webView, surfaceId: surfaceId, script: script) {
+                switch v2RunBrowserJavaScript(browserPanel.webView, surfaceId: surfaceId, script: script, useEval: false) {
                 case .failure(let message):
                     return .err(code: "js_error", message: message, data: ["action": actionName, "selector": selector])
                 case .success(let value):
@@ -5838,7 +6795,7 @@ class TerminalController {
             })()
             """
 
-            switch v2RunBrowserJavaScript(browserPanel.webView, surfaceId: surfaceId, script: script, timeout: 10.0) {
+            switch v2RunBrowserJavaScript(browserPanel.webView, surfaceId: surfaceId, script: script, timeout: 10.0, useEval: false) {
             case .failure(let message):
                 return .err(code: "js_error", message: message, data: nil)
             case .success(let value):
@@ -5935,42 +6892,120 @@ class TerminalController {
     private func v2BrowserWait(params: [String: Any]) -> V2CallResult {
         let timeoutMs = max(1, v2Int(params, "timeout_ms") ?? 5_000)
         let timeout = Double(timeoutMs) / 1000.0
+        let selectorRaw = v2BrowserSelector(params)
 
-        return v2BrowserWithPanel(params: params) { _, ws, surfaceId, browserPanel in
-            let conditionScript: String = {
-                if let selector = v2BrowserSelector(params) {
-                    let literal = v2JSONLiteral(selector)
-                    return "document.querySelector(\(literal)) !== null"
+        let conditionScriptBase: String = {
+            if let urlContains = v2String(params, "url_contains") {
+                let literal = v2JSONLiteral(urlContains)
+                return "String(location.href || '').includes(\(literal))"
+            }
+            if let textContains = v2String(params, "text_contains") {
+                let literal = v2JSONLiteral(textContains)
+                return "(document.body && String(document.body.innerText || '').includes(\(literal)))"
+            }
+            if let loadState = v2String(params, "load_state") {
+                let normalizedLoadState = loadState.lowercased()
+                if normalizedLoadState == "interactive" {
+                    return """
+                    (() => {
+                      const __state = String(document.readyState || '').toLowerCase();
+                      return __state === 'interactive' || __state === 'complete';
+                    })()
+                    """
                 }
-                if let urlContains = v2String(params, "url_contains") {
-                    let literal = v2JSONLiteral(urlContains)
-                    return "String(location.href || '').includes(\(literal))"
-                }
-                if let textContains = v2String(params, "text_contains") {
-                    let literal = v2JSONLiteral(textContains)
-                    return "(document.body && String(document.body.innerText || '').includes(\(literal)))"
-                }
-                if let loadState = v2String(params, "load_state") {
-                    let literal = v2JSONLiteral(loadState.lowercased())
-                    return "String(document.readyState || '').toLowerCase() === \(literal)"
-                }
-                if let fn = v2String(params, "function") {
-                    return "(() => { return !!(\(fn)); })()"
-                }
-                return "document.readyState === 'complete'"
-            }()
+                let literal = v2JSONLiteral(normalizedLoadState)
+                return "String(document.readyState || '').toLowerCase() === \(literal)"
+            }
+            if let fn = v2String(params, "function") {
+                return "(() => { return !!(\(fn)); })()"
+            }
+            return "document.readyState === 'complete'"
+        }()
 
-            let ok = v2BrowserWaitForCondition(conditionScript, webView: browserPanel.webView, surfaceId: surfaceId, timeout: timeout)
-            if !ok {
+        var setupResult: V2CallResult?
+        var workspaceId: UUID?
+        var surfaceIdOut: UUID?
+        var webView: WKWebView?
+
+        v2MainSync {
+            guard let tabManager = self.v2ResolveTabManager(params: params) else {
+                setupResult = .err(code: "unavailable", message: "TabManager not available", data: nil)
+                return
+            }
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                setupResult = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+            let surfaceId = self.v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            guard let surfaceId else {
+                setupResult = .err(code: "not_found", message: "No focused browser surface", data: nil)
+                return
+            }
+            guard let browserPanel = ws.browserPanel(for: surfaceId) else {
+                setupResult = .err(code: "invalid_params", message: "Surface is not a browser", data: ["surface_id": surfaceId.uuidString])
+                return
+            }
+            workspaceId = ws.id
+            surfaceIdOut = surfaceId
+            webView = browserPanel.webView
+        }
+
+        if let setupResult {
+            return setupResult
+        }
+        guard let workspaceId, let surfaceIdOut, let webView else {
+            return .err(code: "internal_error", message: "Failed to resolve browser surface", data: nil)
+        }
+
+        let conditionScript: String
+        if let selectorRaw {
+            guard let selector = v2BrowserResolveSelector(selectorRaw, surfaceId: surfaceIdOut) else {
+                return .err(code: "not_found", message: "Element reference not found", data: ["selector": selectorRaw])
+            }
+            let literal = v2JSONLiteral(selector)
+            conditionScript = "document.querySelector(\(literal)) !== null"
+        } else {
+            conditionScript = conditionScriptBase
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        let pollInterval = 0.05
+        let wrappedScript = "(() => { try { return !!(\(conditionScript)); } catch (_) { return false; } })()"
+
+        while true {
+            switch v2RunBrowserJavaScript(
+                webView,
+                surfaceId: surfaceIdOut,
+                script: wrappedScript,
+                timeout: max(0.5, pollInterval + 0.25),
+                useEval: false
+            ) {
+            case .success(let value):
+                if let b = value as? Bool, b {
+                    return .ok([
+                        "workspace_id": workspaceId.uuidString,
+                        "workspace_ref": self.v2Ref(kind: .workspace, uuid: workspaceId),
+                        "surface_id": surfaceIdOut.uuidString,
+                        "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceIdOut),
+                        "waited": true
+                    ])
+                }
+            case .failure(let message):
+                return .err(
+                    code: "js_error",
+                    message: message,
+                    data: [
+                        "condition": conditionScript,
+                        "timeout_ms": timeoutMs
+                    ]
+                )
+            }
+
+            if Date() >= deadline {
                 return .err(code: "timeout", message: "Condition not met before timeout", data: ["timeout_ms": timeoutMs])
             }
-            return .ok([
-                "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
-                "surface_id": surfaceId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
-                "waited": true
-            ])
+
+            Thread.sleep(forTimeInterval: pollInterval)
         }
     }
 
@@ -6315,13 +7350,31 @@ class TerminalController {
                 return .err(code: "internal_error", message: "Failed to capture snapshot", data: nil)
             }
 
-            return .ok([
+            var result: [String: Any] = [
                 "workspace_id": ws.id.uuidString,
                 "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
                 "surface_id": surfaceId.uuidString,
                 "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
                 "png_base64": imageData.base64EncodedString()
-            ])
+            ]
+
+            // Best effort: keep screenshot data available even when temp-file writes fail.
+            let screenshotsDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cmux-browser-screenshots", isDirectory: true)
+            if (try? FileManager.default.createDirectory(at: screenshotsDirectory, withIntermediateDirectories: true)) != nil {
+                bestEffortPruneTemporaryFiles(in: screenshotsDirectory)
+                let timestampMs = Int(Date().timeIntervalSince1970 * 1000)
+                let shortSurfaceId = String(surfaceId.uuidString.prefix(8))
+                let shortRandomId = String(UUID().uuidString.prefix(8))
+                let filename = "surface-\(shortSurfaceId)-\(timestampMs)-\(shortRandomId).png"
+                let imageURL = screenshotsDirectory.appendingPathComponent(filename, isDirectory: false)
+                if (try? imageData.write(to: imageURL, options: .atomic)) != nil {
+                    result["path"] = imageURL.path
+                    result["url"] = imageURL.absoluteString
+                }
+            }
+
+            return .ok(result)
         }
     }
 
@@ -7151,7 +8204,8 @@ class TerminalController {
         _ = v2RunJavaScript(
             browserPanel.webView,
             script: BrowserPanel.telemetryHookBootstrapScriptSource,
-            timeout: 5.0
+            timeout: 5.0,
+            contentWorld: .page
         )
     }
 
@@ -7159,7 +8213,8 @@ class TerminalController {
         _ = v2RunJavaScript(
             browserPanel.webView,
             script: BrowserPanel.dialogTelemetryHookBootstrapScriptSource,
-            timeout: 5.0
+            timeout: 5.0,
+            contentWorld: .page
         )
     }
 
@@ -7191,7 +8246,7 @@ class TerminalController {
             })()
             """
 
-            switch v2RunJavaScript(browserPanel.webView, script: script, timeout: 5.0) {
+            switch v2RunJavaScript(browserPanel.webView, script: script, timeout: 5.0, contentWorld: .page) {
             case .failure(let message):
                 return .err(code: "js_error", message: message, data: nil)
             case .success(let value):
@@ -7786,7 +8841,7 @@ class TerminalController {
               return { ok: true, items };
             })()
             """
-            switch v2RunJavaScript(browserPanel.webView, script: script, timeout: 5.0) {
+            switch v2RunJavaScript(browserPanel.webView, script: script, timeout: 5.0, contentWorld: .page) {
             case .failure(let message):
                 return .err(code: "js_error", message: message, data: nil)
             case .success(let value):
@@ -7824,7 +8879,7 @@ class TerminalController {
               return { ok: true, items };
             })()
             """
-            switch v2RunJavaScript(browserPanel.webView, script: script, timeout: 5.0) {
+            switch v2RunJavaScript(browserPanel.webView, script: script, timeout: 5.0, contentWorld: .page) {
             case .failure(let message):
                 return .err(code: "js_error", message: message, data: nil)
             case .success(let value):
@@ -8775,6 +9830,7 @@ class TerminalController {
           focus_pane <pane-id|index>      - Focus a pane
           focus_surface_by_panel <panel_id> - Focus surface by panel ID
           close_surface [id|idx]          - Close surface (collapse split)
+          reload_config [soft]            - Reload Ghostty config and refresh terminals
           refresh_surfaces                - Force refresh all terminals
           surface_health [workspace]      - Check view health of all surfaces
 
@@ -8815,6 +9871,7 @@ class TerminalController {
           report_ports <port1> [port2...] [--tab=X] [--panel=Y] - Report listening ports
           report_tty <tty_name> [--tab=X] [--panel=Y] - Register TTY for batched port scanning
           ports_kick [--tab=X] [--panel=Y] - Request batched port scan for panel
+          report_shell_state <prompt|running> [--tab=X] [--panel=Y] - Report whether the shell is idle at a prompt or running a command
           report_pwd <path> [--tab=X] [--panel=Y] - Report current working directory
           clear_ports [--tab=X] [--panel=Y] - Clear listening ports
           sidebar_state [--tab=X] - Dump sidebar metadata
@@ -8856,6 +9913,7 @@ class TerminalController {
           sidebar_overlay_gate [active|inactive] - Return true/false if sidebar outside-drop overlay would capture (test-only)
           terminal_drop_overlay_probe [deferred|direct] - Trigger focused terminal drop-overlay show path and report animation counts (test-only)
           activate_app                    - Bring app + main window to front (test-only)
+          send_workspace <workspace_id> <text> - Send text to a workspace's selected terminal (test-only)
           is_terminal_focused <id|idx>    - Return true/false if terminal surface is first responder (test-only)
           read_terminal_text [id|idx]     - Read visible terminal text (base64, test-only)
           render_stats [id|idx]           - Read terminal render stats (draw counters, test-only)
@@ -8938,81 +9996,91 @@ class TerminalController {
         return "OK"
     }
 
-	    private func simulateShortcut(_ args: String) -> String {
-	        let combo = args.trimmingCharacters(in: .whitespacesAndNewlines)
-	        guard !combo.isEmpty else {
-	            return "ERROR: Usage: simulate_shortcut <combo>"
-	        }
-	        guard let parsed = parseShortcutCombo(combo) else {
-	            return "ERROR: Invalid combo. Example: cmd+ctrl+h"
-	        }
+    private func prepareWindowForSyntheticInput(_ window: NSWindow?) {
+        guard let window else { return }
 
-	        // Stamp at socket-handler arrival so event.timestamp includes any wait
-	        // before the main-thread event dispatch.
-	        let requestTimestamp = ProcessInfo.processInfo.systemUptime
-	
-	        var result = "ERROR: Failed to create event"
-	        DispatchQueue.main.sync {
-	            // Prefer the current active-tab-manager window so shortcut simulation stays
-	            // scoped to the intended window even when NSApp.keyWindow is stale.
-	            let targetWindow: NSWindow? = {
-	                if let activeTabManager = self.tabManager,
-	                   let windowId = AppDelegate.shared?.windowId(for: activeTabManager),
-	                   let window = AppDelegate.shared?.mainWindow(for: windowId) {
-	                    return window
-	                }
-	                return NSApp.keyWindow
-	                    ?? NSApp.mainWindow
-	                    ?? NSApp.windows.first(where: { $0.isVisible })
-	                    ?? NSApp.windows.first
-	            }()
-	            if let targetWindow {
-	                NSApp.activate(ignoringOtherApps: true)
-	                targetWindow.makeKeyAndOrderFront(nil)
-	            }
-	            let windowNumber = targetWindow?.windowNumber ?? 0
-	            guard let keyDownEvent = NSEvent.keyEvent(
-	                with: .keyDown,
-	                location: .zero,
-	                modifierFlags: parsed.modifierFlags,
-	                timestamp: requestTimestamp,
-	                windowNumber: windowNumber,
-	                context: nil,
-	                characters: parsed.characters,
-	                charactersIgnoringModifiers: parsed.charactersIgnoringModifiers,
-	                isARepeat: false,
-	                keyCode: parsed.keyCode
-	            ) else {
-	                result = "ERROR: NSEvent.keyEvent returned nil"
-	                return
-	            }
-	            let keyUpEvent = NSEvent.keyEvent(
-	                with: .keyUp,
-	                location: .zero,
-	                modifierFlags: parsed.modifierFlags,
-	                timestamp: requestTimestamp + 0.0001,
-	                windowNumber: windowNumber,
-	                context: nil,
-	                characters: parsed.characters,
-	                charactersIgnoringModifiers: parsed.charactersIgnoringModifiers,
-	                isARepeat: false,
-	                keyCode: parsed.keyCode
-	            )
-	            // Socket-driven shortcut simulation should reuse the exact same matching logic as the
-	            // app-level shortcut monitor (so tests are hermetic), while still falling back to the
-	            // normal responder chain for plain typing.
-	            if let delegate = AppDelegate.shared, delegate.debugHandleCustomShortcut(event: keyDownEvent) {
-	                result = "OK"
-	                return
-	            }
-	            NSApp.sendEvent(keyDownEvent)
-	            if let keyUpEvent {
-	                NSApp.sendEvent(keyUpEvent)
-	            }
-	            result = "OK"
-	        }
-	        return result
-	    }
+        // Keep socket-driven input simulation focused on the intended window without
+        // paying repeated activation/order-front costs for every synthetic key event.
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        if !window.isKeyWindow || !window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private func simulateShortcut(_ args: String) -> String {
+        let combo = args.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !combo.isEmpty else {
+            return "ERROR: Usage: simulate_shortcut <combo>"
+        }
+        guard let parsed = parseShortcutCombo(combo) else {
+            return "ERROR: Invalid combo. Example: cmd+ctrl+h"
+        }
+
+        // Stamp at socket-handler arrival so event.timestamp includes any wait
+        // before the main-thread event dispatch.
+        let requestTimestamp = ProcessInfo.processInfo.systemUptime
+
+        var result = "ERROR: Failed to create event"
+        DispatchQueue.main.sync {
+            // Prefer the current active-tab-manager window so shortcut simulation stays
+            // scoped to the intended window even when NSApp.keyWindow is stale.
+            let targetWindow: NSWindow? = {
+                if let activeTabManager = self.tabManager,
+                   let windowId = AppDelegate.shared?.windowId(for: activeTabManager),
+                   let window = AppDelegate.shared?.mainWindow(for: windowId) {
+                    return window
+                }
+                return NSApp.keyWindow
+                    ?? NSApp.mainWindow
+                    ?? NSApp.windows.first(where: { $0.isVisible })
+                    ?? NSApp.windows.first
+            }()
+            prepareWindowForSyntheticInput(targetWindow)
+            let windowNumber = targetWindow?.windowNumber ?? 0
+            guard let keyDownEvent = NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: parsed.modifierFlags,
+                timestamp: requestTimestamp,
+                windowNumber: windowNumber,
+                context: nil,
+                characters: parsed.characters,
+                charactersIgnoringModifiers: parsed.charactersIgnoringModifiers,
+                isARepeat: false,
+                keyCode: parsed.keyCode
+            ) else {
+                result = "ERROR: NSEvent.keyEvent returned nil"
+                return
+            }
+            let keyUpEvent = NSEvent.keyEvent(
+                with: .keyUp,
+                location: .zero,
+                modifierFlags: parsed.modifierFlags,
+                timestamp: requestTimestamp + 0.0001,
+                windowNumber: windowNumber,
+                context: nil,
+                characters: parsed.characters,
+                charactersIgnoringModifiers: parsed.charactersIgnoringModifiers,
+                isARepeat: false,
+                keyCode: parsed.keyCode
+            )
+            // Socket-driven shortcut simulation should reuse the exact same matching logic as the
+            // app-level shortcut monitor (so tests are hermetic), while still falling back to the
+            // normal responder chain for plain typing.
+            if let delegate = AppDelegate.shared, delegate.debugHandleCustomShortcut(event: keyDownEvent) {
+                result = "OK"
+                return
+            }
+            NSApp.sendEvent(keyDownEvent)
+            if let keyUpEvent {
+                NSApp.sendEvent(keyUpEvent)
+            }
+            result = "OK"
+        }
+        return result
+    }
 
     private func activateApp() -> String {
         DispatchQueue.main.sync {
@@ -9057,8 +10125,7 @@ class TerminalController {
                 ?? NSApp.mainWindow
                 ?? NSApp.windows.first(where: { $0.isVisible })
                 ?? NSApp.windows.first else { return }
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            prepareWindowForSyntheticInput(window)
             guard let fr = window.firstResponder else {
                 result = "ERROR: No first responder"
                 return
@@ -9907,7 +10974,7 @@ class TerminalController {
         let startedAt = ProcessInfo.processInfo.systemUptime
         #endif
         DispatchQueue.main.sync {
-            let workspace = tabManager.addTab(select: focus)
+            let workspace = tabManager.addTab(select: focus, eagerLoadTerminal: !focus)
             newTabId = workspace.id
         }
         #if DEBUG
@@ -10090,7 +11157,13 @@ class TerminalController {
 
         var result = "OK"
         DispatchQueue.main.sync {
-            guard let tab = resolveTab(from: tabArg, tabManager: tabManager) else {
+            let tab: Tab?
+            if let tabId = UUID(uuidString: tabArg) {
+                tab = tabForSidebarMutation(id: tabId)
+            } else {
+                tab = resolveTab(from: tabArg, tabManager: tabManager)
+            }
+            guard let tab else {
                 result = "ERROR: Tab not found"
                 return
             }
@@ -10197,7 +11270,9 @@ class TerminalController {
                 result = "ERROR: Surface not found"
                 return
             }
-            tabManager.focusTabFromNotification(tab.id, surfaceId: surfaceId)
+            if !tabManager.focusTabFromNotification(tab.id, surfaceId: surfaceId) {
+                result = "ERROR: Focus failed"
+            }
         }
         return result
     }
@@ -10374,7 +11449,7 @@ class TerminalController {
             var cgImage = view.debugCopyIOSurfaceCGImage()
             if cgImage == nil {
                 // If the surface is mid-attach we may not have contents yet. Nudge a draw and retry once.
-                terminalPanel.surface.forceRefresh()
+                terminalPanel.surface.forceRefresh(reason: "terminalController.debugCopyIOSurfaceRetry")
                 cgImage = view.debugCopyIOSurfaceCGImage()
             }
             guard let cgImage else {
@@ -10837,8 +11912,8 @@ class TerminalController {
     private func parseNotificationPayload(_ args: String) -> (String, String, String) {
         let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ("Notification", "", "") }
-        let parts = trimmed.split(separator: "|", maxSplits: 2).map(String.init)
-        let title = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+        let title = parts.count > 0 ? parts[0].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         let subtitle = parts.count > 2 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         let body = parts.count > 2
             ? parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -11103,6 +12178,97 @@ class TerminalController {
         }
         if let error { return error }
         return success ? "OK" : "ERROR: Failed to send input"
+    }
+
+    private func sendInputToWorkspace(_ args: String) -> String {
+        guard let tabManager else { return "ERROR: TabManager not available" }
+        let parts = args.split(separator: " ", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return "ERROR: Usage: send_workspace <workspace_id> <text>" }
+
+        let workspaceArg = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = parts[1]
+        guard let workspaceId = UUID(uuidString: workspaceArg) else {
+            return "ERROR: Invalid workspace ID"
+        }
+
+        var success = false
+        var error: String?
+        DispatchQueue.main.sync {
+            guard let targetManager = AppDelegate.shared?.tabManagerFor(tabId: workspaceId)
+                ?? (tabManager.tabs.contains(where: { $0.id == workspaceId }) ? tabManager : nil) else {
+                error = "ERROR: Workspace not found"
+                return
+            }
+            guard let tab = targetManager.tabs.first(where: { $0.id == workspaceId }) else {
+                error = "ERROR: Workspace not found"
+                return
+            }
+
+            guard let terminalPanel = sendableWorkspaceTerminalPanel(in: tab) else {
+                error = "ERROR: No selected terminal in workspace"
+                return
+            }
+
+            let unescaped = text
+                .replacingOccurrences(of: "\\n", with: "\r")
+                .replacingOccurrences(of: "\\r", with: "\r")
+                .replacingOccurrences(of: "\\t", with: "\t")
+
+            // This DEBUG-only command is used by UI tests to enqueue shell work in an
+            // existing workspace. Return once the input is queued on main so a long
+            // payload does not hold the control-socket response open in CI.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let surface = terminalPanel.surface.surface {
+                    self.sendSocketText(unescaped, surface: surface)
+                } else {
+                    terminalPanel.sendText(unescaped)
+                    terminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
+                }
+            }
+            success = true
+        }
+
+        if let error { return error }
+        return success ? "OK" : "ERROR: Failed to send input"
+    }
+
+    private func sendableWorkspaceTerminalPanel(in workspace: Workspace) -> TerminalPanel? {
+        func selectedTerminalPanel(in paneId: PaneID) -> TerminalPanel? {
+            guard let selectedTab = workspace.bonsplitController.selectedTab(inPane: paneId),
+                  let panelId = workspace.panelIdFromSurfaceId(selectedTab.id),
+                  let terminalPanel = workspace.panels[panelId] as? TerminalPanel else {
+                return nil
+            }
+            return terminalPanel
+        }
+
+        func isSelectedTerminalPanel(_ terminalPanel: TerminalPanel) -> Bool {
+            guard let surfaceId = workspace.surfaceIdFromPanelId(terminalPanel.id) else {
+                return false
+            }
+            return workspace.bonsplitController.allPaneIds.contains { paneId in
+                workspace.bonsplitController.selectedTab(inPane: paneId)?.id == surfaceId
+            }
+        }
+
+        if let focusedPane = workspace.bonsplitController.focusedPaneId,
+           let terminalPanel = selectedTerminalPanel(in: focusedPane) {
+            return terminalPanel
+        }
+
+        if let rememberedTerminal = workspace.lastRememberedTerminalPanelForConfigInheritance(),
+           isSelectedTerminalPanel(rememberedTerminal) {
+            return rememberedTerminal
+        }
+
+        for paneId in workspace.bonsplitController.allPaneIds {
+            if let terminalPanel = selectedTerminalPanel(in: paneId) {
+                return terminalPanel
+            }
+        }
+
+        return nil
     }
 
     private func sendInputToSurface(_ args: String) -> String {
@@ -12606,6 +13772,72 @@ class TerminalController {
         return result
     }
 
+    private func reportShellState(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let rawState = parsed.positional.first, !rawState.isEmpty else {
+            return "ERROR: Missing shell state — usage: report_shell_state <prompt|running> [--tab=X] [--panel=Y]"
+        }
+        guard let state = Self.parseReportedShellActivityState(rawState) else {
+            return "ERROR: Invalid shell state '\(rawState)' — expected prompt or running"
+        }
+
+        if let scope = Self.explicitSocketScope(options: parsed.options) {
+            guard Self.socketFastPathState.shouldPublishShellActivity(
+                workspaceId: scope.workspaceId,
+                panelId: scope.panelId,
+                state: state
+            ) else {
+                return "OK"
+            }
+            DispatchQueue.main.async {
+                guard let tabManager = AppDelegate.shared?.tabManagerFor(tabId: scope.workspaceId) else { return }
+                tabManager.updateSurfaceShellActivity(tabId: scope.workspaceId, surfaceId: scope.panelId, state: state)
+            }
+            return "OK"
+        }
+
+        guard let tabManager else { return "ERROR: TabManager not available" }
+
+        var result = "OK"
+        DispatchQueue.main.sync {
+            guard let tab = resolveTabForReport(args) else {
+                result = parsed.options["tab"] != nil ? "ERROR: Tab not found" : "ERROR: No tab selected"
+                return
+            }
+
+            let validSurfaceIds = Set(tab.panels.keys)
+            tab.pruneSurfaceMetadata(validSurfaceIds: validSurfaceIds)
+
+            let panelArg = parsed.options["panel"] ?? parsed.options["surface"]
+            let surfaceId: UUID
+            if let panelArg {
+                if panelArg.isEmpty {
+                    result = "ERROR: Missing panel id — usage: report_shell_state <prompt|running> [--tab=X] [--panel=Y]"
+                    return
+                }
+                guard let parsedId = UUID(uuidString: panelArg) else {
+                    result = "ERROR: Invalid panel id '\(panelArg)'"
+                    return
+                }
+                surfaceId = parsedId
+            } else {
+                guard let focused = tab.focusedPanelId else {
+                    result = "ERROR: Missing panel id (no focused surface)"
+                    return
+                }
+                surfaceId = focused
+            }
+
+            guard validSurfaceIds.contains(surfaceId) else {
+                result = "ERROR: Panel not found '\(surfaceId.uuidString)'"
+                return
+            }
+
+            tabManager.updateSurfaceShellActivity(tabId: tab.id, surfaceId: surfaceId, state: state)
+        }
+        return result
+    }
+
     private func clearPorts(_ args: String) -> String {
         let parsed = parseOptions(args)
         var result = "OK"
@@ -12754,6 +13986,7 @@ class TerminalController {
 
             var lines: [String] = []
             lines.append("tab=\(tab.id.uuidString)")
+            lines.append("color=\(tab.customColor ?? "none")")
             lines.append("cwd=\(tab.currentDirectory)")
 
             if let focused = tab.focusedPanelId,
@@ -12821,18 +14054,27 @@ class TerminalController {
                 result = "ERROR: Tab not found"
                 return
             }
-            tab.statusEntries.removeAll()
-            tab.logEntries.removeAll()
-            tab.progress = nil
-            tab.gitBranch = nil
-            tab.panelGitBranches.removeAll()
-            tab.pullRequest = nil
-            tab.panelPullRequests.removeAll()
-            tab.surfaceListeningPorts.removeAll()
-            tab.listeningPorts.removeAll()
-            tab.metadataBlocks.removeAll()
+            tab.resetSidebarContext(reason: "reset_sidebar")
         }
         return result
+    }
+
+    private func reloadConfig(_ args: String) -> String {
+        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let soft: Bool
+        switch trimmed {
+        case "", "full":
+            soft = false
+        case "soft":
+            soft = true
+        default:
+            return "ERROR: Usage: reload_config [soft]"
+        }
+
+        v2MainSync {
+            GhosttyApp.shared.reloadConfiguration(soft: soft, source: "socket.reload_config")
+        }
+        return soft ? "OK Reloaded config (soft)" : "OK Reloaded config"
     }
 
     private func refreshSurfaces() -> String {
@@ -12849,7 +14091,7 @@ class TerminalController {
             // (resets cached metrics so the Metal layer drawable resizes correctly)
             for panel in tab.panels.values {
                 if let terminalPanel = panel as? TerminalPanel {
-                    terminalPanel.surface.forceRefresh()
+                    terminalPanel.surface.forceRefresh(reason: "terminalController.refreshAllTerminalPanels")
                     refreshedCount += 1
                 }
             }

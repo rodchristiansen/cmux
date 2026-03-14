@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Darwin
 import Bonsplit
+import UniformTypeIdentifiers
 
 @main
 struct cmuxApp: App {
@@ -13,6 +14,8 @@ struct cmuxApp: App {
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
     @AppStorage("titlebarControlsStyle") private var titlebarControlsStyle = TitlebarControlsStyle.classic.rawValue
     @AppStorage(ShortcutHintDebugSettings.alwaysShowHintsKey) private var alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
+    @AppStorage(DevBuildBannerDebugSettings.sidebarBannerVisibleKey)
+    private var showSidebarDevBuildBanner = DevBuildBannerDebugSettings.defaultShowSidebarBanner
     @AppStorage(SocketControlSettings.appStorageKey) private var socketControlMode = SocketControlSettings.defaultMode.rawValue
     @AppStorage(KeyboardShortcutSettings.Action.toggleSidebar.defaultsKey) private var toggleSidebarShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.newTab.defaultsKey) private var newWorkspaceShortcutData = Data()
@@ -42,6 +45,9 @@ struct cmuxApp: App {
         }
 
         Self.configureGhosttyEnvironment()
+
+        // Apply saved language preference before any UI loads
+        LanguageSettings.apply(LanguageSettings.languageAtLaunch)
 
         let startupAppearance = AppearanceSettings.resolvedMode()
         Self.applyAppearance(startupAppearance)
@@ -264,15 +270,6 @@ struct cmuxApp: App {
             }
 #endif
 
-            CommandMenu(String(localized: "menu.updateLogs.title", defaultValue: "Update Logs")) {
-                Button(String(localized: "menu.updateLogs.copyUpdateLogs", defaultValue: "Copy Update Logs")) {
-                    appDelegate.copyUpdateLogs(nil)
-                }
-                Button(String(localized: "menu.updateLogs.copyFocusLogs", defaultValue: "Copy Focus Logs")) {
-                    appDelegate.copyFocusLogs(nil)
-                }
-            }
-
             CommandMenu(String(localized: "menu.notifications.title", defaultValue: "Notifications")) {
                 let snapshot = notificationMenuSnapshot
 
@@ -325,6 +322,15 @@ struct cmuxApp: App {
                     appDelegate.openDebugColorComparisonWorkspaces(nil)
                 }
 
+                Button(
+                    String(
+                        localized: "debug.menu.openStressWorkspacesWithLoadedSurfaces",
+                        defaultValue: "Open Stress Workspaces and Load All Terminals"
+                    )
+                ) {
+                    appDelegate.openDebugStressWorkspacesWithLoadedSurfaces(nil)
+                }
+
                 Divider()
                 Menu("Debug Windows") {
                     Button("Debug Window Controls…") {
@@ -356,6 +362,10 @@ struct cmuxApp: App {
                 }
 
                 Toggle("Always Show Shortcut Hints", isOn: $alwaysShowShortcutHints)
+                Toggle(
+                    String(localized: "debug.devBuildBanner.show", defaultValue: "Show Dev Build Banner"),
+                    isOn: $showSidebarDevBuildBanner
+                )
 
                 Divider()
 
@@ -363,6 +373,15 @@ struct cmuxApp: App {
                     ForEach(TitlebarControlsStyle.allCases) { style in
                         Text(style.menuTitle).tag(style.rawValue)
                     }
+                }
+
+                Divider()
+
+                Button(String(localized: "menu.updateLogs.copyUpdateLogs", defaultValue: "Copy Update Logs")) {
+                    appDelegate.copyUpdateLogs(nil)
+                }
+                Button(String(localized: "menu.updateLogs.copyFocusLogs", defaultValue: "Copy Focus Logs")) {
+                    appDelegate.copyFocusLogs(nil)
                 }
 
                 Divider()
@@ -433,8 +452,9 @@ struct cmuxApp: App {
                 Divider()
 
                 // Terminal semantics:
-                // Cmd+W closes the focused tab (with confirmation if needed). If this is the last
-                // tab in the last workspace, it closes the window.
+                // Cmd+W closes the focused tab/surface (with confirmation if needed). When that
+                // was the last surface in the workspace, cmux removes the workspace and closes
+                // the window if it was also the last workspace.
                 Button(String(localized: "menu.file.closeTab", defaultValue: "Close Tab")) {
                     closePanelOrWindow()
                 }
@@ -450,6 +470,10 @@ struct cmuxApp: App {
                 // is the last workspace, it closes the window.
                 splitCommandButton(title: String(localized: "menu.file.closeWorkspace", defaultValue: "Close Workspace"), shortcut: closeWorkspaceMenuShortcut) {
                     closeTabOrWindow()
+                }
+
+                Menu(String(localized: "commandPalette.switcher.workspaceLabel", defaultValue: "Workspace")) {
+                    workspaceCommandMenuContent(manager: activeTabManager)
                 }
 
                 Button(String(localized: "menu.file.reopenClosedBrowserPanel", defaultValue: "Reopen Closed Browser Panel")) {
@@ -807,6 +831,195 @@ struct cmuxApp: App {
             return
         }
         _ = tabManager.createBrowserSplit(direction: direction)
+    }
+
+    private func selectedWorkspaceIndex(in manager: TabManager, workspaceId: UUID) -> Int? {
+        manager.tabs.firstIndex { $0.id == workspaceId }
+    }
+
+    private func selectedWorkspaceWindowMoveTargets(in manager: TabManager) -> [AppDelegate.WindowMoveTarget] {
+        let referenceWindowId = AppDelegate.shared?.windowId(for: manager)
+        return AppDelegate.shared?.windowMoveTargets(referenceWindowId: referenceWindowId) ?? []
+    }
+
+    private func toggleSelectedWorkspacePinned(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace else { return }
+        manager.setPinned(workspace, pinned: !workspace.isPinned)
+    }
+
+    private func clearSelectedWorkspaceCustomName(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace else { return }
+        manager.clearCustomTitle(tabId: workspace.id)
+    }
+
+    private func moveSelectedWorkspace(in manager: TabManager, by delta: Int) {
+        guard let workspace = manager.selectedWorkspace,
+              let currentIndex = selectedWorkspaceIndex(in: manager, workspaceId: workspace.id) else { return }
+        let targetIndex = currentIndex + delta
+        guard targetIndex >= 0, targetIndex < manager.tabs.count else { return }
+        _ = manager.reorderWorkspace(tabId: workspace.id, toIndex: targetIndex)
+        manager.selectWorkspace(workspace)
+    }
+
+    private func moveSelectedWorkspaceToTop(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace else { return }
+        manager.moveTabsToTop([workspace.id])
+        manager.selectWorkspace(workspace)
+    }
+
+    private func moveSelectedWorkspace(in manager: TabManager, toWindow windowId: UUID) {
+        guard let workspace = manager.selectedWorkspace else { return }
+        _ = AppDelegate.shared?.moveWorkspaceToWindow(workspaceId: workspace.id, windowId: windowId, focus: true)
+    }
+
+    private func moveSelectedWorkspaceToNewWindow(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace else { return }
+        _ = AppDelegate.shared?.moveWorkspaceToNewWindow(workspaceId: workspace.id, focus: true)
+    }
+
+    private func closeWorkspaceIds(
+        _ workspaceIds: [UUID],
+        in manager: TabManager,
+        allowPinned: Bool
+    ) {
+        manager.closeWorkspacesWithConfirmation(workspaceIds, allowPinned: allowPinned)
+    }
+
+    private func closeOtherSelectedWorkspacePeers(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace else { return }
+        let workspaceIds = manager.tabs.compactMap { $0.id == workspace.id ? nil : $0.id }
+        closeWorkspaceIds(workspaceIds, in: manager, allowPinned: false)
+    }
+
+    private func closeSelectedWorkspacesBelow(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace,
+              let anchorIndex = selectedWorkspaceIndex(in: manager, workspaceId: workspace.id) else { return }
+        let workspaceIds = manager.tabs.suffix(from: anchorIndex + 1).map(\.id)
+        closeWorkspaceIds(workspaceIds, in: manager, allowPinned: false)
+    }
+
+    private func closeSelectedWorkspacesAbove(in manager: TabManager) {
+        guard let workspace = manager.selectedWorkspace,
+              let anchorIndex = selectedWorkspaceIndex(in: manager, workspaceId: workspace.id) else { return }
+        let workspaceIds = manager.tabs.prefix(upTo: anchorIndex).map(\.id)
+        closeWorkspaceIds(workspaceIds, in: manager, allowPinned: false)
+    }
+
+    private func selectedWorkspaceHasUnreadNotifications(in manager: TabManager) -> Bool {
+        guard let workspaceId = manager.selectedWorkspace?.id else { return false }
+        return notificationStore.notifications.contains { $0.tabId == workspaceId && !$0.isRead }
+    }
+
+    private func selectedWorkspaceHasReadNotifications(in manager: TabManager) -> Bool {
+        guard let workspaceId = manager.selectedWorkspace?.id else { return false }
+        return notificationStore.notifications.contains { $0.tabId == workspaceId && $0.isRead }
+    }
+
+    private func markSelectedWorkspaceRead(in manager: TabManager) {
+        guard let workspaceId = manager.selectedWorkspace?.id else { return }
+        notificationStore.markRead(forTabId: workspaceId)
+    }
+
+    private func markSelectedWorkspaceUnread(in manager: TabManager) {
+        guard let workspaceId = manager.selectedWorkspace?.id else { return }
+        notificationStore.markUnread(forTabId: workspaceId)
+    }
+
+    @ViewBuilder
+    private func workspaceCommandMenuContent(manager: TabManager) -> some View {
+        let workspace = manager.selectedWorkspace
+        let workspaceIndex = workspace.flatMap { selectedWorkspaceIndex(in: manager, workspaceId: $0.id) }
+        let windowMoveTargets = selectedWorkspaceWindowMoveTargets(in: manager)
+
+        Button(
+            workspace?.isPinned == true
+                ? String(localized: "contextMenu.unpinWorkspace", defaultValue: "Unpin Workspace")
+                : String(localized: "contextMenu.pinWorkspace", defaultValue: "Pin Workspace")
+        ) {
+            toggleSelectedWorkspacePinned(in: manager)
+        }
+        .disabled(workspace == nil)
+
+        Button(String(localized: "menu.view.renameWorkspace", defaultValue: "Rename Workspace…")) {
+            _ = AppDelegate.shared?.requestRenameWorkspaceViaCommandPalette()
+        }
+        .disabled(workspace == nil)
+
+        if workspace?.hasCustomTitle == true {
+            Button(String(localized: "contextMenu.removeCustomWorkspaceName", defaultValue: "Remove Custom Workspace Name")) {
+                clearSelectedWorkspaceCustomName(in: manager)
+            }
+        }
+
+        Divider()
+
+        Button(String(localized: "contextMenu.moveUp", defaultValue: "Move Up")) {
+            moveSelectedWorkspace(in: manager, by: -1)
+        }
+        .disabled(workspaceIndex == nil || workspaceIndex == 0)
+
+        Button(String(localized: "contextMenu.moveDown", defaultValue: "Move Down")) {
+            moveSelectedWorkspace(in: manager, by: 1)
+        }
+        .disabled(workspaceIndex == nil || workspaceIndex == manager.tabs.count - 1)
+
+        Button(String(localized: "contextMenu.moveToTop", defaultValue: "Move to Top")) {
+            moveSelectedWorkspaceToTop(in: manager)
+        }
+        .disabled(workspace == nil || workspaceIndex == 0)
+
+        Menu(String(localized: "contextMenu.moveWorkspaceToWindow", defaultValue: "Move Workspace to Window")) {
+            Button(String(localized: "contextMenu.newWindow", defaultValue: "New Window")) {
+                moveSelectedWorkspaceToNewWindow(in: manager)
+            }
+            .disabled(workspace == nil)
+
+            if !windowMoveTargets.isEmpty {
+                Divider()
+            }
+
+            ForEach(windowMoveTargets) { target in
+                Button(target.label) {
+                    moveSelectedWorkspace(in: manager, toWindow: target.windowId)
+                }
+                .disabled(target.isCurrentWindow || workspace == nil)
+            }
+        }
+        .disabled(workspace == nil)
+
+        Divider()
+
+        Button(String(localized: "menu.file.closeWorkspace", defaultValue: "Close Workspace")) {
+            manager.closeCurrentWorkspaceWithConfirmation()
+        }
+        .disabled(workspace == nil)
+
+        Button(String(localized: "contextMenu.closeOtherWorkspaces", defaultValue: "Close Other Workspaces")) {
+            closeOtherSelectedWorkspacePeers(in: manager)
+        }
+        .disabled(workspace == nil || manager.tabs.count <= 1)
+
+        Button(String(localized: "contextMenu.closeWorkspacesBelow", defaultValue: "Close Workspaces Below")) {
+            closeSelectedWorkspacesBelow(in: manager)
+        }
+        .disabled(workspaceIndex == nil || workspaceIndex == manager.tabs.count - 1)
+
+        Button(String(localized: "contextMenu.closeWorkspacesAbove", defaultValue: "Close Workspaces Above")) {
+            closeSelectedWorkspacesAbove(in: manager)
+        }
+        .disabled(workspaceIndex == nil || workspaceIndex == 0)
+
+        Divider()
+
+        Button(String(localized: "contextMenu.markWorkspaceRead", defaultValue: "Mark Workspace as Read")) {
+            markSelectedWorkspaceRead(in: manager)
+        }
+        .disabled(!selectedWorkspaceHasUnreadNotifications(in: manager))
+
+        Button(String(localized: "contextMenu.markWorkspaceUnread", defaultValue: "Mark Workspace as Unread")) {
+            markSelectedWorkspaceUnread(in: manager)
+        }
+        .disabled(!selectedWorkspaceHasReadNotifications(in: manager))
     }
 
     @ViewBuilder
@@ -1317,6 +1530,7 @@ private enum DebugWindowConfigSnapshot {
         sidebarCornerRadius=\(String(format: "%.1f", doubleValue(defaults, key: "sidebarCornerRadius", fallback: 0.0)))
         sidebarBranchVerticalLayout=\(boolValue(defaults, key: SidebarBranchLayoutSettings.key, fallback: SidebarBranchLayoutSettings.defaultVerticalLayout))
         sidebarActiveTabIndicatorStyle=\(stringValue(defaults, key: SidebarActiveTabIndicatorSettings.styleKey, fallback: SidebarActiveTabIndicatorSettings.defaultStyle.rawValue))
+        sidebarDevBuildBannerVisible=\(boolValue(defaults, key: DevBuildBannerDebugSettings.sidebarBannerVisibleKey, fallback: DevBuildBannerDebugSettings.defaultShowSidebarBanner))
         shortcutHintSidebarXOffset=\(String(format: "%.1f", doubleValue(defaults, key: ShortcutHintDebugSettings.sidebarHintXKey, fallback: ShortcutHintDebugSettings.defaultSidebarHintX)))
         shortcutHintSidebarYOffset=\(String(format: "%.1f", doubleValue(defaults, key: ShortcutHintDebugSettings.sidebarHintYKey, fallback: ShortcutHintDebugSettings.defaultSidebarHintY)))
         shortcutHintTitlebarXOffset=\(String(format: "%.1f", doubleValue(defaults, key: ShortcutHintDebugSettings.titlebarHintXKey, fallback: ShortcutHintDebugSettings.defaultTitlebarHintX)))
@@ -1771,7 +1985,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show() {
+    func show(navigationTarget: SettingsNavigationTarget? = nil) {
         guard let window else { return }
 #if DEBUG
         dlog("settings.window.show requested isVisible=\(window.isVisible ? 1 : 0) isKey=\(window.isKeyWindow ? 1 : 0)")
@@ -1781,9 +1995,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             window.center()
         }
         window.makeKeyAndOrderFront(nil)
+        if let navigationTarget {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                SettingsNavigationRequest.post(navigationTarget)
+            }
+        }
 #if DEBUG
         dlog("settings.window.show completed isVisible=\(window.isVisible ? 1 : 0) isKey=\(window.isKeyWindow ? 1 : 0)")
 #endif
+    }
+}
+
+enum SettingsNavigationTarget: String {
+    case keyboardShortcuts
+}
+
+enum SettingsNavigationRequest {
+    static let notificationName = Notification.Name("cmux.settings.navigate")
+    private static let targetKey = "target"
+
+    static func post(_ target: SettingsNavigationTarget) {
+        NotificationCenter.default.post(
+            name: notificationName,
+            object: nil,
+            userInfo: [targetKey: target.rawValue]
+        )
+    }
+
+    static func target(from notification: Notification) -> SettingsNavigationTarget? {
+        guard let rawValue = notification.userInfo?[targetKey] as? String else { return nil }
+        return SettingsNavigationTarget(rawValue: rawValue)
     }
 }
 
@@ -1927,6 +2168,8 @@ private struct SidebarDebugView: View {
     @AppStorage(ShortcutHintDebugSettings.paneHintXKey) private var paneShortcutHintXOffset = ShortcutHintDebugSettings.defaultPaneHintX
     @AppStorage(ShortcutHintDebugSettings.paneHintYKey) private var paneShortcutHintYOffset = ShortcutHintDebugSettings.defaultPaneHintY
     @AppStorage(ShortcutHintDebugSettings.alwaysShowHintsKey) private var alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
+    @AppStorage(DevBuildBannerDebugSettings.sidebarBannerVisibleKey)
+    private var showSidebarDevBuildBanner = DevBuildBannerDebugSettings.defaultShowSidebarBanner
     @AppStorage(SidebarActiveTabIndicatorSettings.styleKey)
     private var sidebarActiveTabIndicatorStyle = SidebarActiveTabIndicatorSettings.defaultStyle.rawValue
 
@@ -2150,6 +2393,7 @@ private struct SidebarDebugView: View {
         sidebarCornerRadius=\(String(format: "%.1f", sidebarCornerRadius))
         sidebarBranchVerticalLayout=\(sidebarBranchVerticalLayout)
         sidebarActiveTabIndicatorStyle=\(sidebarActiveTabIndicatorStyle)
+        sidebarDevBuildBannerVisible=\(showSidebarDevBuildBanner)
         shortcutHintSidebarXOffset=\(String(format: "%.1f", ShortcutHintDebugSettings.clamped(sidebarShortcutHintXOffset)))
         shortcutHintSidebarYOffset=\(String(format: "%.1f", ShortcutHintDebugSettings.clamped(sidebarShortcutHintYOffset)))
         shortcutHintTitlebarXOffset=\(String(format: "%.1f", ShortcutHintDebugSettings.clamped(titlebarShortcutHintXOffset)))
@@ -2613,6 +2857,73 @@ enum AppearanceSettings {
     }
 }
 
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case system
+    case en
+    case ar
+    case bs
+    case zhHans = "zh-Hans"
+    case zhHant = "zh-Hant"
+    case da
+    case de
+    case es
+    case fr
+    case it
+    case ja
+    case ko
+    case nb
+    case pl
+    case ptBR = "pt-BR"
+    case ru
+    case th
+    case tr
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system: return String(localized: "language.system", defaultValue: "System")
+        case .en: return "English"
+        case .ar: return "\u{200E}العربية (Arabic)"
+        case .bs: return "Bosanski (Bosnian)"
+        case .zhHans: return "简体中文 (Chinese Simplified)"
+        case .zhHant: return "繁體中文 (Chinese Traditional)"
+        case .da: return "Dansk (Danish)"
+        case .de: return "Deutsch (German)"
+        case .es: return "Español (Spanish)"
+        case .fr: return "Français (French)"
+        case .it: return "Italiano (Italian)"
+        case .ja: return "日本語 (Japanese)"
+        case .ko: return "한국어 (Korean)"
+        case .nb: return "Norsk (Norwegian)"
+        case .pl: return "Polski (Polish)"
+        case .ptBR: return "Português (Brasil)"
+        case .ru: return "Русский (Russian)"
+        case .th: return "ไทย (Thai)"
+        case .tr: return "Türkçe (Turkish)"
+        }
+    }
+}
+
+enum LanguageSettings {
+    static let languageKey = "appLanguage"
+    static let defaultLanguage: AppLanguage = .system
+
+    static func apply(_ language: AppLanguage) {
+        if language == .system {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.set([language.rawValue], forKey: "AppleLanguages")
+        }
+    }
+
+    static var languageAtLaunch: AppLanguage = {
+        let stored = UserDefaults.standard.string(forKey: languageKey)
+        guard let stored, let lang = AppLanguage(rawValue: stored) else { return .system }
+        return lang
+    }()
+}
+
 enum AppIconMode: String, CaseIterable, Identifiable {
     case automatic
     case light
@@ -2695,6 +3006,18 @@ enum CommandPaletteRenameSelectionSettings {
     }
 }
 
+enum CommandPaletteSwitcherSearchSettings {
+    static let searchAllSurfacesKey = "commandPalette.switcherSearchAllSurfaces"
+    static let defaultSearchAllSurfaces = false
+
+    static func searchAllSurfacesEnabled(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: searchAllSurfacesKey) == nil {
+            return defaultSearchAllSurfaces
+        }
+        return defaults.bool(forKey: searchAllSurfacesKey)
+    }
+}
+
 enum ClaudeCodeIntegrationSettings {
     static let hooksEnabledKey = "claudeCodeHooksEnabled"
     static let defaultHooksEnabled = true
@@ -2705,6 +3028,10 @@ enum ClaudeCodeIntegrationSettings {
         }
         return defaults.bool(forKey: hooksEnabledKey)
     }
+}
+
+enum WelcomeSettings {
+    static let shownKey = "cmuxWelcomeShown"
 }
 
 enum TelemetrySettings {
@@ -2725,7 +3052,9 @@ enum TelemetrySettings {
 struct SettingsView: View {
     private let contentTopInset: CGFloat = 8
     private let pickerColumnWidth: CGFloat = 196
+    private let notificationSoundControlWidth: CGFloat = 280
 
+    @AppStorage(LanguageSettings.languageKey) private var appLanguage = LanguageSettings.defaultLanguage.rawValue
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
     @AppStorage(AppIconSettings.modeKey) private var appIconMode = AppIconSettings.defaultMode.rawValue
     @AppStorage(SocketControlSettings.appStorageKey) private var socketControlMode = SocketControlSettings.defaultMode.rawValue
@@ -2746,13 +3075,26 @@ struct SettingsView: View {
     private var browserExternalOpenPatterns = BrowserLinkOpenSettings.defaultBrowserExternalOpenPatterns
     @AppStorage(BrowserInsecureHTTPSettings.allowlistKey) private var browserInsecureHTTPAllowlist = BrowserInsecureHTTPSettings.defaultAllowlistText
     @AppStorage(NotificationSoundSettings.key) private var notificationSound = NotificationSoundSettings.defaultValue
+    @AppStorage(NotificationSoundSettings.customFilePathKey)
+    private var notificationSoundCustomFilePath = NotificationSoundSettings.defaultCustomFilePath
     @AppStorage(NotificationSoundSettings.customCommandKey) private var notificationCustomCommand = NotificationSoundSettings.defaultCustomCommand
     @AppStorage(NotificationBadgeSettings.dockBadgeEnabledKey) private var notificationDockBadgeEnabled = NotificationBadgeSettings.defaultDockBadgeEnabled
+    @AppStorage(NotificationPaneRingSettings.enabledKey) private var notificationPaneRingEnabled = NotificationPaneRingSettings.defaultEnabled
+    @AppStorage(NotificationPaneFlashSettings.enabledKey) private var notificationPaneFlashEnabled = NotificationPaneFlashSettings.defaultEnabled
+    @AppStorage(MenuBarExtraSettings.showInMenuBarKey) private var showMenuBarExtra = MenuBarExtraSettings.defaultShowInMenuBar
     @AppStorage(QuitWarningSettings.warnBeforeQuitKey) private var warnBeforeQuitShortcut = QuitWarningSettings.defaultWarnBeforeQuit
     @AppStorage(CommandPaletteRenameSelectionSettings.selectAllOnFocusKey)
     private var commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
+    @AppStorage(CommandPaletteSwitcherSearchSettings.searchAllSurfacesKey)
+    private var commandPaletteSearchAllSurfaces = CommandPaletteSwitcherSearchSettings.defaultSearchAllSurfaces
+    @AppStorage(ShortcutHintDebugSettings.alwaysShowHintsKey)
+    private var alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
     @AppStorage(WorkspacePlacementSettings.placementKey) private var newWorkspacePlacement = WorkspacePlacementSettings.defaultPlacement.rawValue
     @AppStorage(WorkspaceAutoReorderSettings.key) private var workspaceAutoReorder = WorkspaceAutoReorderSettings.defaultValue
+    @AppStorage(SidebarWorkspaceDetailSettings.hideAllDetailsKey)
+    private var sidebarHideAllDetails = SidebarWorkspaceDetailSettings.defaultHideAllDetails
+    @AppStorage(SidebarWorkspaceDetailSettings.showNotificationMessageKey)
+    private var sidebarShowNotificationMessage = SidebarWorkspaceDetailSettings.defaultShowNotificationMessage
     @AppStorage(SidebarBranchLayoutSettings.key) private var sidebarBranchVerticalLayout = SidebarBranchLayoutSettings.defaultVerticalLayout
     @AppStorage(SidebarActiveTabIndicatorSettings.styleKey)
     private var sidebarActiveTabIndicatorStyle = SidebarActiveTabIndicatorSettings.defaultStyle.rawValue
@@ -2766,6 +3108,7 @@ struct SettingsView: View {
     @AppStorage("sidebarShowLog") private var sidebarShowLog = true
     @AppStorage("sidebarShowProgress") private var sidebarShowProgress = true
     @AppStorage("sidebarShowStatusPills") private var sidebarShowMetadata = true
+    @ObservedObject private var notificationStore = TerminalNotificationStore.shared
     @State private var shortcutResetToken = UUID()
     @State private var topBlurOpacity: Double = 0
     @State private var topBlurBaselineOffset: CGFloat?
@@ -2778,7 +3121,13 @@ struct SettingsView: View {
     @State private var socketPasswordDraft = ""
     @State private var socketPasswordStatusMessage: String?
     @State private var socketPasswordStatusIsError = false
+    @State private var notificationCustomSoundStatusMessage: String?
+    @State private var notificationCustomSoundStatusIsError = false
+    @State private var showNotificationCustomSoundErrorAlert = false
+    @State private var notificationCustomSoundErrorAlertMessage = ""
     @State private var telemetryValueAtLaunch = TelemetrySettings.enabledForCurrentLaunch
+    @State private var showLanguageRestartAlert = false
+    @State private var isResettingSettings = false
     @State private var workspaceTabDefaultEntries = WorkspaceTabColorSettings.defaultPaletteWithOverrides()
     @State private var workspaceTabCustomColors = WorkspaceTabColorSettings.customColors()
 
@@ -2852,10 +3201,205 @@ struct SettingsView: View {
         browserInsecureHTTPAllowlistDraft != browserInsecureHTTPAllowlist
     }
 
+    private var hasCustomNotificationSoundFilePath: Bool {
+        !notificationSoundCustomFilePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var notificationSoundCustomFileDisplayName: String {
+        guard hasCustomNotificationSoundFilePath else {
+            return String(
+                localized: "settings.notifications.sound.custom.file.none",
+                defaultValue: "No file selected"
+            )
+        }
+        return URL(fileURLWithPath: notificationSoundCustomFilePath).lastPathComponent
+    }
+
+    private var canPreviewNotificationSound: Bool {
+        switch notificationSound {
+        case "none":
+            return false
+        case NotificationSoundSettings.customFileValue:
+            return hasCustomNotificationSoundFilePath
+        default:
+            return true
+        }
+    }
+
+    private var notificationPermissionStatusText: String {
+        notificationStore.authorizationState.statusLabel
+    }
+
+    private var notificationPermissionStatusColor: Color {
+        switch notificationStore.authorizationState {
+        case .authorized, .provisional, .ephemeral:
+            return .green
+        case .denied:
+            return .red
+        case .unknown, .notDetermined:
+            return .secondary
+        }
+    }
+
+    private var notificationPermissionSubtitle: String {
+        switch notificationStore.authorizationState {
+        case .unknown, .notDetermined:
+            return "Desktop notifications are not enabled yet."
+        case .authorized:
+            return "Desktop notifications are enabled."
+        case .denied:
+            return "Desktop notifications are disabled in System Settings."
+        case .provisional:
+            return "Desktop notifications are enabled with quiet delivery."
+        case .ephemeral:
+            return "Desktop notifications are temporarily enabled."
+        }
+    }
+
+    private var notificationPermissionActionTitle: String {
+        switch notificationStore.authorizationState {
+        case .unknown, .notDetermined:
+            return "Enable"
+        case .authorized, .denied, .provisional, .ephemeral:
+            return "Open Settings"
+        }
+    }
+
     private func blurOpacity(forContentOffset offset: CGFloat) -> Double {
         guard let baseline = topBlurBaselineOffset else { return 0 }
         let reveal = (baseline - offset) / 24
         return Double(min(max(reveal, 0), 1))
+    }
+
+    private func previewNotificationSound() {
+        if notificationSound == NotificationSoundSettings.customFileValue {
+            NotificationSoundSettings.playCustomFileSound(path: notificationSoundCustomFilePath)
+            return
+        }
+        NotificationSoundSettings.previewSound(value: notificationSound)
+    }
+
+    private func notificationCustomSoundIssueMessage(_ issue: NotificationSoundSettings.CustomSoundPreparationIssue) -> String {
+        switch issue {
+        case .emptyPath:
+            return String(
+                localized: "settings.notifications.sound.custom.status.empty",
+                defaultValue: "Choose a custom audio file first."
+            )
+        case .missingFile(let path):
+            let fileName = URL(fileURLWithPath: path).lastPathComponent
+            return String(
+                localized: "settings.notifications.sound.custom.status.missingFilePrefix",
+                defaultValue: "File not found: "
+            ) + fileName
+        case .missingFileExtension(let path):
+            let fileName = URL(fileURLWithPath: path).lastPathComponent
+            return String(
+                localized: "settings.notifications.sound.custom.status.missingExtensionPrefix",
+                defaultValue: "File needs an extension: "
+            ) + fileName
+        case .stagingFailed(_, let details):
+            let prefix = String(
+                localized: "settings.notifications.sound.custom.status.prepareFailed",
+                defaultValue: "Could not prepare this file for notifications. Try WAV, AIFF, or CAF."
+            )
+            return "\(prefix) (\(details))"
+        }
+    }
+
+    private func notificationCustomSoundReadyStatusMessage(for path: String) -> String {
+        let sourceExtension = URL(fileURLWithPath: path).pathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let stagedExtension = NotificationSoundSettings.stagedCustomSoundFileExtension(forSourceExtension: sourceExtension)
+        if !sourceExtension.isEmpty, stagedExtension != sourceExtension {
+            return String(
+                localized: "settings.notifications.sound.custom.status.readyConverted",
+                defaultValue: "Prepared for notifications (converted to CAF)."
+            )
+        }
+        return String(
+            localized: "settings.notifications.sound.custom.status.ready",
+            defaultValue: "Ready for notifications."
+        )
+    }
+
+    private func refreshNotificationCustomSoundStatus(showAlertOnFailure: Bool = false) {
+        guard notificationSound == NotificationSoundSettings.customFileValue else {
+            notificationCustomSoundStatusMessage = nil
+            notificationCustomSoundStatusIsError = false
+            return
+        }
+        let pathSnapshot = notificationSoundCustomFilePath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = NotificationSoundSettings.prepareCustomFileForNotifications(path: pathSnapshot)
+            DispatchQueue.main.async {
+                guard notificationSound == NotificationSoundSettings.customFileValue else {
+                    notificationCustomSoundStatusMessage = nil
+                    notificationCustomSoundStatusIsError = false
+                    return
+                }
+                guard notificationSoundCustomFilePath == pathSnapshot else { return }
+                switch result {
+                case .success:
+                    notificationCustomSoundStatusMessage = notificationCustomSoundReadyStatusMessage(for: pathSnapshot)
+                    notificationCustomSoundStatusIsError = false
+                case .failure(let issue):
+                    let message = notificationCustomSoundIssueMessage(issue)
+                    notificationCustomSoundStatusMessage = message
+                    notificationCustomSoundStatusIsError = true
+                    if showAlertOnFailure {
+                        notificationCustomSoundErrorAlertMessage = message
+                        showNotificationCustomSoundErrorAlert = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func chooseNotificationSoundFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio]
+        panel.title = String(
+            localized: "settings.notifications.sound.custom.choose.title",
+            defaultValue: "Choose Notification Sound"
+        )
+        panel.prompt = String(
+            localized: "settings.notifications.sound.custom.choose.prompt",
+            defaultValue: "Choose"
+        )
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let selectedPath = url.path
+        switch NotificationSoundSettings.prepareCustomFileForNotifications(path: selectedPath) {
+        case .success:
+            notificationSoundCustomFilePath = selectedPath
+            notificationSound = NotificationSoundSettings.customFileValue
+            notificationCustomSoundStatusMessage = notificationCustomSoundReadyStatusMessage(for: selectedPath)
+            notificationCustomSoundStatusIsError = false
+            previewNotificationSound()
+        case .failure(let issue):
+            let message = notificationCustomSoundIssueMessage(issue)
+            notificationCustomSoundErrorAlertMessage = message
+            showNotificationCustomSoundErrorAlert = true
+            refreshNotificationCustomSoundStatus()
+        }
+    }
+
+    private func handleNotificationPermissionAction() {
+        let state = notificationStore.authorizationState.statusLabel
+#if DEBUG
+        dlog("notification.ui enableTapped state=\(state)")
+#endif
+        NSLog("notification.ui enableTapped state=%@", state)
+        switch notificationStore.authorizationState {
+        case .unknown, .notDetermined:
+            notificationStore.requestAuthorizationFromSettings()
+        case .authorized, .denied, .provisional, .ephemeral:
+            notificationStore.openNotificationSettings()
+        }
     }
 
     private func saveSocketPassword() {
@@ -2890,16 +3434,49 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ScrollViewReader { proxy in
+            ZStack(alignment: .top) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     SettingsSectionHeader(title: String(localized: "settings.section.app", defaultValue: "App"))
                     SettingsCard {
-                        SettingsPickerRow(String(localized: "settings.app.theme", defaultValue: "Theme"), controlWidth: pickerColumnWidth, selection: $appearanceMode) {
-                            ForEach(AppearanceMode.visibleCases) { mode in
-                                Text(mode.displayName).tag(mode.rawValue)
+                        SettingsCardRow(
+                            String(localized: "settings.app.language", defaultValue: "Language"),
+                            subtitle: appLanguage != LanguageSettings.languageAtLaunch.rawValue
+                                ? String(localized: "settings.app.language.restartSubtitle", defaultValue: "Restart cmux to apply")
+                                : nil,
+                            controlWidth: pickerColumnWidth
+                        ) {
+                            Picker("", selection: $appLanguage) {
+                                ForEach(AppLanguage.allCases) { lang in
+                                    Text(lang.displayName).tag(lang.rawValue)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .onChange(of: appLanguage) { newValue in
+                                guard !isResettingSettings else { return }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
+                                    // Re-check current value to handle rapid changes
+                                    let current = appLanguage
+                                    if let lang = AppLanguage(rawValue: current) {
+                                        LanguageSettings.apply(lang)
+                                    }
+                                    if current != LanguageSettings.languageAtLaunch.rawValue {
+                                        showLanguageRestartAlert = true
+                                    }
+                                }
                             }
                         }
+
+                        SettingsCardDivider()
+
+                        ThemePickerRow(
+                            selectedMode: appearanceMode,
+                            onSelect: { mode in
+                                appearanceMode = mode.rawValue
+                            }
+                        )
 
                         SettingsCardDivider()
 
@@ -2948,25 +3525,136 @@ struct SettingsView: View {
 
                         SettingsCardDivider()
 
-                        SettingsPickerRow(
-                            "Notification Sound",
-                            subtitle: "Sound played when a notification arrives.",
-                            controlWidth: pickerColumnWidth,
-                            selection: $notificationSound
+                        SettingsCardRow(
+                            String(localized: "settings.app.showInMenuBar", defaultValue: "Show in Menu Bar"),
+                            subtitle: String(localized: "settings.app.showInMenuBar.subtitle", defaultValue: "Keep cmux in the menu bar for unread notifications and quick actions.")
                         ) {
-                            ForEach(NotificationSoundSettings.systemSounds, id: \.value) { sound in
-                                Text(sound.label).tag(sound.value)
+                            Toggle("", isOn: $showMenuBarExtra)
+                                .labelsHidden()
+                                .controlSize(.small)
+                                .accessibilityLabel(
+                                    String(localized: "settings.app.showInMenuBar", defaultValue: "Show in Menu Bar")
+                                )
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.notifications.paneRing.title", defaultValue: "Unread Pane Ring"),
+                            subtitle: String(localized: "settings.notifications.paneRing.subtitle", defaultValue: "Show a blue ring around panes with unread notifications.")
+                        ) {
+                            Toggle("", isOn: $notificationPaneRingEnabled)
+                                .labelsHidden()
+                                .controlSize(.small)
+                                .accessibilityLabel(
+                                    String(localized: "settings.notifications.paneRing.title", defaultValue: "Unread Pane Ring")
+                                )
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.notifications.paneFlash.title", defaultValue: "Pane Flash"),
+                            subtitle: String(localized: "settings.notifications.paneFlash.subtitle", defaultValue: "Briefly flash a blue outline when cmux highlights a pane.")
+                        ) {
+                            Toggle("", isOn: $notificationPaneFlashEnabled)
+                                .labelsHidden()
+                                .controlSize(.small)
+                                .accessibilityLabel(
+                                    String(localized: "settings.notifications.paneFlash.title", defaultValue: "Pane Flash")
+                                )
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            "Desktop Notifications",
+                            subtitle: notificationPermissionSubtitle
+                        ) {
+                            HStack(spacing: 6) {
+                                Text(notificationPermissionStatusText)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(notificationPermissionStatusColor)
+                                    .frame(width: 98, alignment: .trailing)
+
+                                Button(notificationPermissionActionTitle) {
+                                    handleNotificationPermissionAction()
+                                }
+                                .controlSize(.small)
+
+                                Button("Send Test") {
+                                    notificationStore.sendSettingsTestNotification()
+                                }
+                                .controlSize(.small)
                             }
-                        } extraTrailing: {
-                            Button {
-                                NotificationSoundSettings.previewSound(value: notificationSound)
-                            } label: {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 9))
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.notifications.sound.title", defaultValue: "Notification Sound"),
+                            subtitle: String(localized: "settings.notifications.sound.subtitle", defaultValue: "Sound played when a notification arrives."),
+                            controlWidth: notificationSoundControlWidth
+                        ) {
+                            VStack(alignment: .trailing, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Picker("", selection: $notificationSound) {
+                                        ForEach(NotificationSoundSettings.systemSounds, id: \.value) { sound in
+                                            Text(sound.label).tag(sound.value)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    Button {
+                                        previewNotificationSound()
+                                    } label: {
+                                        Image(systemName: "play.fill")
+                                            .font(.system(size: 9))
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .disabled(!canPreviewNotificationSound)
+                                }
+
+                                if notificationSound == NotificationSoundSettings.customFileValue {
+                                    HStack(spacing: 6) {
+                                        Text(notificationSoundCustomFileDisplayName)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                            .frame(width: 170, alignment: .trailing)
+                                        Button(
+                                            String(
+                                                localized: "settings.notifications.sound.custom.choose.button",
+                                                defaultValue: "Choose..."
+                                            )
+                                        ) {
+                                            chooseNotificationSoundFile()
+                                        }
+                                        .controlSize(.small)
+                                        Button(
+                                            String(
+                                                localized: "settings.notifications.sound.custom.clear.button",
+                                                defaultValue: "Clear"
+                                            )
+                                        ) {
+                                            notificationSoundCustomFilePath = NotificationSoundSettings.defaultCustomFilePath
+                                            refreshNotificationCustomSoundStatus()
+                                        }
+                                        .controlSize(.small)
+                                        .disabled(!hasCustomNotificationSoundFilePath)
+                                    }
+                                    if let notificationCustomSoundStatusMessage {
+                                        Text(notificationCustomSoundStatusMessage)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(notificationCustomSoundStatusIsError ? Color.red : Color.secondary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.trailing)
+                                            .frame(width: 260, alignment: .trailing)
+                                    }
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(notificationSound == "none")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                         }
 
                         SettingsCardDivider()
@@ -3021,6 +3709,36 @@ struct SettingsView: View {
 
                         SettingsCardDivider()
 
+                        SettingsCardRow(
+                            String(localized: "settings.app.commandPaletteSearchAllSurfaces", defaultValue: "Command Palette Searches All Surfaces"),
+                            subtitle: commandPaletteSearchAllSurfaces
+                                ? String(localized: "settings.app.commandPaletteSearchAllSurfaces.subtitleOn", defaultValue: "Cmd+P also matches terminal, browser, and markdown surfaces across workspaces.")
+                                : String(localized: "settings.app.commandPaletteSearchAllSurfaces.subtitleOff", defaultValue: "Cmd+P matches workspace rows only.")
+                        ) {
+                            Toggle("", isOn: $commandPaletteSearchAllSurfaces)
+                                .labelsHidden()
+                                .controlSize(.small)
+                                .accessibilityIdentifier("CommandPaletteSearchAllSurfacesToggle")
+                                .accessibilityLabel(
+                                    String(localized: "settings.app.commandPaletteSearchAllSurfaces", defaultValue: "Command Palette Searches All Surfaces")
+                                )
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.hideAllSidebarDetails", defaultValue: "Hide All Sidebar Details"),
+                            subtitle: sidebarHideAllDetails
+                                ? String(localized: "settings.app.hideAllSidebarDetails.subtitleOn", defaultValue: "Show only the workspace title row. Overrides the detail toggles below.")
+                                : String(localized: "settings.app.hideAllSidebarDetails.subtitleOff", defaultValue: "Show secondary workspace details as controlled by the toggles below.")
+                        ) {
+                            Toggle("", isOn: $sidebarHideAllDetails)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+
+                        SettingsCardDivider()
+
                         SettingsPickerRow(
                             String(localized: "settings.app.sidebarBranchLayout", defaultValue: "Sidebar Branch Layout"),
                             subtitle: sidebarBranchVerticalLayout
@@ -3032,6 +3750,19 @@ struct SettingsView: View {
                             Text(String(localized: "settings.app.sidebarBranchLayout.vertical", defaultValue: "Vertical")).tag(true)
                             Text(String(localized: "settings.app.sidebarBranchLayout.inline", defaultValue: "Inline")).tag(false)
                         }
+                        .disabled(sidebarHideAllDetails)
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.showNotificationMessage", defaultValue: "Show Notification Message in Sidebar"),
+                            subtitle: String(localized: "settings.app.showNotificationMessage.subtitle", defaultValue: "Display the latest notification message below the workspace title.")
+                        ) {
+                            Toggle("", isOn: $sidebarShowNotificationMessage)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3043,6 +3774,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3054,6 +3786,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3067,6 +3800,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3078,6 +3812,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3089,6 +3824,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3100,6 +3836,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
 
                         SettingsCardDivider()
 
@@ -3111,6 +3848,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
+                        .disabled(sidebarHideAllDetails)
                     }
 
                     SettingsSectionHeader(title: String(localized: "settings.section.workspaceColors", defaultValue: "Workspace Colors"))
@@ -3488,6 +4226,8 @@ struct SettingsView: View {
                     }
 
                     SettingsSectionHeader(title: String(localized: "settings.section.keyboardShortcuts", defaultValue: "Keyboard Shortcuts"))
+                        .id(SettingsNavigationTarget.keyboardShortcuts)
+                        .accessibilityIdentifier("SettingsKeyboardShortcutsSection")
                     SettingsCard {
                         SettingsCardRow(
                             String(localized: "settings.shortcuts.showHints", defaultValue: "Show Cmd/Ctrl-Hold Shortcut Hints"),
@@ -3518,6 +4258,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.leading, 2)
+                        .accessibilityIdentifier("ShortcutRecordingHint")
 
                     SettingsSectionHeader(title: String(localized: "settings.section.reset", defaultValue: "Reset"))
                     SettingsCard {
@@ -3612,10 +4353,18 @@ struct SettingsView: View {
         .toggleStyle(.switch)
         .onAppear {
             BrowserHistoryStore.shared.loadIfNeeded()
+            notificationStore.refreshAuthorizationStatus()
             browserThemeMode = BrowserThemeSettings.mode(defaults: .standard).rawValue
             browserHistoryEntryCount = BrowserHistoryStore.shared.entries.count
             browserInsecureHTTPAllowlistDraft = browserInsecureHTTPAllowlist
             reloadWorkspaceTabColorSettings()
+            refreshNotificationCustomSoundStatus()
+        }
+        .onChange(of: notificationSound) { _, _ in
+            refreshNotificationCustomSoundStatus()
+        }
+        .onChange(of: notificationSoundCustomFilePath) { _, _ in
+            refreshNotificationCustomSoundStatus()
         }
         .onChange(of: browserInsecureHTTPAllowlist) { oldValue, newValue in
             // Keep draft in sync with external changes unless the user has local unsaved edits.
@@ -3628,6 +4377,14 @@ struct SettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             reloadWorkspaceTabColorSettings()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: SettingsNavigationRequest.notificationName)) { notification in
+            guard let target = SettingsNavigationRequest.target(from: notification) else { return }
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(target, anchor: .top)
+                }
+            }
         }
         .confirmationDialog(
             String(localized: "settings.browser.history.clearDialog.title", defaultValue: "Clear browser history?"),
@@ -3656,9 +4413,51 @@ struct SettingsView: View {
         } message: {
             Text(String(localized: "settings.automation.openAccess.dialog.message", defaultValue: "This disables ancestry and password checks and opens the socket to all local users. Only enable when you understand the risk."))
         }
+        .confirmationDialog(
+            String(localized: "settings.app.language.restartDialog.title", defaultValue: "Restart to apply language change?"),
+            isPresented: $showLanguageRestartAlert,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "settings.app.language.restartDialog.confirm", defaultValue: "Restart Now")) {
+                relaunchApp()
+            }
+            Button(String(localized: "settings.app.language.restartDialog.later", defaultValue: "Later"), role: .cancel) {}
+        }
+        .alert(
+            String(
+                localized: "settings.notifications.sound.custom.error.title",
+                defaultValue: "Custom Notification Sound Error"
+            ),
+            isPresented: $showNotificationCustomSoundErrorAlert
+        ) {
+            Button(String(localized: "common.ok", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(notificationCustomSoundErrorAlertMessage)
+        }
+        }
+    }
+
+    private func relaunchApp() {
+        let bundlePath = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1 && open -n -- \"$RELAUNCH_PATH\""]
+        task.environment = ["RELAUNCH_PATH": bundlePath]
+        do {
+            try task.run()
+        } catch {
+            return
+        }
+        NSApplication.shared.terminate(nil)
     }
 
     private func resetAllSettings() {
+        isResettingSettings = true
+        appLanguage = LanguageSettings.defaultLanguage.rawValue
+        LanguageSettings.apply(.system)
+        if appLanguage != LanguageSettings.languageAtLaunch.rawValue {
+            showLanguageRestartAlert = true
+        }
         appearanceMode = AppearanceSettings.defaultMode.rawValue
         appIconMode = AppIconSettings.defaultMode.rawValue
         AppIconSettings.applyIcon(.automatic)
@@ -3675,12 +4474,25 @@ struct SettingsView: View {
         browserInsecureHTTPAllowlist = BrowserInsecureHTTPSettings.defaultAllowlistText
         browserInsecureHTTPAllowlistDraft = BrowserInsecureHTTPSettings.defaultAllowlistText
         notificationSound = NotificationSoundSettings.defaultValue
+        notificationSoundCustomFilePath = NotificationSoundSettings.defaultCustomFilePath
+        notificationCustomSoundStatusMessage = nil
+        notificationCustomSoundStatusIsError = false
+        showNotificationCustomSoundErrorAlert = false
+        notificationCustomSoundErrorAlertMessage = ""
         notificationCustomCommand = NotificationSoundSettings.defaultCustomCommand
         notificationDockBadgeEnabled = NotificationBadgeSettings.defaultDockBadgeEnabled
+        notificationPaneRingEnabled = NotificationPaneRingSettings.defaultEnabled
+        notificationPaneFlashEnabled = NotificationPaneFlashSettings.defaultEnabled
+        showMenuBarExtra = MenuBarExtraSettings.defaultShowInMenuBar
         warnBeforeQuitShortcut = QuitWarningSettings.defaultWarnBeforeQuit
         commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
+        commandPaletteSearchAllSurfaces = CommandPaletteSwitcherSearchSettings.defaultSearchAllSurfaces
+        ShortcutHintDebugSettings.resetVisibilityDefaults()
+        alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
         newWorkspacePlacement = WorkspacePlacementSettings.defaultPlacement.rawValue
         workspaceAutoReorder = WorkspaceAutoReorderSettings.defaultValue
+        sidebarHideAllDetails = SidebarWorkspaceDetailSettings.defaultHideAllDetails
+        sidebarShowNotificationMessage = SidebarWorkspaceDetailSettings.defaultShowNotificationMessage
         sidebarBranchVerticalLayout = SidebarBranchLayoutSettings.defaultVerticalLayout
         sidebarActiveTabIndicatorStyle = SidebarActiveTabIndicatorSettings.defaultStyle.rawValue
         sidebarShowBranchDirectory = true
@@ -3700,6 +4512,7 @@ struct SettingsView: View {
         WorkspaceTabColorSettings.reset()
         reloadWorkspaceTabColorSettings()
         shortcutResetToken = UUID()
+        DispatchQueue.main.async { isResettingSettings = false }
     }
 
     private func defaultTabColorBinding(for name: String) -> Binding<Color> {
@@ -3948,6 +4761,193 @@ private struct SettingsCardNote: View {
     }
 }
 
+private struct ThemeWindowThumbnail: View {
+    let isDark: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let height = geo.size.height
+
+            ZStack {
+                // Wallpaper background
+                if isDark {
+                    LinearGradient(
+                        colors: [Color(red: 0.1, green: 0.1, blue: 0.3), Color(red: 0.05, green: 0.05, blue: 0.1)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: height * 0.5))
+                        path.addQuadCurve(to: CGPoint(x: width, y: height), control: CGPoint(x: width * 0.5, y: height * 0.2))
+                        path.addLine(to: CGPoint(x: width, y: 0))
+                        path.addLine(to: CGPoint(x: 0, y: 0))
+                    }
+                    .fill(LinearGradient(colors: [Color(red: 0.2, green: 0.2, blue: 0.6).opacity(0.5), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+                } else {
+                    LinearGradient(
+                        colors: [Color(red: 0.6, green: 0.8, blue: 0.95), Color(red: 0.2, green: 0.4, blue: 0.8)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: height * 0.5))
+                        path.addQuadCurve(to: CGPoint(x: width, y: height), control: CGPoint(x: width * 0.5, y: height * 0.2))
+                        path.addLine(to: CGPoint(x: width, y: 0))
+                        path.addLine(to: CGPoint(x: 0, y: 0))
+                    }
+                    .fill(LinearGradient(colors: [Color(red: 0.8, green: 0.9, blue: 1.0).opacity(0.6), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+
+                // Menu bar
+                VStack(spacing: 0) {
+                    HStack {
+                        Image(systemName: "applelogo")
+                            .font(.system(size: max(height * 0.08, 6)))
+                            .foregroundColor(isDark ? .white : .black)
+                            .opacity(0.8)
+                        Spacer()
+                    }
+                    .padding(.horizontal, max(width * 0.04, 4))
+                    .frame(height: max(height * 0.12, 8))
+                    .background(.ultraThinMaterial)
+                    Spacer()
+                }
+
+                // Back window
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(isDark ? Color(white: 0.2) : Color(white: 0.9))
+                        .frame(height: max(height * 0.15, 8))
+                    ZStack(alignment: .top) {
+                        Rectangle()
+                            .fill(isDark ? Color(white: 0.15) : Color(white: 0.98))
+                        RoundedRectangle(cornerRadius: max(width * 0.02, 2), style: .continuous)
+                            .fill(Color.accentColor)
+                            .frame(height: max(height * 0.12, 6))
+                            .padding(max(width * 0.04, 4))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: max(width * 0.04, 4), style: .continuous))
+                .frame(width: width * 0.65, height: height * 0.45)
+                .shadow(color: .black.opacity(isDark ? 0.4 : 0.15), radius: 4, x: 0, y: 2)
+                .offset(x: -width * 0.08, y: -height * 0.1)
+
+                // Front window with traffic lights
+                VStack(spacing: 0) {
+                    ZStack {
+                        Rectangle()
+                            .fill(isDark ? Color(white: 0.18) : Color(white: 0.92))
+                        HStack(spacing: max(width * 0.025, 2)) {
+                            Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34)).frame(width: max(width * 0.04, 3))
+                            Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18)).frame(width: max(width * 0.04, 3))
+                            Circle().fill(Color(red: 0.15, green: 0.79, blue: 0.25)).frame(width: max(width * 0.04, 3))
+                            Spacer()
+                        }
+                        .padding(.horizontal, max(width * 0.04, 4))
+                    }
+                    .frame(height: max(height * 0.18, 10))
+                    Rectangle()
+                        .fill(isDark ? Color(white: 0.1) : .white)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: max(width * 0.05, 5), style: .continuous))
+                .shadow(color: .black.opacity(isDark ? 0.5 : 0.2), radius: 6, x: 0, y: 3)
+                .frame(width: width * 0.75, height: height * 0.55)
+                .offset(x: width * 0.12, y: height * 0.2)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+    }
+}
+
+private struct ThemePickerRow: View {
+    let selectedMode: String
+    let onSelect: (AppearanceMode) -> Void
+
+    private let thumbWidth: CGFloat = 76
+    private let thumbHeight: CGFloat = 50
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(String(localized: "settings.app.theme", defaultValue: "Theme"))
+                .font(.system(size: 13, weight: .medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                ForEach(AppearanceMode.visibleCases) { mode in
+                    let isSelected = selectedMode == mode.rawValue
+                    Button {
+                        onSelect(mode)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Group {
+                                if mode == .system {
+                                    ZStack {
+                                        ThemeWindowThumbnail(isDark: false)
+                                            .mask(
+                                                GeometryReader { geo in
+                                                    Rectangle()
+                                                        .frame(width: geo.size.width / 2, height: geo.size.height)
+                                                        .position(x: geo.size.width / 4, y: geo.size.height / 2)
+                                                }
+                                            )
+                                        ThemeWindowThumbnail(isDark: true)
+                                            .mask(
+                                                GeometryReader { geo in
+                                                    Rectangle()
+                                                        .frame(width: geo.size.width / 2, height: geo.size.height)
+                                                        .position(x: geo.size.width * 0.75, y: geo.size.height / 2)
+                                                }
+                                            )
+                                        GeometryReader { geo in
+                                            Rectangle()
+                                                .fill(Color.primary.opacity(0.15))
+                                                .frame(width: 1, height: geo.size.height)
+                                                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                                        }
+                                    }
+                                } else {
+                                    ThemeWindowThumbnail(isDark: mode == .dark)
+                                }
+                            }
+                            .frame(width: thumbWidth, height: thumbHeight)
+
+                            Text(mode.displayName)
+                                .font(.system(size: 10))
+                                .fontWeight(isSelected ? .semibold : .regular)
+                                .foregroundColor(isSelected ? .primary : .secondary)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(isSelected
+                                    ? Color.accentColor.opacity(0.12)
+                                    : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+            .layoutPriority(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct AppIconPickerRow: View {
     let selectedMode: String
     let onSelect: (AppIconMode) -> Void
@@ -3956,20 +4956,25 @@ private struct AppIconPickerRow: View {
     private let autoIconSize: CGFloat = 36
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(String(localized: "settings.app.appIcon", defaultValue: "App Icon"))
-                .font(.system(size: 13, weight: .medium))
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(String(localized: "settings.app.appIcon", defaultValue: "App Icon"))
+                    .font(.system(size: 13, weight: .medium))
+                Text(String(localized: "settings.app.appIcon.subtitle", defaultValue: "Dock and app switcher"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 ForEach(AppIconMode.allCases) { mode in
                     let isSelected = selectedMode == mode.rawValue
                     Button {
                         onSelect(mode)
                     } label: {
-                        VStack(spacing: 6) {
+                        VStack(spacing: 4) {
                             Group {
                                 if mode == .automatic {
-                                    // Show both icons overlapping
                                     ZStack {
                                         Image("AppIconLight")
                                             .resizable()
@@ -3995,25 +5000,29 @@ private struct AppIconPickerRow: View {
                             }
 
                             Text(mode.displayName)
-                                .font(.system(size: 11))
+                                .font(.system(size: 10))
                                 .foregroundColor(isSelected ? .primary : .secondary)
                         }
                         .padding(.vertical, 8)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
                         .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(isSelected
                                     ? Color.accentColor.opacity(0.12)
                                     : Color.clear)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                         )
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
+            .layoutPriority(1)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)

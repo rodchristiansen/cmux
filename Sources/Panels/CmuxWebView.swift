@@ -93,7 +93,7 @@ final class CmuxWebView: WKWebView {
 
     /// Temporarily permits focus acquisition for explicit pointer-driven interactions
     /// (mouse click into this webview) while keeping background autofocus blocked.
-    func withPointerFocusAllowance(_ body: () -> Void) {
+    func withPointerFocusAllowance<T>(_ body: () -> T) -> T {
         pointerFocusAllowanceDepth += 1
 #if DEBUG
         dlog(
@@ -110,10 +110,22 @@ final class CmuxWebView: WKWebView {
             )
 #endif
         }
-        body()
+        return body()
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+#if DEBUG
+        let typingTimingStart = CmuxTypingTiming.start()
+        var handled = false
+        defer {
+            CmuxTypingTiming.logDuration(
+                path: "browser.web.performKeyEquivalent",
+                startedAt: typingTimingStart,
+                event: event,
+                extra: "handled=\(handled ? 1 : 0)"
+            )
+        }
+#endif
         if event.keyCode == 36 || event.keyCode == 76 {
             // Always bypass app/menu key-equivalent routing for Return/Enter so WebKit
             // receives the keyDown path used by form submission handlers.
@@ -124,28 +136,65 @@ final class CmuxWebView: WKWebView {
         // Menu/app shortcut routing is only needed for Command equivalents
         // (New Tab, Close Tab, tab switching, split commands, etc).
         guard flags.contains(.command) else {
-            return super.performKeyEquivalent(with: event)
+            let result = super.performKeyEquivalent(with: event)
+#if DEBUG
+            handled = result
+#endif
+            return result
+        }
+
+        if !shouldRouteCommandEquivalentDirectlyToMainMenu(event) {
+            let result = super.performKeyEquivalent(with: event)
+#if DEBUG
+            handled = result
+#endif
+            return result
         }
 
         // Let the app menu handle key equivalents first (New Tab, Close Tab, tab switching, etc).
         if let menu = NSApp.mainMenu, menu.performKeyEquivalent(with: event) {
+#if DEBUG
+            handled = true
+#endif
             return true
         }
 
         // Handle app-level shortcuts that are not menu-backed (for example split commands).
         // Without this, WebKit can consume Cmd-based shortcuts before the app monitor sees them.
         if AppDelegate.shared?.handleBrowserSurfaceKeyEquivalent(event) == true {
+#if DEBUG
+            handled = true
+#endif
             return true
         }
 
-        return super.performKeyEquivalent(with: event)
+        let result = super.performKeyEquivalent(with: event)
+#if DEBUG
+        handled = result
+#endif
+        return result
     }
 
     override func keyDown(with event: NSEvent) {
+#if DEBUG
+        let typingTimingStart = CmuxTypingTiming.start()
+        var route = "super"
+        defer {
+            CmuxTypingTiming.logDuration(
+                path: "browser.web.keyDown",
+                startedAt: typingTimingStart,
+                event: event,
+                extra: "route=\(route)"
+            )
+        }
+#endif
         // Some Cmd-based key paths in WebKit don't consistently invoke performKeyEquivalent.
         // Route them through the same app-level shortcut handler as a fallback.
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
            AppDelegate.shared?.handleBrowserSurfaceKeyEquivalent(event) == true {
+#if DEBUG
+            route = "appShortcut"
+#endif
             return
         }
 
@@ -1113,11 +1162,31 @@ final class CmuxWebView: WKWebView {
         NSPasteboard.PasteboardType("com.cmux.sidebar-tab-reorder"),
     ]
 
+    static func shouldRejectInternalPaneDrag(_ pasteboardTypes: [NSPasteboard.PasteboardType]?) -> Bool {
+        DragOverlayRoutingPolicy.hasBonsplitTabTransfer(pasteboardTypes)
+            || DragOverlayRoutingPolicy.hasSidebarTabReorder(pasteboardTypes)
+    }
+
     override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
         let filtered = newTypes.filter { !Self.blockedDragTypes.contains($0) }
         if !filtered.isEmpty {
             super.registerForDraggedTypes(filtered)
         }
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard !Self.shouldRejectInternalPaneDrag(sender.draggingPasteboard.types) else { return [] }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard !Self.shouldRejectInternalPaneDrag(sender.draggingPasteboard.types) else { return [] }
+        return super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard !Self.shouldRejectInternalPaneDrag(sender.draggingPasteboard.types) else { return false }
+        return super.performDragOperation(sender)
     }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {

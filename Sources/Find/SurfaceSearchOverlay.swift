@@ -2,6 +2,19 @@ import AppKit
 import Bonsplit
 import SwiftUI
 
+private extension NSView {
+    func cmuxAncestor<T: NSView>(of type: T.Type) -> T? {
+        var current: NSView? = self
+        while let view = current {
+            if let target = view as? T {
+                return target
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
 struct SurfaceSearchOverlay: View {
     let tabId: UUID
     let surfaceId: UUID
@@ -42,6 +55,7 @@ struct SurfaceSearchOverlay: View {
                         onNavigateSearch(action)
                     }
                 )
+                .accessibilityIdentifier("TerminalFindSearchTextField")
                 .frame(width: 180)
                 .padding(.leading, 8)
                 .padding(.trailing, 50)
@@ -74,7 +88,7 @@ struct SurfaceSearchOverlay: View {
                     Image(systemName: "chevron.up")
                 }
                 .buttonStyle(SearchButtonStyle())
-                .help(String(localized: "search.nextMatch.help", defaultValue: "Next match (Return)"))
+                .safeHelp(String(localized: "search.nextMatch.help", defaultValue: "Next match (Return)"))
 
                 Button(action: {
                     #if DEBUG
@@ -85,7 +99,7 @@ struct SurfaceSearchOverlay: View {
                     Image(systemName: "chevron.down")
                 }
                 .buttonStyle(SearchButtonStyle())
-                .help(String(localized: "search.previousMatch.help", defaultValue: "Previous match (Shift+Return)"))
+                .safeHelp(String(localized: "search.previousMatch.help", defaultValue: "Previous match (Shift+Return)"))
 
                 Button(action: {
                     #if DEBUG
@@ -96,7 +110,7 @@ struct SurfaceSearchOverlay: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(SearchButtonStyle())
-                .help(String(localized: "search.close.help", defaultValue: "Close (Esc)"))
+                .safeHelp(String(localized: "search.close.help", defaultValue: "Close (Esc)"))
             }
             .padding(8)
             .background(.background)
@@ -268,6 +282,7 @@ private struct SearchTextFieldRepresentable: NSViewRepresentable {
             case #selector(NSResponder.cancelOperation(_:)):
                 // Don't intercept Escape during CJK IME composition (issue #118)
                 if textView.hasMarkedText() { return false }
+                control.cmuxAncestor(of: GhosttySurfaceScrollView.self)?.beginFindEscapeSuppression()
                 parent.onEscape()
                 return true
             case #selector(NSResponder.insertNewline(_:)):
@@ -289,6 +304,7 @@ private struct SearchTextFieldRepresentable: NSViewRepresentable {
         let field = SearchNativeTextField(frame: .zero)
         field.font = .systemFont(ofSize: NSFont.systemFontSize)
         field.placeholderString = String(localized: "search.placeholder", defaultValue: "Search")
+        field.setAccessibilityIdentifier("TerminalFindSearchTextField")
         field.delegate = context.coordinator
         field.stringValue = text
         context.coordinator.parentField = field
@@ -312,10 +328,19 @@ private struct SearchTextFieldRepresentable: NSViewRepresentable {
                 field.currentEditor() != nil ||
                 ((fr as? NSTextView)?.delegate as? NSTextField) === field
             #if DEBUG
-            dlog("find.nativeField.searchFocusNotification surface=\(coordinator.parent.surfaceId.uuidString.prefix(5)) alreadyFocused=\(alreadyFocused)")
+            dlog(
+                "find.nativeField.searchFocusNotification surface=\(coordinator.parent.surfaceId.uuidString.prefix(5)) " +
+                "alreadyFocused=\(alreadyFocused) firstResponder=\(String(describing: fr))"
+            )
             #endif
             guard !alreadyFocused else { return }
-            window.makeFirstResponder(field)
+            let result = window.makeFirstResponder(field)
+#if DEBUG
+            dlog(
+                "find.nativeField.searchFocusApply surface=\(coordinator.parent.surfaceId.uuidString.prefix(5)) " +
+                "result=\(result ? 1 : 0) firstResponder=\(String(describing: window.firstResponder))"
+            )
+#endif
         }
 
         return field

@@ -54,6 +54,13 @@ final class WindowTerminalHostView: NSView {
     private var lastDragRouteSignature: String?
 #endif
 
+    deinit {
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        clearActiveDividerCursor(restoreArrow: false)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
@@ -122,44 +129,69 @@ final class WindowTerminalHostView: NSView {
         clearActiveDividerCursor(restoreArrow: true)
     }
 
+    // PERF: hitTest is called on EVERY event including keyboard. Keep non-pointer
+    // path minimal. Do not add work outside the isPointerEvent guard.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        updateDividerCursor(at: point)
-
-        if shouldPassThroughToSidebarResizer(at: point) {
-            return nil
+        let currentEvent = NSApp.currentEvent
+        let isPointerEvent: Bool
+        switch currentEvent?.type {
+        case .mouseMoved, .mouseEntered, .mouseExited,
+             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged,
+             .scrollWheel, .cursorUpdate:
+            isPointerEvent = true
+        default:
+            isPointerEvent = false
         }
 
-        if shouldPassThroughToSplitDivider(at: point) {
-            return nil
-        }
+        if isPointerEvent {
+            if shouldPassThroughToSidebarResizer(at: point) {
+                clearActiveDividerCursor(restoreArrow: false)
+                return nil
+            }
 
-        let dragPasteboardTypes = NSPasteboard(name: .drag).types
-        let eventType = NSApp.currentEvent?.type
-        let shouldPassThrough = DragOverlayRoutingPolicy.shouldPassThroughPortalHitTesting(
-            pasteboardTypes: dragPasteboardTypes,
-            eventType: eventType
-        )
-        if shouldPassThrough {
+            // Compute divider hit once and reuse for both cursor update and pass-through.
+            if let kind = splitDividerCursorKind(at: point) {
+                activeDividerCursorKind = kind
+                kind.cursor.set()
+                return nil
+            }
+
+            clearActiveDividerCursor(restoreArrow: true)
+
+            let dragPasteboardTypes = NSPasteboard(name: .drag).types
+            let eventType = currentEvent?.type
+            let shouldPassThrough = DragOverlayRoutingPolicy.shouldPassThroughPortalHitTesting(
+                pasteboardTypes: dragPasteboardTypes,
+                eventType: eventType
+            )
+            if shouldPassThrough {
+#if DEBUG
+                logDragRouteDecision(
+                    passThrough: true,
+                    eventType: eventType,
+                    pasteboardTypes: dragPasteboardTypes,
+                    hitView: nil
+                )
+#endif
+                return nil
+            }
+
+            let hitView = super.hitTest(point)
 #if DEBUG
             logDragRouteDecision(
-                passThrough: true,
-                eventType: eventType,
+                passThrough: false,
+                eventType: currentEvent?.type,
                 pasteboardTypes: dragPasteboardTypes,
-                hitView: nil
+                hitView: hitView
             )
 #endif
-            return nil
+            return hitView === self ? nil : hitView
         }
 
+        // Non-pointer event: skip divider/drag routing, just do standard hit testing.
         let hitView = super.hitTest(point)
-#if DEBUG
-        logDragRouteDecision(
-            passThrough: false,
-            eventType: eventType,
-            pasteboardTypes: dragPasteboardTypes,
-            hitView: hitView
-        )
-#endif
         return hitView === self ? nil : hitView
     }
 
@@ -692,18 +724,19 @@ final class WindowTerminalPortal: NSObject {
         return frameInContainer.width > 1 && frameInContainer.height > 1
     }
 
-    private func synchronizeAllEntriesFromExternalGeometryChange() {
+    fileprivate func synchronizeAllEntriesFromExternalGeometryChange() {
         guard ensureInstalled() else { return }
         synchronizeLayoutHierarchy()
         synchronizeAllHostedViews(excluding: nil)
 
         // During live resize, AppKit can deliver frame churn where host/container geometry
-        // settles a tick before the terminal's own scroll/surface hierarchy. Force a final
-        // in-place geometry + surface refresh for all visible entries in this window.
+        // settles a tick before the terminal's own scroll/surface hierarchy. Only force an
+        // in-place surface refresh when reconciliation actually changed terminal geometry.
         for entry in entriesByHostedId.values {
             guard let hostedView = entry.hostedView, !hostedView.isHidden else { continue }
-            hostedView.reconcileGeometryNow()
-            hostedView.refreshSurfaceNow()
+            if hostedView.reconcileGeometryNow() {
+                hostedView.refreshSurfaceNow(reason: "portal.externalGeometrySync")
+            }
         }
     }
 
@@ -726,6 +759,7 @@ final class WindowTerminalPortal: NSObject {
         guard let window else { return false }
         guard let (container, reference) = installedTargetIfStillValid(for: window) ?? installationTarget(for: window)
         else { return false }
+        let browserHost = preferredBrowserHost(in: container)
 
         if hostView.superview !== container ||
             installedContainerView !== container ||
@@ -734,7 +768,11 @@ final class WindowTerminalPortal: NSObject {
             installConstraints.removeAll()
 
             hostView.removeFromSuperview()
-            container.addSubview(hostView, positioned: .above, relativeTo: reference)
+            if let browserHost {
+                container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
+            } else {
+                container.addSubview(hostView, positioned: .above, relativeTo: reference)
+            }
 
             installConstraints = [
                 hostView.leadingAnchor.constraint(equalTo: reference.leadingAnchor),
@@ -745,6 +783,10 @@ final class WindowTerminalPortal: NSObject {
             NSLayoutConstraint.activate(installConstraints)
             installedContainerView = container
             installedReferenceView = reference
+        } else if let browserHost {
+            if !Self.isView(browserHost, above: hostView, in: container) {
+                container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
+            }
         } else if !Self.isView(hostView, above: reference, in: container) {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
         }
@@ -835,6 +877,10 @@ final class WindowTerminalPortal: NSObject {
             return false
         }
         return viewIndex > referenceIndex
+    }
+
+    private func preferredBrowserHost(in container: NSView) -> WindowBrowserHostView? {
+        container.subviews.last(where: { $0 is WindowBrowserHostView }) as? WindowBrowserHostView
     }
 
 #if DEBUG
@@ -1379,7 +1425,7 @@ final class WindowTerminalPortal: NSObject {
             hostedView.frame = targetFrame
             CATransaction.commit()
             hostedView.reconcileGeometryNow()
-            hostedView.refreshSurfaceNow()
+            hostedView.refreshSurfaceNow(reason: "portal.frameChange")
         }
 
         if hasFiniteFrame {
@@ -1418,7 +1464,7 @@ final class WindowTerminalPortal: NSObject {
             // normal frame-change refresh path won't run. Nudge geometry + redraw so newly
             // revealed terminals don't sit on a stale/blank IOSurface until later focus churn.
             hostedView.reconcileGeometryNow()
-            hostedView.refreshSurfaceNow()
+            hostedView.refreshSurfaceNow(reason: "portal.reveal")
         }
 
         if transientRecoveryReason == nil {
@@ -1589,6 +1635,7 @@ final class WindowTerminalPortal: NSObject {
 enum TerminalWindowPortalRegistry {
     private static var portalsByWindowId: [ObjectIdentifier: WindowTerminalPortal] = [:]
     private static var hostedToWindowId: [ObjectIdentifier: ObjectIdentifier] = [:]
+    private static var hasPendingExternalGeometrySyncForAllWindows = false
 #if DEBUG
     private static var blockedBindCount: Int = 0
     private static var blockedBindReasons: [String: Int] = [:]
@@ -1732,6 +1779,17 @@ enum TerminalWindowPortalRegistry {
         guard let window = anchorView.window else { return }
         let portal = portal(for: window)
         portal.synchronizeHostedViewForAnchor(anchorView)
+    }
+
+    static func scheduleExternalGeometrySynchronizeForAllWindows() {
+        guard !Self.hasPendingExternalGeometrySyncForAllWindows else { return }
+        Self.hasPendingExternalGeometrySyncForAllWindows = true
+        DispatchQueue.main.async {
+            Self.hasPendingExternalGeometrySyncForAllWindows = false
+            for portal in Self.portalsByWindowId.values {
+                portal.synchronizeAllEntriesFromExternalGeometryChange()
+            }
+        }
     }
 
     static func hideHostedView(_ hostedView: GhosttySurfaceScrollView) {
