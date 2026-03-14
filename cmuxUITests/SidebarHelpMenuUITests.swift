@@ -420,6 +420,7 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
 
         let mainWindowId = try XCTUnwrap(socketCommand("current_window")?.trimmingCharacters(in: .whitespacesAndNewlines))
         let secondaryWorkspaceId = try XCTUnwrap(okUUID(from: socketCommand("new_workspace")))
+        XCTAssertEqual(socketCommand("select_workspace \(secondaryWorkspaceId)"), "OK")
         let initialSurfaceId = try XCTUnwrap(waitForSurfaceIDs(minimumCount: 1, timeout: 5.0).first)
         let hiddenSurfaceId = try XCTUnwrap(okUUID(from: socketCommand("new_surface --type=terminal")))
 
