@@ -1687,6 +1687,7 @@ protocol BrowserSurfaceRuntime: AnyObject {
     func showDeveloperToolsConsole()
     func dismissDetachedDeveloperToolsWindows()
     func hostWindow() -> NSWindow?
+    func frameInWindowCoordinates() -> CGRect?
     func isHiddenOrHasHiddenAncestor() -> Bool
     func setAllowsFirstResponderAcquisition(_ allowed: Bool)
     func ownsResponder(_ responder: NSResponder?) -> Bool
@@ -2135,6 +2136,11 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
 
     func hostWindow() -> NSWindow? {
         webView.window
+    }
+
+    func frameInWindowCoordinates() -> CGRect? {
+        guard webView.window != nil else { return nil }
+        return webView.convert(webView.bounds, to: nil)
     }
 
     func isHiddenOrHasHiddenAncestor() -> Bool {
@@ -3055,7 +3061,7 @@ final class BrowserPanel: Panel, ObservableObject {
         installDetachedDeveloperToolsWindowCloseObserver()
         applyBrowserThemeModeIfNeeded()
         insecureHTTPAlertWindowProvider = { [weak self] in
-            self?.webView.window ?? NSApp.keyWindow ?? NSApp.mainWindow
+            self?.effectiveSurfaceWindow()
         }
 
         // Navigate to initial URL if provided
@@ -4159,7 +4165,7 @@ extension BrowserPanel {
         }
         let generation = beginSearchFocusRequest(reason: "startFind")
 #if DEBUG
-        let window = webView.window
+        let window = surfaceWindow()
         dlog(
             "browser.find.start panel=\(id.uuidString.prefix(5)) " +
             "created=\(created ? 1 : 0) render=\(shouldRenderWebView ? 1 : 0) " +
@@ -4190,7 +4196,7 @@ extension BrowserPanel {
             return
         }
 #if DEBUG
-        let window = webView.window
+        let window = surfaceWindow()
         dlog(
             "browser.find.focusNotification panel=\(id.uuidString.prefix(5)) " +
             "generation=\(generation) " +
@@ -4283,6 +4289,14 @@ extension BrowserPanel {
         runtime.hostWindow()
     }
 
+    func effectiveSurfaceWindow() -> NSWindow? {
+        surfaceWindow() ?? NSApp.keyWindow ?? NSApp.mainWindow
+    }
+
+    func surfaceFrameInWindowCoordinates() -> CGRect? {
+        runtime.frameInWindowCoordinates()
+    }
+
     func isSurfaceHiddenOrHasHiddenAncestor() -> Bool {
         runtime.isHiddenOrHasHiddenAncestor()
     }
@@ -4313,6 +4327,11 @@ extension BrowserPanel {
 
     func surfaceOwnsResponder(_ responder: NSResponder?) -> Bool {
         runtime.ownsResponder(responder)
+    }
+
+    func isSurfaceFocusedInHostWindow() -> Bool {
+        guard let window = surfaceWindow() else { return false }
+        return surfaceOwnsResponder(window.firstResponder)
     }
 
     func suppressOmnibarAutofocus(for seconds: TimeInterval) {
@@ -4807,7 +4826,7 @@ extension BrowserPanel {
     func resetInsecureHTTPAlertHooksForTesting() {
         insecureHTTPAlertFactory = { NSAlert() }
         insecureHTTPAlertWindowProvider = { [weak self] in
-            self?.webView.window ?? NSApp.keyWindow ?? NSApp.mainWindow
+            self?.effectiveSurfaceWindow()
         }
     }
 

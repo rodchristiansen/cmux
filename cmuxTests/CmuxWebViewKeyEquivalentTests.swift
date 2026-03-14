@@ -14791,6 +14791,9 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
 
         XCTAssertTrue(surface.hostWindow() === window)
         XCTAssertTrue(surface.isHiddenOrHasHiddenAncestor())
+        let frameInWindow = surface.frameInWindowCoordinates()
+        XCTAssertEqual(frameInWindow?.width ?? 0, surface.webView.bounds.width, accuracy: 0.5)
+        XCTAssertEqual(frameInWindow?.height ?? 0, surface.webView.bounds.height, accuracy: 0.5)
 
         surface.setAllowsFirstResponderAcquisition(true)
         XCTAssertTrue(webView.allowsFirstResponderAcquisition)
@@ -15351,6 +15354,7 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         var focusSurfaceResult = true
         var unfocusSurfaceResult = true
         var currentHostWindow: NSWindow?
+        var currentFrameInWindowCoordinates: CGRect?
         var currentIsHiddenOrHasHiddenAncestor = false
 
         init() {
@@ -15547,6 +15551,10 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
 
         func hostWindow() -> NSWindow? {
             currentHostWindow
+        }
+
+        func frameInWindowCoordinates() -> CGRect? {
+            currentFrameInWindowCoordinates
         }
 
         func isHiddenOrHasHiddenAncestor() -> Bool {
@@ -15787,7 +15795,9 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
     func testBrowserPanelSurfaceHelpersUseRuntimeBoundary() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panelWindow = NSWindow()
+        let panelFrame = CGRect(x: 12, y: 34, width: 210, height: 120)
         runtime.currentHostWindow = panelWindow
+        runtime.currentFrameInWindowCoordinates = panelFrame
         runtime.currentIsHiddenOrHasHiddenAncestor = true
         runtime.state = makeRuntimeState(currentURL: nil, isLoading: true)
         let panel = BrowserPanel(
@@ -15796,9 +15806,32 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         )
 
         XCTAssertTrue(panel.surfaceWindow() === panelWindow)
+        XCTAssertEqual(panel.effectiveSurfaceWindow(), panelWindow)
+        XCTAssertEqual(panel.surfaceFrameInWindowCoordinates(), panelFrame)
         XCTAssertTrue(panel.isSurfaceHiddenOrHasHiddenAncestor())
         XCTAssertTrue(panel.isSurfaceBlankForAutofocus())
         XCTAssertTrue(panel.isSurfaceLoadingNow())
+    }
+
+    func testBrowserPanelSurfaceFocusStateUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panelWindow = NSWindow()
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let responder = NSView()
+        responder.frame = contentView.bounds
+        panelWindow.contentView = contentView
+        contentView.addSubview(responder)
+        runtime.currentHostWindow = panelWindow
+        runtime.ownsResponderResult = true
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panelWindow.makeFirstResponder(responder))
+        XCTAssertTrue(panel.isSurfaceFocusedInHostWindow())
+        XCTAssertEqual(runtime.ownsResponderCallCount, 1)
+        XCTAssertTrue(runtime.lastOwnedResponder === responder)
     }
 
     func testBrowserPanelResponderPolicyUsesRuntimeBoundary() {

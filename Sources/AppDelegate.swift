@@ -6616,9 +6616,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func isWebViewFocused(_ panel: BrowserPanel) -> Bool {
-        guard let window = panel.webView.window else { return false }
-        guard let fr = window.firstResponder as? NSView else { return false }
-        return fr.isDescendant(of: panel.webView)
+        panel.isSurfaceFocusedInHostWindow()
     }
 
     private func paneIdsForGotoSplitUITest(tab: Workspace, browserPanelId: UUID) -> (browser: PaneID, terminal: PaneID)? {
@@ -6845,9 +6843,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         })();
         """
 
-        panel.webView.evaluateJavaScript(script) { [weak self] result, _ in
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            let payload = result as? [String: Any]
+            let payload = (try? await panel.evaluateJavaScript(script)) as? [String: Any]
             let focused = (payload?["focused"] as? Bool) ?? false
             let inputId = (payload?["id"] as? String) ?? ""
             let secondaryInputId = (payload?["secondaryId"] as? String) ?? ""
@@ -6859,8 +6857,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let readyState = (payload?["readyState"] as? String) ?? ""
             var secondaryClickOffsetX = -1.0
             var secondaryClickOffsetY = -1.0
-            if let window = panel.webView.window {
-                let webFrame = panel.webView.convert(panel.webView.bounds, to: nil)
+            if let window = panel.surfaceWindow(),
+               let webFrame = panel.surfaceFrameInWindowCoordinates() {
                 let contentHeight = Double(window.contentView?.bounds.height ?? 0)
                 if webFrame.width > 1,
                    webFrame.height > 1,
@@ -6995,8 +6993,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         })();
         """
 
-        panel.webView.evaluateJavaScript(script) { result, _ in
-            let payload = result as? [String: Any]
+        Task { @MainActor in
+            let payload = (try? await panel.evaluateJavaScript(script)) as? [String: Any]
             completion([
                 "id": (payload?["id"] as? String) ?? "",
                 "tag": (payload?["tag"] as? String) ?? "",
