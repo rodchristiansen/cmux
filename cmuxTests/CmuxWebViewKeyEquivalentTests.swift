@@ -15263,6 +15263,39 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(lastCustomUserAgent, BrowserUserAgentSettings.safariUserAgent)
     }
 
+    func testBrowserPanelDeveloperToolsVisibilityUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.currentDeveloperToolsVisibilityState = .hidden
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        XCTAssertEqual(runtime.revealDeveloperToolsCallCount, 1)
+        XCTAssertEqual(runtime.lastRevealDeveloperToolsAttachIfNeeded, true)
+        XCTAssertTrue(panel.isDeveloperToolsVisible())
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertTrue(panel.hideDeveloperTools())
+        XCTAssertEqual(runtime.concealDeveloperToolsCallCount, 1)
+        XCTAssertFalse(panel.isDeveloperToolsVisible())
+    }
+
+    func testBrowserPanelDeveloperToolsConsoleUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.currentDeveloperToolsVisibilityState = .visible
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.showDeveloperToolsConsole())
+        XCTAssertEqual(runtime.revealDeveloperToolsCallCount, 0)
+        XCTAssertEqual(runtime.showDeveloperToolsConsoleCallCount, 1)
+        XCTAssertTrue(panel.isDeveloperToolsVisible())
+    }
+
     func testBrowserPanelPreferredURLStringForOmnibarUsesRuntimeStateBeforePublishedCurrentURL() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panel = BrowserPanel(
