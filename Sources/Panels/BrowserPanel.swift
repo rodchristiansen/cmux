@@ -1300,6 +1300,7 @@ protocol BrowserSurfaceRuntime: AnyObject {
     ) -> WKWebView
 
     func setLastAttemptedNavigationURL(_ url: URL?)
+    func applyBrowserThemeMode(_ mode: BrowserThemeMode)
     func setCustomUserAgent(_ customUserAgent: String)
     func setUnderPageBackgroundColor(_ color: NSColor)
     @discardableResult
@@ -1345,6 +1346,7 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
     private let navigationDelegate = BrowserNavigationDelegate()
     private let uiDelegate = BrowserUIDelegate()
     private let downloadDelegate = BrowserDownloadDelegate()
+    private var browserThemeMode: BrowserThemeMode = .system
     private var lastEmittedState: BrowserSurfaceRuntimeState?
     var eventHandlers = BrowserSurfaceRuntimeEventHandlers() {
         didSet {
@@ -1402,12 +1404,18 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         webView = replacement
         webViewInstanceID = UUID()
         bindWebView(replacement)
+        applyStoredBrowserThemeMode(to: replacement)
         emitStateChange(force: true)
         return replacement
     }
 
     func setLastAttemptedNavigationURL(_ url: URL?) {
         navigationDelegate.lastAttemptedURL = url
+    }
+
+    func applyBrowserThemeMode(_ mode: BrowserThemeMode) {
+        browserThemeMode = mode
+        applyStoredBrowserThemeMode(to: webView)
     }
 
     func setCustomUserAgent(_ customUserAgent: String) {
@@ -1559,6 +1567,28 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         }
     }
 
+    private func applyStoredBrowserThemeMode(to webView: WKWebView) {
+        switch browserThemeMode {
+        case .system:
+            webView.appearance = nil
+        case .light:
+            webView.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            webView.appearance = NSAppearance(named: .darkAqua)
+        }
+
+        let script = Self.browserThemeModeScript(mode: browserThemeMode)
+        webView.evaluateJavaScript(script) { _, error in
+#if DEBUG
+            if let error {
+                dlog("browser.themeMode error=\(error.localizedDescription)")
+            }
+#else
+            _ = error
+#endif
+        }
+    }
+
     private func applyEventHandlersToCurrentWebView() {
         applyEventHandlers(to: webView)
     }
@@ -1612,6 +1642,46 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
 
     private func isCurrentWebView(_ candidate: WKWebView) -> Bool {
         candidate === webView
+    }
+
+    private static func browserThemeModeScript(mode: BrowserThemeMode) -> String {
+        let colorSchemeLiteral: String
+        switch mode {
+        case .system:
+            colorSchemeLiteral = "null"
+        case .light:
+            colorSchemeLiteral = "'light'"
+        case .dark:
+            colorSchemeLiteral = "'dark'"
+        }
+
+        return """
+        (() => {
+          const metaId = 'cmux-browser-theme-mode-meta';
+          const colorScheme = \(colorSchemeLiteral);
+          const root = document.documentElement || document.body;
+          if (!root) return;
+
+          let meta = document.getElementById(metaId);
+          if (colorScheme) {
+            root.style.setProperty('color-scheme', colorScheme, 'important');
+            root.setAttribute('data-cmux-browser-theme', colorScheme);
+            if (!meta) {
+              meta = document.createElement('meta');
+              meta.id = metaId;
+              meta.name = 'color-scheme';
+              (document.head || root).appendChild(meta);
+            }
+            meta.setAttribute('content', colorScheme);
+          } else {
+            root.style.removeProperty('color-scheme');
+            root.removeAttribute('data-cmux-browser-theme');
+            if (meta) {
+              meta.remove();
+            }
+          }
+        })();
+        """
     }
 
     private func emitStateChange(force: Bool = false) {
@@ -2347,9 +2417,7 @@ final class BrowserPanel: Panel, ObservableObject {
             handleWebViewLoadingChanged(state.isLoading)
         }
         let trimmedTitle = (state.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedTitle.isEmpty {
-            pageTitle = trimmedTitle
-        }
+        pageTitle = trimmedTitle
         nativeCanGoBack = state.canGoBack
         nativeCanGoForward = state.canGoForward
         estimatedProgress = state.estimatedProgress
@@ -4375,63 +4443,7 @@ extension BrowserPanel {
 
 private extension BrowserPanel {
     func applyBrowserThemeModeIfNeeded() {
-        switch browserThemeMode {
-        case .system:
-            webView.appearance = nil
-        case .light:
-            webView.appearance = NSAppearance(named: .aqua)
-        case .dark:
-            webView.appearance = NSAppearance(named: .darkAqua)
-        }
-
-        let script = makeBrowserThemeModeScript(mode: browserThemeMode)
-        webView.evaluateJavaScript(script) { _, error in
-            #if DEBUG
-            if let error {
-                dlog("browser.themeMode error=\(error.localizedDescription)")
-            }
-            #endif
-        }
-    }
-
-    func makeBrowserThemeModeScript(mode: BrowserThemeMode) -> String {
-        let colorSchemeLiteral: String
-        switch mode {
-        case .system:
-            colorSchemeLiteral = "null"
-        case .light:
-            colorSchemeLiteral = "'light'"
-        case .dark:
-            colorSchemeLiteral = "'dark'"
-        }
-
-        return """
-        (() => {
-          const metaId = 'cmux-browser-theme-mode-meta';
-          const colorScheme = \(colorSchemeLiteral);
-          const root = document.documentElement || document.body;
-          if (!root) return;
-
-          let meta = document.getElementById(metaId);
-          if (colorScheme) {
-            root.style.setProperty('color-scheme', colorScheme, 'important');
-            root.setAttribute('data-cmux-browser-theme', colorScheme);
-            if (!meta) {
-              meta = document.createElement('meta');
-              meta.id = metaId;
-              meta.name = 'color-scheme';
-              (document.head || root).appendChild(meta);
-            }
-            meta.setAttribute('content', colorScheme);
-          } else {
-            root.style.removeProperty('color-scheme');
-            root.removeAttribute('data-cmux-browser-theme');
-            if (meta) {
-              meta.remove();
-            }
-          }
-        })();
-        """
+        runtime.applyBrowserThemeMode(browserThemeMode)
     }
 
     func scheduleDeveloperToolsRestoreRetry() {

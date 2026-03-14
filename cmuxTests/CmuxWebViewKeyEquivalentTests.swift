@@ -14566,7 +14566,7 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertTrue(first.webView.configuration.processPool === second.webView.configuration.processPool)
     }
 
-    func testSurfaceAppliesConfigurationToCreatedWebView() {
+    func testSurfaceAppliesConfigurationToCreatedWebView() async throws {
         let configuration = makeConfiguration()
         let surface = LocalWebKitBrowserSurfaceRuntime(
             processPool: WKProcessPool(),
@@ -14579,9 +14579,30 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertEqual(webView.customUserAgent, configuration.customUserAgent)
         assertColorsEqual(webView.underPageBackgroundColor, configuration.underPageBackgroundColor)
         XCTAssertEqual(
-            webView.configuration.userContentController.userScripts.map(\.source),
-            configuration.bootstrapUserScriptSources
+            webView.configuration.userContentController.userScripts.count,
+            configuration.bootstrapUserScriptSources.count
         )
+        XCTAssertTrue(
+            webView.configuration.userContentController.userScripts.allSatisfy {
+                $0.injectionTime == .atDocumentStart && !$0.isForMainFrameOnly
+            }
+        )
+
+        let navigationFinished = expectation(description: "bootstrap scripts ran")
+        surface.eventHandlers = BrowserSurfaceRuntimeEventHandlers(
+            didFinishNavigation: {
+                navigationFinished.fulfill()
+            }
+        )
+        webView.loadHTMLString("<html><body>runtime</body></html>", baseURL: nil)
+        await fulfillment(of: [navigationFinished], timeout: 5)
+
+        let firstScriptAppliedResult = try await surface.evaluateJavaScript("window.__cmuxRuntimeTestOne === true") as? Bool
+        let secondScriptAppliedResult = try await surface.evaluateJavaScript("window.__cmuxRuntimeTestTwo === true") as? Bool
+        let firstScriptApplied = try XCTUnwrap(firstScriptAppliedResult)
+        let secondScriptApplied = try XCTUnwrap(secondScriptAppliedResult)
+        XCTAssertTrue(firstScriptApplied)
+        XCTAssertTrue(secondScriptApplied)
     }
 
     func testReplaceWebViewCreatesNewInstanceAndPreservesRequestedPageZoom() {
@@ -14609,6 +14630,21 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertEqual(replacement.pageZoom, 1.75, accuracy: 0.001)
         XCTAssertEqual(replacement.customUserAgent, replacementConfiguration.customUserAgent)
         assertColorsEqual(replacement.underPageBackgroundColor, replacementConfiguration.underPageBackgroundColor)
+    }
+
+    func testReplaceWebViewPreservesAppliedBrowserThemeMode() {
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+
+        surface.applyBrowserThemeMode(.dark)
+        let replacement = surface.replaceWebView(
+            using: makeConfiguration(customUserAgent: "cmux-runtime-test-theme"),
+            pageZoom: nil
+        )
+
+        XCTAssertEqual(replacement.appearance?.bestMatch(from: [.darkAqua, .aqua]), .darkAqua)
     }
 
     func testStateObserverReceivesImmediateAndMutatedRuntimeState() {
@@ -14716,6 +14752,235 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         replacementWebView.onContextMenuDownloadStateChanged?(false)
         XCTAssertEqual(finishedNavigationCount, 2)
         XCTAssertEqual(downloadStates, [true, false])
+    }
+}
+
+@MainActor
+final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
+    private final class RecordingBrowserSurfaceRuntime: BrowserSurfaceRuntime {
+        let backendKind: BrowserRuntimeBackendKind = .localWebKit
+        var webView: WKWebView
+        var webViewInstanceID = UUID()
+        var state: BrowserSurfaceRuntimeState
+        var eventHandlers = BrowserSurfaceRuntimeEventHandlers()
+        var onStateChange: ((BrowserSurfaceRuntimeState) -> Void)?
+
+        private(set) var lastAttemptedNavigationURL: URL?
+        private(set) var appliedThemeModes: [BrowserThemeMode] = []
+        private(set) var lastCustomUserAgent: String?
+        private(set) var lastUnderPageBackgroundColor: NSColor?
+        private(set) var loadedRequests: [URLRequest] = []
+        private(set) var stopLoadingCallCount = 0
+
+        init() {
+            let configuration = WKWebViewConfiguration()
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            self.webView = webView
+            self.state = BrowserSurfaceRuntimeState(
+                currentURL: nil,
+                title: nil,
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false,
+                estimatedProgress: 0,
+                pageZoom: webView.pageZoom
+            )
+        }
+
+        @discardableResult
+        func replaceWebView(
+            using configuration: BrowserRuntimeSurfaceConfiguration,
+            pageZoom: CGFloat?
+        ) -> WKWebView {
+            let replacement = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+            if let pageZoom {
+                replacement.pageZoom = pageZoom
+            }
+            webView = replacement
+            webViewInstanceID = UUID()
+            state = BrowserSurfaceRuntimeState(
+                currentURL: state.currentURL,
+                title: state.title,
+                isLoading: state.isLoading,
+                canGoBack: state.canGoBack,
+                canGoForward: state.canGoForward,
+                estimatedProgress: state.estimatedProgress,
+                pageZoom: replacement.pageZoom
+            )
+            return replacement
+        }
+
+        func setLastAttemptedNavigationURL(_ url: URL?) {
+            lastAttemptedNavigationURL = url
+        }
+
+        func applyBrowserThemeMode(_ mode: BrowserThemeMode) {
+            appliedThemeModes.append(mode)
+            switch mode {
+            case .system:
+                webView.appearance = nil
+            case .light:
+                webView.appearance = NSAppearance(named: .aqua)
+            case .dark:
+                webView.appearance = NSAppearance(named: .darkAqua)
+            }
+        }
+
+        func setCustomUserAgent(_ customUserAgent: String) {
+            lastCustomUserAgent = customUserAgent
+            webView.customUserAgent = customUserAgent
+        }
+
+        func setUnderPageBackgroundColor(_ color: NSColor) {
+            lastUnderPageBackgroundColor = color
+            webView.underPageBackgroundColor = color
+        }
+
+        @discardableResult
+        func loadRequest(_ request: URLRequest) -> WKNavigation? {
+            loadedRequests.append(request)
+            return nil
+        }
+
+        func loadHTMLString(_ html: String, baseURL: URL?) {}
+        func goBack() {}
+        func goForward() {}
+        func reload() {}
+
+        func stopLoading() {
+            stopLoadingCallCount += 1
+        }
+
+        func setPageZoom(_ pageZoom: CGFloat) {
+            state = BrowserSurfaceRuntimeState(
+                currentURL: state.currentURL,
+                title: state.title,
+                isLoading: state.isLoading,
+                canGoBack: state.canGoBack,
+                canGoForward: state.canGoForward,
+                estimatedProgress: state.estimatedProgress,
+                pageZoom: pageZoom
+            )
+        }
+
+        func takeSnapshot(completion: @escaping (NSImage?) -> Void) {
+            completion(nil)
+        }
+
+        func evaluateJavaScript(_ script: String) async throws -> Any? {
+            nil
+        }
+
+        func sessionHistorySnapshot() -> (backHistoryURLs: [URL], forwardHistoryURLs: [URL]) {
+            ([], [])
+        }
+    }
+
+    private final class RecordingBrowserSurfaceRuntimeFactory: BrowserSurfaceRuntimeFactory {
+        let runtime: RecordingBrowserSurfaceRuntime
+        private(set) var configurations: [BrowserRuntimeSurfaceConfiguration] = []
+
+        init(runtime: RecordingBrowserSurfaceRuntime) {
+            self.runtime = runtime
+        }
+
+        func makeSurface(using configuration: BrowserRuntimeSurfaceConfiguration) -> any BrowserSurfaceRuntime {
+            configurations.append(configuration)
+            return runtime
+        }
+    }
+
+    private func assertColorsEqual(
+        _ lhs: NSColor?,
+        _ rhs: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let lhsComponents = lhs?.usingColorSpace(.deviceRGB)?.cgColor.components
+        let rhsComponents = rhs.usingColorSpace(.deviceRGB)?.cgColor.components
+        XCTAssertNotNil(lhsComponents, file: file, line: line)
+        XCTAssertNotNil(rhsComponents, file: file, line: line)
+        guard let lhsComponents, let rhsComponents else { return }
+        XCTAssertEqual(lhsComponents.count, rhsComponents.count, file: file, line: line)
+        for (left, right) in zip(lhsComponents, rhsComponents) {
+            XCTAssertEqual(left, right, accuracy: 0.01, file: file, line: line)
+        }
+    }
+
+    func testBrowserPanelConfiguresRuntimeCallbacksOnInit() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let factory = RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+
+        _ = BrowserPanel(workspaceId: UUID(), runtimeFactory: factory)
+
+        XCTAssertEqual(factory.configurations.count, 1)
+        XCTAssertNotNil(runtime.eventHandlers.didFinishNavigation)
+        XCTAssertNotNil(runtime.eventHandlers.didFailNavigation)
+        XCTAssertNotNil(runtime.eventHandlers.didTerminateWebContentProcess)
+        XCTAssertNotNil(runtime.eventHandlers.requestNavigation)
+        XCTAssertNotNil(runtime.eventHandlers.downloadStateChanged)
+        XCTAssertNotNil(runtime.onStateChange)
+    }
+
+    func testBrowserPanelRoutesThemeModeThroughRuntime() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let factory = RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        let panel = BrowserPanel(workspaceId: UUID(), runtimeFactory: factory)
+
+        panel.setBrowserThemeMode(.dark)
+        panel.setBrowserThemeMode(.light)
+
+        let appliedThemeModes = Array(runtime.appliedThemeModes.suffix(2))
+        let appearanceMatch = panel.webView.appearance?.bestMatch(from: [.aqua, .darkAqua])
+
+        XCTAssertEqual(appliedThemeModes, [.dark, .light])
+        XCTAssertEqual(appearanceMatch, .aqua)
+    }
+
+    func testBrowserPanelNavigationUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let url = URL(string: "https://example.com/runtime")!
+
+        panel.navigate(to: url, recordTypedNavigation: false)
+
+        let shouldRenderWebView = panel.shouldRenderWebView
+        let lastAttemptedNavigationURL = runtime.lastAttemptedNavigationURL
+        let loadedRequestURL = runtime.loadedRequests.last?.url
+        let lastCustomUserAgent = runtime.lastCustomUserAgent
+
+        XCTAssertTrue(shouldRenderWebView)
+        XCTAssertEqual(lastAttemptedNavigationURL, url)
+        XCTAssertEqual(loadedRequestURL, url)
+        XCTAssertEqual(lastCustomUserAgent, BrowserUserAgentSettings.safariUserAgent)
+    }
+
+    func testBrowserPanelBackgroundRefreshUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let updatedColor = NSColor(srgbRed: 0.18, green: 0.29, blue: 0.44, alpha: 1.0)
+        let updatedOpacity = 0.57
+
+        NotificationCenter.default.post(
+            name: .ghosttyDefaultBackgroundDidChange,
+            object: nil,
+            userInfo: [
+                GhosttyNotificationKey.backgroundColor: updatedColor,
+                GhosttyNotificationKey.backgroundOpacity: updatedOpacity
+            ]
+        )
+
+        assertColorsEqual(
+            runtime.lastUnderPageBackgroundColor,
+            updatedColor.withAlphaComponent(updatedOpacity)
+        )
+        _ = panel
     }
 }
 
