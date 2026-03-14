@@ -1038,7 +1038,7 @@ final class MultiWindowNotificationsUITests: XCTestCase {
     }
 
     private func socketCommand(_ cmd: String, responseTimeout: TimeInterval = 2.0) -> String? {
-        if let response = ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendLine(cmd) {
+        if let response = UITestControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendLine(cmd) {
             return response
         }
         return socketCommandViaNetcat(cmd, responseTimeout: responseTimeout)
@@ -1086,101 +1086,6 @@ final class MultiWindowNotificationsUITests: XCTestCase {
         }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-
-    private final class ControlSocketClient {
-        private let path: String
-        private let responseTimeout: TimeInterval
-
-        init(path: String, responseTimeout: TimeInterval = 2.0) {
-            self.path = path
-            self.responseTimeout = responseTimeout
-        }
-
-        func sendLine(_ line: String) -> String? {
-            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-            guard fd >= 0 else { return nil }
-            defer { close(fd) }
-
-#if os(macOS)
-            var noSigPipe: Int32 = 1
-            _ = withUnsafePointer(to: &noSigPipe) { ptr in
-                setsockopt(
-                    fd,
-                    SOL_SOCKET,
-                    SO_NOSIGPIPE,
-                    ptr,
-                    socklen_t(MemoryLayout<Int32>.size)
-                )
-            }
-#endif
-
-            var addr = sockaddr_un()
-            memset(&addr, 0, MemoryLayout<sockaddr_un>.size)
-            addr.sun_family = sa_family_t(AF_UNIX)
-
-            let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
-            let bytes = Array(path.utf8CString)
-            guard bytes.count <= maxLen else { return nil }
-            withUnsafeMutablePointer(to: &addr.sun_path) { p in
-                let raw = UnsafeMutableRawPointer(p).assumingMemoryBound(to: CChar.self)
-                memset(raw, 0, maxLen)
-                for i in 0..<bytes.count {
-                    raw[i] = bytes[i]
-                }
-            }
-
-            let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
-            let addrLen = socklen_t(pathOffset + bytes.count)
-#if os(macOS)
-            addr.sun_len = UInt8(min(Int(addrLen), 255))
-#endif
-
-            let connected = withUnsafePointer(to: &addr) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    connect(fd, sa, addrLen)
-                }
-            }
-            guard connected == 0 else { return nil }
-
-            let payload = line + "\n"
-            let wrote: Bool = payload.withCString { cstr in
-                var remaining = strlen(cstr)
-                var p = UnsafeRawPointer(cstr)
-                while remaining > 0 {
-                    let n = write(fd, p, remaining)
-                    if n <= 0 { return false }
-                    remaining -= n
-                    p = p.advanced(by: n)
-                }
-                return true
-            }
-            guard wrote else { return nil }
-
-            let deadline = Date().addingTimeInterval(responseTimeout)
-            var buf = [UInt8](repeating: 0, count: 4096)
-            var accum = ""
-            while Date() < deadline {
-                var pollDescriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-                let ready = poll(&pollDescriptor, 1, 100)
-                if ready < 0 {
-                    return nil
-                }
-                if ready == 0 {
-                    continue
-                }
-                let n = read(fd, &buf, buf.count)
-                if n <= 0 { break }
-                if let chunk = String(bytes: buf[0..<n], encoding: .utf8) {
-                    accum.append(chunk)
-                    if let idx = accum.firstIndex(of: "\n") {
-                        return String(accum[..<idx])
-                    }
-                }
-            }
-            return accum.isEmpty ? nil : accum.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-    }
-
     private func readCurrentTerminalText() -> String? {
         guard let response = socketCommand("read_terminal_text"), response.hasPrefix("OK ") else {
             return nil

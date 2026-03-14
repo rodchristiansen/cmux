@@ -187,7 +187,7 @@ final class SplitCloseRightBlankRegressionUITests: XCTestCase {
     private var socketPath = ""
     private var diagnosticsPath = ""
     private var screenshotDir = ""
-    private var socketClient: ControlSocketClient?
+    private var socketClient: UITestControlSocketClient?
 
     override func setUp() {
         super.setUp()
@@ -954,7 +954,7 @@ final class SplitCloseRightBlankRegressionUITests: XCTestCase {
 
     private func socketCommand(_ cmd: String) -> String? {
         if socketClient == nil {
-            socketClient = ControlSocketClient(path: socketPath)
+            socketClient = UITestControlSocketClient(path: socketPath)
         }
         if let v = socketClient?.sendLine(cmd) {
             return v
@@ -998,79 +998,5 @@ final class SplitCloseRightBlankRegressionUITests: XCTestCase {
         }
         let trimmed = outStr.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private final class ControlSocketClient {
-        private let path: String
-
-        init(path: String) {
-            self.path = path
-        }
-
-        func sendLine(_ line: String) -> String? {
-            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-            guard fd >= 0 else { return nil }
-            defer { close(fd) }
-
-            var addr = sockaddr_un()
-            // Zero-init is important because we compute a variable sockaddr length and
-            // the kernel may validate `sun_len` on some macOS versions.
-            memset(&addr, 0, MemoryLayout<sockaddr_un>.size)
-            addr.sun_family = sa_family_t(AF_UNIX)
-
-            let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
-            let bytes = Array(path.utf8CString) // includes null terminator
-            guard bytes.count <= maxLen else { return nil }
-            withUnsafeMutablePointer(to: &addr.sun_path) { p in
-                let raw = UnsafeMutableRawPointer(p).assumingMemoryBound(to: CChar.self)
-                memset(raw, 0, maxLen)
-                for i in 0..<bytes.count {
-                    raw[i] = bytes[i]
-                }
-            }
-
-            // Darwin expects a sockaddr length that includes only the fields up to the pathname.
-            let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
-            let addrLen = socklen_t(pathOffset + bytes.count)
-#if os(macOS)
-            // `sun_len` exists on Darwin/BSD.
-            addr.sun_len = UInt8(min(Int(addrLen), 255))
-#endif
-
-            let ok = withUnsafePointer(to: &addr) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    connect(fd, sa, addrLen)
-                }
-            }
-            guard ok == 0 else { return nil }
-
-            let payload = line + "\n"
-            let wrote: Bool = payload.withCString { cstr in
-                var remaining = strlen(cstr)
-                var p = UnsafeRawPointer(cstr)
-                while remaining > 0 {
-                    let n = write(fd, p, remaining)
-                    if n <= 0 { return false }
-                    remaining -= n
-                    p = p.advanced(by: n)
-                }
-                return true
-            }
-            guard wrote else { return nil }
-
-            var buf = [UInt8](repeating: 0, count: 4096)
-            var accum = ""
-            while true {
-                let n = read(fd, &buf, buf.count)
-                if n <= 0 { break }
-                if let chunk = String(bytes: buf[0..<n], encoding: .utf8) {
-                    accum.append(chunk)
-                    if let idx = accum.firstIndex(of: "\n") {
-                        return String(accum[..<idx])
-                    }
-                }
-            }
-            return accum.isEmpty ? nil : accum.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
     }
 }
