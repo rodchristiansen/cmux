@@ -143,6 +143,44 @@ final class BrowserKeyboardCaptureUITests: XCTestCase {
         )
     }
 
+    func testBracketWorkspaceAndSurfaceShortcutsRouteToPageWhenKeyboardCaptured() {
+        let app = launchWithBrowserSetup()
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+        guard let expectedBrowserPaneId = setup["browserPaneId"], !expectedBrowserPaneId.isEmpty else {
+            XCTFail("Missing browserPaneId in goto_split setup data")
+            return
+        }
+
+        enterKeyboardCaptureMode(app)
+
+        for probe in bracketShortcutProbes() {
+            let baselineKeydownCount = pageKeydownCount()
+            app.typeKey(probe.key, modifierFlags: probe.modifiers)
+
+            XCTAssertTrue(
+                waitForDataMatch(timeout: 5.0) { data in
+                    let count = Int(data["browserKeyboardCapturePageKeydownCount"] ?? "") ?? 0
+                    return count >= baselineKeydownCount + 1 &&
+                        data["browserKeyboardCapturePageLastMeta"] == "true" &&
+                        data["browserKeyboardCapturePageLastShift"] == (probe.expectShift ? "true" : "false") &&
+                        data["browserKeyboardCapturePageLastControl"] == (probe.expectControl ? "true" : "false")
+                },
+                "Expected \(probe.name) to reach the page while keyboard capture is active. data=\(String(describing: loadData()))"
+            )
+
+            let snapshot = loadData() ?? [:]
+            XCTAssertEqual(
+                snapshot["focusedPaneId"],
+                expectedBrowserPaneId,
+                "Expected browser pane focus to remain unchanged for \(probe.name). data=\(snapshot)"
+            )
+        }
+    }
+
     private func launchWithBrowserSetup(enableFocusShortcuts: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
@@ -205,6 +243,47 @@ final class BrowserKeyboardCaptureUITests: XCTestCase {
 
     private func pageKeydownCount() -> Int {
         Int(loadData()?["browserKeyboardCapturePageKeydownCount"] ?? "") ?? 0
+    }
+
+    private struct BracketShortcutProbe {
+        let name: String
+        let key: String
+        let modifiers: XCUIElement.KeyModifierFlags
+        let expectShift: Bool
+        let expectControl: Bool
+    }
+
+    private func bracketShortcutProbes() -> [BracketShortcutProbe] {
+        [
+            BracketShortcutProbe(
+                name: "Cmd+Shift+[",
+                key: "[",
+                modifiers: [.command, .shift],
+                expectShift: true,
+                expectControl: false
+            ),
+            BracketShortcutProbe(
+                name: "Cmd+Shift+]",
+                key: "]",
+                modifiers: [.command, .shift],
+                expectShift: true,
+                expectControl: false
+            ),
+            BracketShortcutProbe(
+                name: "Cmd+Ctrl+[",
+                key: "[",
+                modifiers: [.command, .control],
+                expectShift: false,
+                expectControl: true
+            ),
+            BracketShortcutProbe(
+                name: "Cmd+Ctrl+]",
+                key: "]",
+                modifiers: [.command, .control],
+                expectShift: false,
+                expectControl: true
+            )
+        ]
     }
 
     private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
