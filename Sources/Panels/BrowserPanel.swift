@@ -1900,6 +1900,9 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
             let attachSelector = NSSelectorFromString("attach")
             if inspector.responds(to: attachSelector) {
                 inspector.cmuxCallVoid(selector: attachSelector)
+                if inspector.cmuxCallBool(selector: isVisibleSelector) ?? false {
+                    return true
+                }
             }
         }
 
@@ -3701,7 +3704,7 @@ extension BrowserPanel {
             forceDeveloperToolsRefreshOnNextAttach = false
         }
 
-        if visible != targetVisible {
+        if source.hasPrefix("toggle"), visible != targetVisible {
             scheduleDeveloperToolsTransitionSettle(source: source)
         } else {
             developerToolsTransitionTargetVisible = nil
