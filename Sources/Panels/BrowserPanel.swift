@@ -2995,7 +2995,7 @@ final class BrowserPanel: Panel, ObservableObject {
             },
             didTerminateWebContentProcess: { [weak self] in
                 guard let self else { return }
-                self.replaceWebViewAfterContentProcessTermination(for: self.webView)
+                self.replaceWebViewAfterContentProcessTermination()
             },
             openInNewTab: { [weak self] url in
                 self?.openLinkInNewTab(url: url)
@@ -3101,17 +3101,16 @@ final class BrowserPanel: Panel, ObservableObject {
         refreshNavigationAvailability()
     }
 
-    private func replaceWebViewAfterContentProcessTermination(for terminatedWebView: WKWebView) {
-        guard terminatedWebView === webView else { return }
-
+    private func replaceWebViewAfterContentProcessTermination() {
         let wasRenderable = shouldRenderWebView
-        let restoreURL = terminatedWebView.url ?? currentURL
+        let restoreURL = runtime.state.currentURL ?? currentURL
         let restoreURLString = restoreURL?.absoluteString
         let shouldRestoreURL = wasRenderable && restoreURLString != nil && restoreURLString != blankURLString
         let history = sessionNavigationHistorySnapshot()
         let historyCurrentURL = preferredURLStringForOmnibar()
-        let desiredZoom = max(minPageZoom, min(maxPageZoom, terminatedWebView.pageZoom))
+        let desiredZoom = max(minPageZoom, min(maxPageZoom, runtime.state.pageZoom))
         let restoreDevTools = preferredDeveloperToolsVisible
+        let retiredWebView = webView
 
 #if DEBUG
         dlog(
@@ -3125,8 +3124,8 @@ final class BrowserPanel: Panel, ObservableObject {
         faviconTask?.cancel()
         faviconTask = nil
         faviconRefreshGeneration &+= 1
-        BrowserWindowPortalRegistry.detach(webView: terminatedWebView)
-        terminatedWebView.stopLoading()
+        BrowserWindowPortalRegistry.detach(webView: retiredWebView)
+        runtime.stopLoading()
 
         _ = replaceRuntimeWebView(pageZoom: desiredZoom)
         shouldRenderWebView = wasRenderable
@@ -3166,7 +3165,7 @@ final class BrowserPanel: Panel, ObservableObject {
 
 #if DEBUG
     func debugSimulateWebContentProcessTermination() {
-        replaceWebViewAfterContentProcessTermination(for: webView)
+        replaceWebViewAfterContentProcessTermination()
     }
 #endif
 

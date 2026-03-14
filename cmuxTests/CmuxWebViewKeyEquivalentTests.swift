@@ -15190,6 +15190,8 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         private(set) var lastCustomUserAgent: String?
         private(set) var lastUnderPageBackgroundColor: NSColor?
         private(set) var loadedRequests: [URLRequest] = []
+        private(set) var replaceWebViewCallCount = 0
+        private(set) var lastReplaceWebViewPageZoom: CGFloat?
         private(set) var stopLoadingCallCount = 0
         private(set) var captureAddressBarPageFocusCallCount = 0
         private(set) var restoreAddressBarPageFocusCallCount = 0
@@ -15252,6 +15254,8 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             using configuration: BrowserRuntimeSurfaceConfiguration,
             pageZoom: CGFloat?
         ) -> WKWebView {
+            replaceWebViewCallCount += 1
+            lastReplaceWebViewPageZoom = pageZoom
             let replacement = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
             if let pageZoom {
                 replacement.pageZoom = pageZoom
@@ -15542,6 +15546,26 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(lastAttemptedNavigationURL, url)
         XCTAssertEqual(loadedRequestURL, url)
         XCTAssertEqual(lastCustomUserAgent, BrowserUserAgentSettings.safariUserAgent)
+    }
+
+    func testBrowserPanelProcessTerminationReplacementUsesRuntimeStateBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let initialURL = URL(string: "https://example.com/initial")!
+        let replacementURL = URL(string: "https://example.com/runtime-current")!
+
+        panel.navigate(to: initialURL, recordTypedNavigation: false)
+        runtime.state = makeRuntimeState(currentURL: replacementURL, pageZoom: 1.6)
+
+        runtime.eventHandlers.didTerminateWebContentProcess?()
+
+        XCTAssertEqual(runtime.stopLoadingCallCount, 1)
+        XCTAssertEqual(runtime.replaceWebViewCallCount, 1)
+        XCTAssertEqual(runtime.lastReplaceWebViewPageZoom ?? 0, 1.6, accuracy: 0.001)
+        XCTAssertEqual(runtime.loadedRequests.last?.url, replacementURL)
     }
 
     func testBrowserPanelFocusUsesRuntimeBoundary() {
