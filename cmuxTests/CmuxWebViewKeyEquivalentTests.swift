@@ -14525,6 +14525,9 @@ final class GhosttyTerminalViewVisibilityPolicyTests: XCTestCase {
 
 @MainActor
 final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
+    private final class TestNavigationDelegate: NSObject, WKNavigationDelegate {}
+    private final class TestUIDelegate: NSObject, WKUIDelegate {}
+
     private func assertColorsEqual(
         _ lhs: NSColor?,
         _ rhs: NSColor,
@@ -14609,6 +14612,60 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertEqual(replacement.pageZoom, 1.75, accuracy: 0.001)
         XCTAssertEqual(replacement.customUserAgent, replacementConfiguration.customUserAgent)
         assertColorsEqual(replacement.underPageBackgroundColor, replacementConfiguration.underPageBackgroundColor)
+    }
+
+    func testStateObserverReceivesImmediateAndMutatedRuntimeState() {
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+        var observedStates: [BrowserSurfaceRuntimeState] = []
+
+        surface.onStateChange = { state in
+            observedStates.append(state)
+        }
+        surface.setPageZoom(1.4)
+
+        XCTAssertEqual(observedStates.count, 2)
+        XCTAssertEqual(observedStates.first?.currentURL, nil)
+        XCTAssertEqual(observedStates.first?.pageZoom ?? 0, 1.0, accuracy: 0.001)
+        XCTAssertEqual(observedStates.last?.pageZoom ?? 0, 1.4, accuracy: 0.001)
+    }
+
+    func testReplaceWebViewRebindsDelegatesAndDownloadHandler() {
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+        let navigationDelegate = TestNavigationDelegate()
+        let uiDelegate = TestUIDelegate()
+        var downloadStates: [Bool] = []
+
+        surface.configureDelegates(
+            navigationDelegate: navigationDelegate,
+            uiDelegate: uiDelegate
+        )
+        surface.setDownloadStateChangeHandler { downloadStates.append($0) }
+
+        guard let initialWebView = surface.webView as? CmuxWebView else {
+            return XCTFail("Expected CmuxWebView runtime surface")
+        }
+        XCTAssertTrue(initialWebView.navigationDelegate === navigationDelegate)
+        XCTAssertTrue(initialWebView.uiDelegate === uiDelegate)
+        initialWebView.onContextMenuDownloadStateChanged?(true)
+
+        let replacement = surface.replaceWebView(
+            using: makeConfiguration(customUserAgent: "cmux-runtime-test-rebound"),
+            pageZoom: nil
+        )
+        guard let replacementWebView = replacement as? CmuxWebView else {
+            return XCTFail("Expected replacement CmuxWebView runtime surface")
+        }
+
+        XCTAssertTrue(replacementWebView.navigationDelegate === navigationDelegate)
+        XCTAssertTrue(replacementWebView.uiDelegate === uiDelegate)
+        replacementWebView.onContextMenuDownloadStateChanged?(false)
+        XCTAssertEqual(downloadStates, [true, false])
     }
 }
 
