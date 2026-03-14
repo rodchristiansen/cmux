@@ -2981,8 +2981,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         source: String,
         expectedSocketPath: String
     ) {
-        guard let config = socketListenerConfigurationIfEnabled(),
-              config.path == expectedSocketPath else { return }
+        guard let config = socketListenerConfigurationIfEnabled() else { return }
+        let currentExpectedSocketPath = TerminalController.shared.activeSocketPath(preferredPath: config.path)
+        guard currentExpectedSocketPath == expectedSocketPath else { return }
         guard !health.isHealthy else {
             lastSocketListenerUnhealthyCaptureAt = .distantPast
             return
@@ -2990,7 +2991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let failureSignals = health.failureSignals
         var data: [String: Any] = [
             "source": source,
-            "path": config.path,
+            "path": currentExpectedSocketPath,
             "isRunning": health.isRunning ? 1 : 0,
             "acceptLoopAlive": health.acceptLoopAlive ? 1 : 0,
             "socketPathMatches": health.socketPathMatches ? 1 : 0,
