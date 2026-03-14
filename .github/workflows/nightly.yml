@@ -151,7 +151,27 @@ jobs:
       - name: Install build deps
         if: needs.decide.outputs.should_publish != 'true' || steps.current_head_prebuild.outputs.still_current == 'true'
         run: |
-          npm install --global "create-dmg@${CREATE_DMG_VERSION}"
+          set -euo pipefail
+          NODE_PREFIX="$(node -p "require('path').dirname(require('path').dirname(process.execPath))")"
+          if [ -d "$NODE_PREFIX/include/node" ]; then
+            export npm_config_nodedir="$NODE_PREFIX"
+            echo "Using local Node headers from $npm_config_nodedir"
+          fi
+
+          for attempt in 1 2 3; do
+            if npm install --global --no-audit --no-fund "create-dmg@${CREATE_DMG_VERSION}"; then
+              create-dmg --version
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to install create-dmg@${CREATE_DMG_VERSION} after $attempt attempts" >&2
+              exit 1
+            fi
+
+            echo "create-dmg install failed on attempt $attempt, retrying..."
+            sleep $((attempt * 5))
+          done
 
       - name: Download pre-built GhosttyKit.xcframework
         if: needs.decide.outputs.should_publish != 'true' || steps.current_head_prebuild.outputs.still_current == 'true'
