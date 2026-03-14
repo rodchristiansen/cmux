@@ -15834,6 +15834,52 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertTrue(runtime.lastOwnedResponder === responder)
     }
 
+    func testBrowserPanelTransientDeveloperToolsHidePreflightUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panelWindow = NSWindow()
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let responder = NSView()
+        responder.frame = contentView.bounds
+        panelWindow.contentView = contentView
+        contentView.addSubview(responder)
+        XCTAssertTrue(panelWindow.makeFirstResponder(responder))
+
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        let result = panel.prepareSurfaceFocusForTransientDeveloperToolsHide(in: panelWindow)
+
+        XCTAssertTrue(result.movedToSurface)
+        XCTAssertFalse(result.movedToNil)
+        XCTAssertEqual(runtime.focusSurfaceCallCount, 1)
+    }
+
+    func testBrowserPanelTransientDeveloperToolsHidePreflightFallsBackToNilResponder() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.focusSurfaceResult = false
+        let panelWindow = NSWindow()
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let responder = NSView()
+        responder.frame = contentView.bounds
+        panelWindow.contentView = contentView
+        contentView.addSubview(responder)
+        XCTAssertTrue(panelWindow.makeFirstResponder(responder))
+
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        let result = panel.prepareSurfaceFocusForTransientDeveloperToolsHide(in: panelWindow)
+
+        XCTAssertFalse(result.movedToSurface)
+        XCTAssertTrue(result.movedToNil)
+        XCTAssertEqual(runtime.focusSurfaceCallCount, 1)
+        XCTAssertFalse(panelWindow.firstResponder === responder)
+    }
+
     func testBrowserPanelResponderPolicyUsesRuntimeBoundary() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panel = BrowserPanel(

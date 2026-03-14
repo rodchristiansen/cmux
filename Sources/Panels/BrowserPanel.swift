@@ -4334,6 +4334,13 @@ extension BrowserPanel {
         return surfaceOwnsResponder(window.firstResponder)
     }
 
+    @discardableResult
+    func prepareSurfaceFocusForTransientDeveloperToolsHide(in window: NSWindow) -> (movedToSurface: Bool, movedToNil: Bool) {
+        let movedToSurface = focusSurfaceForHandoff()
+        let movedToNil = movedToSurface ? false : window.makeFirstResponder(nil)
+        return (movedToSurface, movedToNil)
+    }
+
     func suppressOmnibarAutofocus(for seconds: TimeInterval) {
         suppressOmnibarAutofocusUntil = Date().addingTimeInterval(seconds)
 #if DEBUG
