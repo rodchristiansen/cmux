@@ -3890,8 +3890,8 @@ extension BrowserPanel {
             developerToolsDetachedOpenGraceDeadline = nil
         }
 
+        let visibleAfterTransition = runtime.developerToolsVisibilityState().isVisible
         if targetVisible {
-            let visibleAfterTransition = runtime.developerToolsVisibilityState().isVisible
             if visibleAfterTransition {
                 syncDeveloperToolsPresentationPreferenceFromUI()
                 cancelDeveloperToolsRestoreRetry()
@@ -3905,7 +3905,14 @@ extension BrowserPanel {
             forceDeveloperToolsRefreshOnNextAttach = false
         }
 
-        if source.hasPrefix("toggle"), visible != targetVisible {
+        let shouldSettleQueuedTransition: Bool
+        if source.hasPrefix("toggle") {
+            shouldSettleQueuedTransition = visible != targetVisible
+        } else {
+            shouldSettleQueuedTransition = visibleAfterTransition != targetVisible
+        }
+
+        if shouldSettleQueuedTransition {
             scheduleDeveloperToolsTransitionSettle(source: source)
         } else {
             developerToolsTransitionTargetVisible = nil
