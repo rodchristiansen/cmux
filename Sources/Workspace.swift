@@ -1026,6 +1026,12 @@ final class Workspace: Identifiable, ObservableObject {
         )
     }
 
+    private static let paperPaneLayoutDefaultsKey = "cmuxPaperPaneLayout"
+
+    private static var paneLayoutStyle: PaneLayoutStyle {
+        UserDefaults.standard.bool(forKey: paperPaneLayoutDefaultsKey) ? .paperCanvas : .splitTree
+    }
+
     private static func bonsplitAppearance(from config: GhosttyConfig) -> BonsplitConfiguration.Appearance {
         bonsplitAppearance(
             from: config.backgroundColor,
@@ -1133,6 +1139,7 @@ final class Workspace: Identifiable, ObservableObject {
             backgroundOpacity: GhosttyApp.shared.defaultBackgroundOpacity
         )
         let config = BonsplitConfiguration(
+            layoutStyle: Self.paneLayoutStyle,
             allowSplits: true,
             allowCloseTabs: true,
             allowCloseLastPane: false,
@@ -2085,7 +2092,8 @@ final class Workspace: Identifiable, ObservableObject {
 
         // Pre-generate the bonsplit tab ID so we can install the panel mapping before bonsplit
         // mutates layout state (avoids transient "Empty Panel" flashes during split).
-        let newTab = Bonsplit.Tab(
+        let newTab = PaneKit.Tab(
+            id: TabID(uuid: newPanel.id),
             title: newPanel.displayTitle,
             icon: newPanel.displayIcon,
             kind: SurfaceKind.terminal,
@@ -2219,7 +2227,8 @@ final class Workspace: Identifiable, ObservableObject {
         panelTitles[browserPanel.id] = browserPanel.displayTitle
 
         // Pre-generate the bonsplit tab ID so the mapping exists before the split lands.
-        let newTab = Bonsplit.Tab(
+        let newTab = PaneKit.Tab(
+            id: TabID(uuid: browserPanel.id),
             title: browserPanel.displayTitle,
             icon: browserPanel.displayIcon,
             kind: SurfaceKind.browser,
@@ -2348,7 +2357,8 @@ final class Workspace: Identifiable, ObservableObject {
         panelTitles[markdownPanel.id] = markdownPanel.displayTitle
 
         // Pre-generate the bonsplit tab ID so the mapping exists before the split lands.
-        let newTab = Bonsplit.Tab(
+        let newTab = PaneKit.Tab(
+            id: TabID(uuid: markdownPanel.id),
             title: markdownPanel.displayTitle,
             icon: markdownPanel.displayIcon,
             kind: SurfaceKind.markdown,
@@ -2736,7 +2746,7 @@ final class Workspace: Identifiable, ObservableObject {
         let anchorPaneId: UUID?
     }
 
-    private func stageClosedBrowserRestoreSnapshotIfNeeded(for tab: Bonsplit.Tab, inPane pane: PaneID) {
+    private func stageClosedBrowserRestoreSnapshotIfNeeded(for tab: PaneKit.Tab, inPane pane: PaneID) {
         guard let panelId = panelIdFromSurfaceId(tab.id),
               let browserPanel = browserPanel(for: panelId),
               let tabIndex = bonsplitController.tabs(inPane: pane).firstIndex(where: { $0.id == tab.id }) else {
@@ -4509,7 +4519,7 @@ extension Workspace: BonsplitDelegate {
         pendingNonFocusSplitFocusReassert = nil
     }
 
-    func splitTabBar(_ controller: BonsplitController, shouldCloseTab tab: Bonsplit.Tab, inPane pane: PaneID) -> Bool {
+    func splitTabBar(_ controller: BonsplitController, shouldCloseTab tab: PaneKit.Tab, inPane pane: PaneID) -> Bool {
         func recordPostCloseSelection() {
             let tabs = controller.tabs(inPane: pane)
             guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else {
@@ -4736,11 +4746,11 @@ extension Workspace: BonsplitDelegate {
         }
     }
 
-    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Bonsplit.Tab, inPane pane: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: PaneKit.Tab, inPane pane: PaneID) {
         applyTabSelection(tabId: tab.id, inPane: pane)
     }
 
-    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Bonsplit.Tab, fromPane source: PaneID, toPane destination: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: PaneKit.Tab, fromPane source: PaneID, toPane destination: PaneID) {
 #if DEBUG
         let now = ProcessInfo.processInfo.systemUptime
         let sincePrev: String
@@ -5090,7 +5100,7 @@ extension Workspace: BonsplitDelegate {
         }
     }
 
-    func splitTabBar(_ controller: BonsplitController, didRequestTabContextAction action: TabContextAction, for tab: Bonsplit.Tab, inPane pane: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didRequestTabContextAction action: TabContextAction, for tab: PaneKit.Tab, inPane pane: PaneID) {
         switch action {
         case .rename:
             promptRenamePanel(tabId: tab.id)

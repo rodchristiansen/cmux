@@ -38,22 +38,38 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
     }
 
     public var body: some View {
-        SplitViewContainer(
-            contentBuilder: { tabItem, paneId in
-                contentBuilder(Tab(from: tabItem), PaneID(id: paneId.id))
-            },
-            emptyPaneBuilder: { internalPaneId in
-                emptyPaneBuilder(PaneID(id: internalPaneId.id))
-            },
-            appearance: controller.configuration.appearance,
-            showSplitButtons: controller.configuration.allowSplits && controller.configuration.appearance.showSplitButtons,
-            contentViewLifecycle: controller.configuration.contentViewLifecycle,
-            onGeometryChange: { [weak controller] isDragging in
-                controller?.notifyGeometryChange(isDragging: isDragging)
-            },
-            enableAnimations: controller.configuration.appearance.enableAnimations,
-            animationDuration: controller.configuration.appearance.animationDuration
-        )
+        Group {
+            if controller.configuration.layoutStyle == .paperCanvas {
+                PaperCanvasViewContainer(
+                    contentBuilder: { tabItem, paneId in
+                        contentBuilder(Tab(from: tabItem), PaneID(id: paneId.id))
+                    },
+                    emptyPaneBuilder: { internalPaneId in
+                        emptyPaneBuilder(PaneID(id: internalPaneId.id))
+                    },
+                    appearance: controller.configuration.appearance,
+                    showSplitButtons: controller.configuration.allowSplits && controller.configuration.appearance.showSplitButtons,
+                    contentViewLifecycle: controller.configuration.contentViewLifecycle
+                )
+            } else {
+                SplitViewContainer(
+                    contentBuilder: { tabItem, paneId in
+                        contentBuilder(Tab(from: tabItem), PaneID(id: paneId.id))
+                    },
+                    emptyPaneBuilder: { internalPaneId in
+                        emptyPaneBuilder(PaneID(id: internalPaneId.id))
+                    },
+                    appearance: controller.configuration.appearance,
+                    showSplitButtons: controller.configuration.allowSplits && controller.configuration.appearance.showSplitButtons,
+                    contentViewLifecycle: controller.configuration.contentViewLifecycle,
+                    onGeometryChange: { [weak controller] isDragging in
+                        controller?.notifyGeometryChange(isDragging: isDragging)
+                    },
+                    enableAnimations: controller.configuration.appearance.enableAnimations,
+                    animationDuration: controller.configuration.appearance.animationDuration
+                )
+            }
+        }
         .environment(controller)
         .environment(controller.internalController)
     }

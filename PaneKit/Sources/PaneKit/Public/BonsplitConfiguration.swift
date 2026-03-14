@@ -27,6 +27,9 @@ public enum NewTabPosition: Sendable {
 /// Configuration for the split tab bar appearance and behavior
 public struct BonsplitConfiguration: Sendable {
 
+    /// Internal layout engine used to place panes.
+    public var layoutStyle: PaneLayoutStyle
+
     // MARK: - Behavior
 
     /// Whether to allow creating splits
@@ -77,6 +80,7 @@ public struct BonsplitConfiguration: Sendable {
     // MARK: - Initializer
 
     public init(
+        layoutStyle: PaneLayoutStyle = .splitTree,
         allowSplits: Bool = true,
         allowCloseTabs: Bool = true,
         allowCloseLastPane: Bool = false,
@@ -87,6 +91,7 @@ public struct BonsplitConfiguration: Sendable {
         newTabPosition: NewTabPosition = .current,
         appearance: Appearance = .default
     ) {
+        self.layoutStyle = layoutStyle
         self.allowSplits = allowSplits
         self.allowCloseTabs = allowCloseTabs
         self.allowCloseLastPane = allowCloseLastPane

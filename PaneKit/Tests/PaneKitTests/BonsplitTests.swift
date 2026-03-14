@@ -497,6 +497,87 @@ final class BonsplitTests: XCTestCase {
         XCTAssertEqual(spy.paneId, pane)
     }
 
+    @MainActor
+    func testPaperCanvasSplitDoesNotResizeExistingPane() {
+        let controller = BonsplitController(
+            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+        )
+        controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1200, height: 800))
+
+        guard let originalPane = controller.focusedPaneId else {
+            return XCTFail("Expected focused pane")
+        }
+        guard let originalFrameBefore = controller.internalController.paperCanvas?.pane(originalPane)?.frame else {
+            return XCTFail("Expected original paper-pane frame")
+        }
+
+        guard let newPane = controller.splitPane(originalPane, orientation: .horizontal) else {
+            return XCTFail("Expected paper split to create a pane")
+        }
+        guard let originalFrameAfter = controller.internalController.paperCanvas?.pane(originalPane)?.frame,
+              let newFrame = controller.internalController.paperCanvas?.pane(newPane)?.frame else {
+            return XCTFail("Expected paper-pane frames after split")
+        }
+
+        XCTAssertEqual(originalFrameAfter.width, originalFrameBefore.width)
+        XCTAssertEqual(originalFrameAfter.height, originalFrameBefore.height)
+        XCTAssertEqual(originalFrameAfter.origin.x, originalFrameBefore.origin.x)
+        XCTAssertEqual(originalFrameAfter.origin.y, originalFrameBefore.origin.y)
+        XCTAssertGreaterThanOrEqual(newFrame.minX, originalFrameAfter.maxX)
+        XCTAssertEqual(newFrame.size, originalFrameAfter.size)
+    }
+
+    @MainActor
+    func testPaperCanvasNavigationMovesViewportToFocusedNeighbor() {
+        let controller = BonsplitController(
+            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+        )
+        controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1000, height: 700))
+
+        guard let originalPane = controller.focusedPaneId else {
+            return XCTFail("Expected focused pane")
+        }
+        guard let rightPane = controller.splitPane(originalPane, orientation: .horizontal) else {
+            return XCTFail("Expected split pane")
+        }
+
+        controller.focusPane(originalPane)
+        let beforeOrigin = controller.internalController.paperViewportOrigin
+
+        controller.navigateFocus(direction: .right)
+
+        XCTAssertEqual(controller.focusedPaneId, rightPane)
+        XCTAssertGreaterThan(controller.internalController.paperViewportOrigin.x, beforeOrigin.x)
+    }
+
+    @MainActor
+    func testPaperCanvasSplitShiftsExistingPaneChainInsteadOfOverlapping() {
+        let controller = BonsplitController(
+            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+        )
+        controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1000, height: 700))
+
+        guard let rootPane = controller.focusedPaneId else {
+            return XCTFail("Expected focused pane")
+        }
+        guard let firstRightPane = controller.splitPane(rootPane, orientation: .horizontal) else {
+            return XCTFail("Expected first split")
+        }
+        controller.focusPane(rootPane)
+        guard let secondRightPane = controller.splitPane(rootPane, orientation: .horizontal) else {
+            return XCTFail("Expected second split")
+        }
+
+        guard let rootFrame = controller.internalController.paperCanvas?.pane(rootPane)?.frame,
+              let firstRightFrame = controller.internalController.paperCanvas?.pane(firstRightPane)?.frame,
+              let secondRightFrame = controller.internalController.paperCanvas?.pane(secondRightPane)?.frame else {
+            return XCTFail("Expected paper-pane frames")
+        }
+
+        XCTAssertGreaterThanOrEqual(secondRightFrame.minX, rootFrame.maxX)
+        XCTAssertGreaterThanOrEqual(firstRightFrame.minX, secondRightFrame.maxX)
+    }
+
     func testIconSaturationKeepsRasterFaviconInColorWhenInactive() {
         XCTAssertEqual(
             TabItemStyling.iconSaturation(hasRasterIcon: true, tabSaturation: 0.0),

@@ -1,12 +1,18 @@
 import Foundation
 import SwiftUI
 
-/// Central controller managing the entire split view state (internal implementation)
+/// Central controller managing the pane layout state (internal implementation)
 @Observable
 @MainActor
 final class SplitViewController {
-    /// The root node of the split tree
+    /// The legacy split-tree root. This remains available for the classic layout path
+    /// and for bootstrapping a paper canvas from an existing restored tree.
     var rootNode: SplitNode
+
+    var layoutStyle: PaneLayoutStyle
+    var minimumPaneWidth: CGFloat
+    var minimumPaneHeight: CGFloat
+    var paperCanvas: PaperCanvasState?
 
     /// Currently zoomed pane. When set, rendering should only show this pane.
     var zoomedPaneId: PaneID?
@@ -57,37 +63,125 @@ final class SplitViewController {
     /// Callback for geometry changes
     var onGeometryChange: (() -> Void)?
 
-    init(rootNode: SplitNode? = nil) {
+    var paperViewportOrigin: CGPoint {
+        paperCanvas?.viewportOrigin ?? .zero
+    }
+
+    init(
+        rootNode: SplitNode? = nil,
+        layoutStyle: PaneLayoutStyle = .splitTree,
+        minimumPaneWidth: CGFloat = 100,
+        minimumPaneHeight: CGFloat = 100
+    ) {
+        self.layoutStyle = layoutStyle
+        self.minimumPaneWidth = minimumPaneWidth
+        self.minimumPaneHeight = minimumPaneHeight
+
         if let rootNode {
             self.rootNode = rootNode
+            self.focusedPaneId = rootNode.allPaneIds.first
         } else {
-            // Initialize with a single pane containing a welcome tab
             let welcomeTab = TabItem(title: "Welcome", icon: "star")
             let initialPane = PaneState(tabs: [welcomeTab])
             self.rootNode = .pane(initialPane)
             self.focusedPaneId = initialPane.id
         }
+
+        if layoutStyle == .paperCanvas {
+            enablePaperCanvasLayout()
+        }
+    }
+
+    func applyConfiguration(_ configuration: BonsplitConfiguration) {
+        minimumPaneWidth = configuration.appearance.minimumPaneWidth
+        minimumPaneHeight = configuration.appearance.minimumPaneHeight
+
+        guard layoutStyle != configuration.layoutStyle else {
+            if layoutStyle == .paperCanvas {
+                paperCanvas?.updateViewportSize(effectiveViewportSize())
+            }
+            return
+        }
+
+        layoutStyle = configuration.layoutStyle
+        switch layoutStyle {
+        case .splitTree:
+            paperCanvas = nil
+        case .paperCanvas:
+            enablePaperCanvasLayout()
+        }
+    }
+
+    func setPaperViewportFrame(_ frame: CGRect) {
+        containerFrame = frame
+        guard layoutStyle == .paperCanvas else { return }
+        if paperCanvas == nil {
+            enablePaperCanvasLayout()
+        }
+        paperCanvas?.updateViewportSize(frame.size)
+        if let focusedPaneId,
+           let frame = paperCanvas?.pane(focusedPaneId)?.frame {
+            paperCanvas?.reveal(frame, margin: 0)
+        }
+    }
+
+    var allPaneIds: [PaneID] {
+        switch layoutStyle {
+        case .splitTree:
+            return rootNode.allPaneIds
+        case .paperCanvas:
+            return paperCanvas?.allPaneIds ?? []
+        }
+    }
+
+    var allPanes: [PaneState] {
+        switch layoutStyle {
+        case .splitTree:
+            return rootNode.allPanes
+        case .paperCanvas:
+            return paperCanvas?.allPanes ?? []
+        }
+    }
+
+    func paneState(_ paneId: PaneID) -> PaneState? {
+        switch layoutStyle {
+        case .splitTree:
+            return rootNode.findPane(paneId)
+        case .paperCanvas:
+            return paperCanvas?.pane(paneId)?.pane
+        }
+    }
+
+    func paneBounds() -> [PaneBounds] {
+        switch layoutStyle {
+        case .splitTree:
+            return rootNode.computePaneBounds()
+        case .paperCanvas:
+            return paperCanvas?.panes.map { PaneBounds(paneId: $0.pane.id, bounds: $0.frame) } ?? []
+        }
     }
 
     // MARK: - Focus Management
 
-    /// Set focus to a specific pane
     func focusPane(_ paneId: PaneID) {
-        guard rootNode.findPane(paneId) != nil else { return }
+        guard paneState(paneId) != nil else { return }
 #if DEBUG
         dlog("focus.bonsplit pane=\(paneId.id.uuidString.prefix(5))")
 #endif
         focusedPaneId = paneId
+        if layoutStyle == .paperCanvas,
+           let frame = paperCanvas?.pane(paneId)?.frame {
+            paperCanvas?.reveal(frame)
+        }
     }
 
-    /// Get the currently focused pane state
     var focusedPane: PaneState? {
         guard let focusedPaneId else { return nil }
-        return rootNode.findPane(focusedPaneId)
+        return paneState(focusedPaneId)
     }
 
     var zoomedNode: SplitNode? {
-        guard let zoomedPaneId else { return nil }
+        guard layoutStyle == .splitTree, let zoomedPaneId else { return nil }
         return rootNode.findNode(containing: zoomedPaneId)
     }
 
@@ -100,15 +194,14 @@ final class SplitViewController {
 
     @discardableResult
     func togglePaneZoom(_ paneId: PaneID) -> Bool {
-        guard rootNode.findPane(paneId) != nil else { return false }
+        guard paneState(paneId) != nil else { return false }
 
         if zoomedPaneId == paneId {
             zoomedPaneId = nil
             return true
         }
 
-        // Match Ghostty behavior: a single-pane layout can't be zoomed.
-        guard rootNode.allPaneIds.count > 1 else { return false }
+        guard allPaneIds.count > 1 else { return false }
         zoomedPaneId = paneId
         focusedPaneId = paneId
         return true
@@ -116,15 +209,59 @@ final class SplitViewController {
 
     // MARK: - Split Operations
 
-    /// Split the specified pane in the given orientation
     func splitPane(_ paneId: PaneID, orientation: SplitOrientation, with newTab: TabItem? = nil) {
+        switch layoutStyle {
+        case .splitTree:
+            clearPaneZoom()
+            rootNode = splitNodeRecursively(
+                node: rootNode,
+                targetPaneId: paneId,
+                orientation: orientation,
+                newTab: newTab
+            )
+        case .paperCanvas:
+            splitPaperPane(paneId, orientation: orientation, newTab: newTab, insertFirst: false)
+        }
+    }
+
+    func splitPaneWithTab(_ paneId: PaneID, orientation: SplitOrientation, tab: TabItem, insertFirst: Bool) {
+        switch layoutStyle {
+        case .splitTree:
+            clearPaneZoom()
+            rootNode = splitNodeWithTabRecursively(
+                node: rootNode,
+                targetPaneId: paneId,
+                orientation: orientation,
+                tab: tab,
+                insertFirst: insertFirst
+            )
+        case .paperCanvas:
+            splitPaperPane(paneId, orientation: orientation, newTab: tab, insertFirst: insertFirst)
+        }
+    }
+
+    private func splitPaperPane(
+        _ paneId: PaneID,
+        orientation: SplitOrientation,
+        newTab: TabItem?,
+        insertFirst: Bool
+    ) {
         clearPaneZoom()
-        rootNode = splitNodeRecursively(
-            node: rootNode,
-            targetPaneId: paneId,
+        guard let paperCanvas,
+              let target = paperCanvas.pane(paneId) else {
+            return
+        }
+
+        let newPane = PaneState(tabs: newTab.map { [$0] } ?? [])
+        let newFrame = paperCanvas.resolvedSplitFrame(
+            for: target.frame,
             orientation: orientation,
-            newTab: newTab
+            insertFirst: insertFirst
         )
+
+        _ = paperCanvas.addPane(newPane, frame: newFrame)
+        focusedPaneId = newPane.id
+        paperCanvas.centerViewport(on: newFrame)
     }
 
     private func splitNodeRecursively(
@@ -136,29 +273,15 @@ final class SplitViewController {
         switch node {
         case .pane(let paneState):
             if paneState.id == targetPaneId {
-                // Create new pane - empty if no tab provided (gives developer full control)
-                let newPane: PaneState
-                if let tab = newTab {
-                    newPane = PaneState(tabs: [tab])
-                } else {
-                    newPane = PaneState(tabs: [])
-                }
-
-                // Start with divider at the edge so there's no flash before animation
+                let newPane = newTab.map { PaneState(tabs: [$0]) } ?? PaneState(tabs: [])
                 let splitState = SplitState(
                     orientation: orientation,
                     first: .pane(paneState),
                     second: .pane(newPane),
-                    // Keep the model at its steady-state ratio. The view layer can still animate
-                    // from an edge via animationOrigin, but the model should never represent a
-                    // fully-collapsed pane (which can get stuck under view reparenting timing).
                     dividerPosition: 0.5,
-                    animationOrigin: .fromSecond  // New pane slides in from right/bottom
+                    animationOrigin: .fromSecond
                 )
-
-                // Focus the new pane
                 focusedPaneId = newPane.id
-
                 return .split(splitState)
             }
             return node
@@ -180,18 +303,6 @@ final class SplitViewController {
         }
     }
 
-    /// Split a pane with a specific tab, optionally inserting the new pane first
-    func splitPaneWithTab(_ paneId: PaneID, orientation: SplitOrientation, tab: TabItem, insertFirst: Bool) {
-        clearPaneZoom()
-        rootNode = splitNodeWithTabRecursively(
-            node: rootNode,
-            targetPaneId: paneId,
-            orientation: orientation,
-            tab: tab,
-            insertFirst: insertFirst
-        )
-    }
-
     private func splitNodeWithTabRecursively(
         node: SplitNode,
         targetPaneId: PaneID,
@@ -202,13 +313,9 @@ final class SplitViewController {
         switch node {
         case .pane(let paneState):
             if paneState.id == targetPaneId {
-                // Create new pane with the tab
                 let newPane = PaneState(tabs: [tab])
-
-                // Start with divider at the edge so there's no flash before animation
                 let splitState: SplitState
                 if insertFirst {
-                    // New pane goes first (left or top).
                     splitState = SplitState(
                         orientation: orientation,
                         first: .pane(newPane),
@@ -217,7 +324,6 @@ final class SplitViewController {
                         animationOrigin: .fromFirst
                     )
                 } else {
-                    // New pane goes second (right or bottom).
                     splitState = SplitState(
                         orientation: orientation,
                         first: .pane(paneState),
@@ -226,10 +332,7 @@ final class SplitViewController {
                         animationOrigin: .fromSecond
                     )
                 }
-
-                // Focus the new pane
                 focusedPaneId = newPane.id
-
                 return .split(splitState)
             }
             return node
@@ -253,26 +356,49 @@ final class SplitViewController {
         }
     }
 
-    /// Close a pane and collapse the split
     func closePane(_ paneId: PaneID) {
-        // Don't close the last pane
-        guard rootNode.allPaneIds.count > 1 else { return }
+        guard allPaneIds.count > 1 else { return }
 
-        let (newRoot, siblingPaneId) = closePaneRecursively(node: rootNode, targetPaneId: paneId)
+        switch layoutStyle {
+        case .splitTree:
+            let (newRoot, siblingPaneId) = closePaneRecursively(node: rootNode, targetPaneId: paneId)
 
-        if let newRoot {
-            rootNode = newRoot
-        }
+            if let newRoot {
+                rootNode = newRoot
+            }
 
-        // Focus the sibling or first available pane
-        if let siblingPaneId {
-            focusedPaneId = siblingPaneId
-        } else if let firstPane = rootNode.allPaneIds.first {
-            focusedPaneId = firstPane
-        }
+            if let siblingPaneId {
+                focusedPaneId = siblingPaneId
+            } else if let firstPane = rootNode.allPaneIds.first {
+                focusedPaneId = firstPane
+            }
 
-        if let zoomedPaneId, rootNode.findPane(zoomedPaneId) == nil {
-            self.zoomedPaneId = nil
+            if let zoomedPaneId, rootNode.findPane(zoomedPaneId) == nil {
+                self.zoomedPaneId = nil
+            }
+        case .paperCanvas:
+            guard let paperCanvas,
+                  let closingPane = paperCanvas.pane(paneId) else {
+                return
+            }
+
+            let closingFrame = closingPane.frame
+            _ = paperCanvas.removePane(paneId)
+
+            if let zoomedPaneId, zoomedPaneId == paneId {
+                self.zoomedPaneId = nil
+            }
+
+            if let nextFocus = findBestNeighbor(
+                from: closingFrame,
+                currentPaneId: paneId,
+                directionCandidates: paneBounds()
+            ) ?? paperCanvas.allPaneIds.first {
+                focusedPaneId = nextFocus
+                if let focusFrame = paperCanvas.pane(nextFocus)?.frame {
+                    paperCanvas.reveal(focusFrame)
+                }
+            }
         }
     }
 
@@ -288,18 +414,14 @@ final class SplitViewController {
             return (node, nil)
 
         case .split(let splitState):
-            // Check if either direct child is the target
             if case .pane(let firstPane) = splitState.first, firstPane.id == targetPaneId {
-                let focusTarget = splitState.second.allPaneIds.first
-                return (splitState.second, focusTarget)
+                return (splitState.second, splitState.second.allPaneIds.first)
             }
 
             if case .pane(let secondPane) = splitState.second, secondPane.id == targetPaneId {
-                let focusTarget = splitState.first.allPaneIds.first
-                return (splitState.first, focusTarget)
+                return (splitState.first, splitState.first.allPaneIds.first)
             }
 
-            // Recursively check children
             let (newFirst, focusFromFirst) = closePaneRecursively(node: splitState.first, targetPaneId: targetPaneId)
             if newFirst == nil {
                 return (splitState.second, splitState.second.allPaneIds.first)
@@ -319,11 +441,10 @@ final class SplitViewController {
 
     // MARK: - Tab Operations
 
-    /// Add a tab to the focused pane (or specified pane)
     func addTab(_ tab: TabItem, toPane paneId: PaneID? = nil, atIndex index: Int? = nil) {
         let targetPaneId = paneId ?? focusedPaneId
         guard let targetPaneId,
-              let pane = rootNode.findPane(targetPaneId) else { return }
+              let pane = paneState(targetPaneId) else { return }
 
         if let index {
             pane.insertTab(tab, at: index)
@@ -332,105 +453,118 @@ final class SplitViewController {
         }
     }
 
-    /// Move a tab from one pane to another
     func moveTab(_ tab: TabItem, from sourcePaneId: PaneID, to targetPaneId: PaneID, atIndex index: Int? = nil) {
-        guard let sourcePane = rootNode.findPane(sourcePaneId),
-              let targetPane = rootNode.findPane(targetPaneId) else { return }
+        guard let sourcePane = paneState(sourcePaneId),
+              let targetPane = paneState(targetPaneId) else { return }
 
-        // Remove from source
-        sourcePane.removeTab(tab.id)
-
-        // Add to target
+        _ = sourcePane.removeTab(tab.id)
         if let index {
             targetPane.insertTab(tab, at: index)
         } else {
             targetPane.addTab(tab)
         }
 
-        // Focus target pane
         focusPane(targetPaneId)
 
-        // If source pane is now empty and not the only pane, close it
-        if sourcePane.tabs.isEmpty && rootNode.allPaneIds.count > 1 {
+        if sourcePane.tabs.isEmpty && allPaneIds.count > 1 {
             closePane(sourcePaneId)
         }
     }
 
-    /// Close a tab in a specific pane
     func closeTab(_ tabId: UUID, inPane paneId: PaneID) {
-        guard let pane = rootNode.findPane(paneId) else { return }
+        guard let pane = paneState(paneId) else { return }
 
-        pane.removeTab(tabId)
-
-        // If pane is now empty and not the only pane, close it
-        if pane.tabs.isEmpty && rootNode.allPaneIds.count > 1 {
+        _ = pane.removeTab(tabId)
+        if pane.tabs.isEmpty && allPaneIds.count > 1 {
             closePane(paneId)
         }
     }
 
     // MARK: - Keyboard Navigation
 
-    /// Navigate focus to an adjacent pane based on spatial position
     func navigateFocus(direction: NavigationDirection) {
         guard let currentPaneId = focusedPaneId else { return }
-
-        let allPaneBounds = rootNode.computePaneBounds()
+        let allPaneBounds = paneBounds()
         guard let currentBounds = allPaneBounds.first(where: { $0.paneId == currentPaneId })?.bounds else { return }
 
-        if let targetPaneId = findBestNeighbor(from: currentBounds, currentPaneId: currentPaneId,
-                                               direction: direction, allPaneBounds: allPaneBounds) {
+        if let targetPaneId = findBestNeighbor(
+            from: currentBounds,
+            currentPaneId: currentPaneId,
+            direction: direction,
+            allPaneBounds: allPaneBounds
+        ) {
             focusPane(targetPaneId)
         }
-        // No neighbor found = at edge, do nothing
     }
 
-    private func findBestNeighbor(from currentBounds: CGRect, currentPaneId: PaneID,
-                                  direction: NavigationDirection, allPaneBounds: [PaneBounds]) -> PaneID? {
+    private func findBestNeighbor(
+        from currentBounds: CGRect,
+        currentPaneId: PaneID,
+        direction: NavigationDirection,
+        allPaneBounds: [PaneBounds]
+    ) -> PaneID? {
         let epsilon: CGFloat = 0.001
 
-        // Filter to panes in the target direction
         let candidates = allPaneBounds.filter { paneBounds in
             guard paneBounds.paneId != currentPaneId else { return false }
-            let b = paneBounds.bounds
+            let bounds = paneBounds.bounds
             switch direction {
-            case .left:  return b.maxX <= currentBounds.minX + epsilon
-            case .right: return b.minX >= currentBounds.maxX - epsilon
-            case .up:    return b.maxY <= currentBounds.minY + epsilon
-            case .down:  return b.minY >= currentBounds.maxY - epsilon
+            case .left:
+                return bounds.maxX <= currentBounds.minX + epsilon
+            case .right:
+                return bounds.minX >= currentBounds.maxX - epsilon
+            case .up:
+                return bounds.maxY <= currentBounds.minY + epsilon
+            case .down:
+                return bounds.minY >= currentBounds.maxY - epsilon
             }
         }
 
         guard !candidates.isEmpty else { return nil }
 
-        // Score by overlap (perpendicular axis) and distance
-        let scored: [(PaneID, CGFloat, CGFloat)] = candidates.map { c in
+        let scored: [(PaneID, CGFloat, CGFloat)] = candidates.map { candidate in
             let overlap: CGFloat
             let distance: CGFloat
 
             switch direction {
             case .left, .right:
-                // Vertical overlap for horizontal movement
-                overlap = max(0, min(currentBounds.maxY, c.bounds.maxY) - max(currentBounds.minY, c.bounds.minY))
-                distance = direction == .left ? (currentBounds.minX - c.bounds.maxX) : (c.bounds.minX - currentBounds.maxX)
+                overlap = max(0, min(currentBounds.maxY, candidate.bounds.maxY) - max(currentBounds.minY, candidate.bounds.minY))
+                distance = direction == .left ? (currentBounds.minX - candidate.bounds.maxX) : (candidate.bounds.minX - currentBounds.maxX)
             case .up, .down:
-                // Horizontal overlap for vertical movement
-                overlap = max(0, min(currentBounds.maxX, c.bounds.maxX) - max(currentBounds.minX, c.bounds.minX))
-                distance = direction == .up ? (currentBounds.minY - c.bounds.maxY) : (c.bounds.minY - currentBounds.maxY)
+                overlap = max(0, min(currentBounds.maxX, candidate.bounds.maxX) - max(currentBounds.minX, candidate.bounds.minX))
+                distance = direction == .up ? (currentBounds.minY - candidate.bounds.maxY) : (candidate.bounds.minY - currentBounds.maxY)
             }
 
-            return (c.paneId, overlap, distance)
+            return (candidate.paneId, overlap, distance)
         }
 
-        // Sort: prefer more overlap, then closer distance
-        let sorted = scored.sorted { a, b in
-            if abs(a.1 - b.1) > epsilon { return a.1 > b.1 }
-            return a.2 < b.2
-        }
-
-        return sorted.first?.0
+        return scored.sorted { lhs, rhs in
+            if abs(lhs.1 - rhs.1) > epsilon {
+                return lhs.1 > rhs.1
+            }
+            return lhs.2 < rhs.2
+        }.first?.0
     }
 
-    /// Create a new tab in the focused pane
+    private func findBestNeighbor(
+        from currentBounds: CGRect,
+        currentPaneId: PaneID,
+        directionCandidates allPaneBounds: [PaneBounds]
+    ) -> PaneID? {
+        let preferredDirections: [NavigationDirection] = [.right, .left, .down, .up]
+        for direction in preferredDirections {
+            if let neighbor = findBestNeighbor(
+                from: currentBounds,
+                currentPaneId: currentPaneId,
+                direction: direction,
+                allPaneBounds: allPaneBounds
+            ) {
+                return neighbor
+            }
+        }
+        return nil
+    }
+
     func createNewTab() {
         guard let pane = focusedPane else { return }
         let count = pane.tabs.count + 1
@@ -438,14 +572,12 @@ final class SplitViewController {
         pane.addTab(newTab)
     }
 
-    /// Close the currently selected tab in the focused pane
     func closeSelectedTab() {
         guard let pane = focusedPane,
               let selectedTabId = pane.selectedTabId else { return }
         closeTab(selectedTabId, inPane: pane.id)
     }
 
-    /// Select the previous tab in the focused pane
     func selectPreviousTab() {
         guard let pane = focusedPane,
               let selectedTabId = pane.selectedTabId,
@@ -456,7 +588,6 @@ final class SplitViewController {
         pane.selectTab(pane.tabs[newIndex].id)
     }
 
-    /// Select the next tab in the focused pane
     func selectNextTab() {
         guard let pane = focusedPane,
               let selectedTabId = pane.selectedTabId,
@@ -469,8 +600,8 @@ final class SplitViewController {
 
     // MARK: - Split State Access
 
-    /// Find a split state by its UUID
     func findSplit(_ splitId: UUID) -> SplitState? {
+        guard layoutStyle == .splitTree else { return nil }
         return findSplitRecursively(in: rootNode, id: splitId)
     }
 
@@ -489,8 +620,8 @@ final class SplitViewController {
         }
     }
 
-    /// Get all split states in the tree
     var allSplits: [SplitState] {
+        guard layoutStyle == .splitTree else { return [] }
         return collectSplits(from: rootNode)
     }
 
@@ -501,5 +632,50 @@ final class SplitViewController {
         case .split(let splitState):
             return [splitState] + collectSplits(from: splitState.first) + collectSplits(from: splitState.second)
         }
+    }
+
+    // MARK: - Private Helpers
+
+    private func enablePaperCanvasLayout() {
+        let viewportSize = effectiveViewportSize()
+        let normalizedBounds = rootNode.computePaneBounds(in: CGRect(origin: .zero, size: CGSize(width: 1, height: 1)))
+        let placements = normalizedBounds.compactMap { paneBounds -> PaperCanvasPane? in
+            guard let pane = rootNode.findPane(paneBounds.paneId) else { return nil }
+
+            let resolvedFrame = CGRect(
+                x: paneBounds.bounds.minX * viewportSize.width,
+                y: paneBounds.bounds.minY * viewportSize.height,
+                width: max(paneBounds.bounds.width * viewportSize.width, minimumPaneWidth),
+                height: max(paneBounds.bounds.height * viewportSize.height, minimumPaneHeight)
+            )
+            return PaperCanvasPane(pane: pane, frame: resolvedFrame)
+        }
+
+        paperCanvas = PaperCanvasState(
+            panes: placements.isEmpty ? [PaperCanvasPane(pane: initialPaperPane(), frame: CGRect(origin: .zero, size: viewportSize))] : placements,
+            viewportSize: viewportSize
+        )
+
+        if focusedPaneId == nil {
+            focusedPaneId = paperCanvas?.allPaneIds.first
+        }
+        if let focusedPaneId,
+           let frame = paperCanvas?.pane(focusedPaneId)?.frame {
+            paperCanvas?.reveal(frame, margin: 0)
+        }
+    }
+
+    private func initialPaperPane() -> PaneState {
+        if let existing = rootNode.allPanes.first {
+            return existing
+        }
+        let welcomeTab = TabItem(title: "Welcome", icon: "star")
+        return PaneState(tabs: [welcomeTab])
+    }
+
+    private func effectiveViewportSize() -> CGSize {
+        let width = containerFrame.width > 0 ? containerFrame.width : max(minimumPaneWidth * 2, 960)
+        let height = containerFrame.height > 0 ? containerFrame.height : max(minimumPaneHeight * 2, 640)
+        return CGSize(width: width, height: height)
     }
 }

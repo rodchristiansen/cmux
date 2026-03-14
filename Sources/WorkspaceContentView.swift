@@ -282,7 +282,7 @@ struct WorkspaceContentView: View {
 
 extension WorkspaceContentView {
     #if DEBUG
-    static func debugPanelLookup(tab: Bonsplit.Tab, workspace: Workspace) {
+    static func debugPanelLookup(tab: PaneKit.Tab, workspace: Workspace) {
         let found = workspace.panel(for: tab.id) != nil
         if !found {
             let ts = ISO8601DateFormatter().string(from: Date())
@@ -298,7 +298,7 @@ extension WorkspaceContentView {
         }
     }
     #else
-    static func debugPanelLookup(tab: Bonsplit.Tab, workspace: Workspace) {
+    static func debugPanelLookup(tab: PaneKit.Tab, workspace: Workspace) {
         _ = tab
         _ = workspace
     }
