@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import Darwin
-import Bonsplit
+import PaneKit
 import UniformTypeIdentifiers
 
 @main

@@ -1,7 +1,7 @@
 import AppKit
 import ObjectiveC
 #if DEBUG
-import Bonsplit
+import PaneKit
 #endif
 
 private var cmuxWindowTerminalPortalKey: UInt8 = 0

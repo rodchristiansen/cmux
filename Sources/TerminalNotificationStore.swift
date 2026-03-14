@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import UserNotifications
-import Bonsplit
+import PaneKit
 
 // UNUserNotificationCenter.removeDeliveredNotifications(withIdentifiers:) and
 // removePendingNotificationRequests(withIdentifiers:) perform synchronous XPC to

@@ -1,4 +1,4 @@
-import Bonsplit
+import PaneKit
 import SwiftUI
 import WebKit
 import AppKit

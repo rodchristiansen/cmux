@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import WebKit
 import AppKit
-import Bonsplit
+import PaneKit
 
 enum GhosttyBackgroundTheme {
     static func clampedOpacity(_ opacity: Double) -> CGFloat {

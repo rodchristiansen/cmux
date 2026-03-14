@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
-import Bonsplit
+import PaneKit
 import Combine
 import CoreText
 

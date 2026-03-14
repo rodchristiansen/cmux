@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import Foundation
-import Bonsplit
+import PaneKit
 import WebKit
 
 /// Unix socket-based controller for programmatic terminal control

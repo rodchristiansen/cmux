@@ -1,5 +1,5 @@
 import AppKit
-import Bonsplit
+import PaneKit
 import ObjectiveC
 import SwiftUI
 import WebKit

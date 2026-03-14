@@ -6,7 +6,7 @@ import QuartzCore
 import Combine
 import Darwin
 import Sentry
-import Bonsplit
+import PaneKit
 import IOSurface
 
 #if os(macOS)

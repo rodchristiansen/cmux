@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import Foundation
-import Bonsplit
+import PaneKit
 import CoreVideo
 import Combine
 

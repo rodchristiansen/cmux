@@ -1,7 +1,7 @@
 import SwiftUI
 import Foundation
 import AppKit
-import Bonsplit
+import PaneKit
 
 /// View that renders a Workspace's content using BonsplitView
 struct WorkspaceContentView: View {

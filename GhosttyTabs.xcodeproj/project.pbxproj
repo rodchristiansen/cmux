@@ -504,7 +504,7 @@
 					A5001231 /* Sparkle */,
 					A5001251 /* Sentry */,
 					A5001271 /* PostHog */,
-					A5001261 /* Bonsplit */,
+					A5001261 /* PaneKit */,
 					A5001291 /* MarkdownUI */,
 				);
 			name = GhosttyTabs;
@@ -608,7 +608,7 @@
 					A5001252 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 					A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 					A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-					A5001260 /* XCLocalSwiftPackageReference "bonsplit" */,
+					A5001260 /* XCLocalSwiftPackageReference "PaneKit" */,
 				);
 			productRefGroup = A5001042 /* Products */;
 			projectDirPath = "";
@@ -1034,9 +1034,9 @@
 					minimumVersion = 2.4.1;
 				};
 			};
-			A5001260 /* XCLocalSwiftPackageReference "bonsplit" */ = {
+			A5001260 /* XCLocalSwiftPackageReference "PaneKit" */ = {
 				isa = XCLocalSwiftPackageReference;
-				relativePath = vendor/bonsplit;
+				relativePath = PaneKit;
 			};
 /* End XCRemoteSwiftPackageReference section */
 
@@ -1056,10 +1056,10 @@
 				package = A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */;
 				productName = PostHog;
 			};
-			A5001261 /* Bonsplit */ = {
+			A5001261 /* PaneKit */ = {
 				isa = XCSwiftPackageProductDependency;
-				package = A5001260 /* XCLocalSwiftPackageReference "bonsplit" */;
-				productName = Bonsplit;
+				package = A5001260 /* XCLocalSwiftPackageReference "PaneKit" */;
+				productName = PaneKit;
 			};
 			A5001291 /* MarkdownUI */ = {
 				isa = XCSwiftPackageProductDependency;

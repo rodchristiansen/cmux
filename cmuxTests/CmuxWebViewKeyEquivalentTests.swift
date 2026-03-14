@@ -4,7 +4,7 @@ import SwiftUI
 import WebKit
 import SwiftUI
 import ObjectiveC.runtime
-import Bonsplit
+import PaneKit
 import UserNotifications
 
 #if canImport(cmux_DEV)
