@@ -59,6 +59,8 @@ typeset -g _CMUX_TTY_NAME=""
 typeset -g _CMUX_TTY_REPORTED=0
 typeset -g _CMUX_AUTOSUGGEST_PROVIDER_LAST=""
 typeset -g _CMUX_AUTOSUGGEST_PROVIDER_DETECTED=""
+typeset -g _CMUX_AUTOSUGGEST_PROVIDER_LAST_SENT_AT=0
+typeset -g _CMUX_AUTOSUGGEST_PROVIDER_RETRY_SECS=30
 typeset -g _CMUX_AUTOSUGGEST_PROVIDER_ACK_FILE=""
 if [[ -x /usr/bin/mktemp ]]; then
     _CMUX_AUTOSUGGEST_PROVIDER_ACK_FILE="$(
@@ -185,12 +187,27 @@ _cmux_detect_unknown_autosuggestion_provider() {
         return 0
     fi
 
-    if _cmux_assoc_contains_match parameters "*AUTOSUGGEST*" "*AUTOCOMPLETE*" "*AUTO_SUGGEST*"; then
-        print -r -- "external:unknown"
-        return 0
-    fi
-
     local key
+    for key in "${(@k)parameters}"; do
+        case "$key" in
+            _CMUX_*|CMUX_*)
+                continue
+                ;;
+        esac
+        if _cmux_name_matches_any \
+            "$key" \
+            "*AUTOSUGGEST*" \
+            "*AUTOCOMPLETE*" \
+            "*AUTO_SUGGEST*" \
+            "*autosuggest*" \
+            "*autocomplete*" \
+            "*auto_suggest*" \
+            "*auto-suggest*"; then
+            print -r -- "external:unknown"
+            return 0
+        fi
+    done
+
     for key in "${(@k)functions}"; do
         case "$key" in
             _cmux_*)
@@ -249,12 +266,7 @@ _cmux_sync_autosuggestion_provider_ack() {
     local path="${_CMUX_AUTOSUGGEST_PROVIDER_ACK_FILE:-}"
     [[ -n "$path" && -r "$path" ]] || return 0
 
-    local provider=""
-    provider="$(/bin/cat -- "$path" 2>/dev/null || true)"
     /bin/rm -f -- "$path" >/dev/null 2>&1 || true
-    provider="$(_cmux_normalize_autosuggestion_provider "$provider" 2>/dev/null || true)"
-    [[ -n "$provider" ]] || return 0
-    _CMUX_AUTOSUGGEST_PROVIDER_LAST="$provider"
 }
 
 _cmux_report_autosuggestion_provider() {
@@ -262,7 +274,13 @@ _cmux_report_autosuggestion_provider() {
 
     local provider
     provider="$(_cmux_autosuggestion_provider 2>/dev/null || true)"
-    [[ "$provider" == "$_CMUX_AUTOSUGGEST_PROVIDER_LAST" ]] && return 0
+    local now=$EPOCHSECONDS
+    if [[ "$provider" == "$_CMUX_AUTOSUGGEST_PROVIDER_LAST" ]] \
+        && (( now - _CMUX_AUTOSUGGEST_PROVIDER_LAST_SENT_AT < _CMUX_AUTOSUGGEST_PROVIDER_RETRY_SECS )); then
+        return 0
+    fi
+    _CMUX_AUTOSUGGEST_PROVIDER_LAST="$provider"
+    _CMUX_AUTOSUGGEST_PROVIDER_LAST_SENT_AT=$now
 
     local ack_path="${_CMUX_AUTOSUGGEST_PROVIDER_ACK_FILE:-}"
     {

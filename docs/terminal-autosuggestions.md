@@ -178,11 +178,11 @@ Add a one-time or low-frequency zsh handshake after user startup, for example on
 
 The shell should report whether external autosuggestions are active for the current shell session:
 
-`report_autosuggestion_provider --shell=zsh --provider=external:zsh-autosuggestions --tab=<id> --panel=<id>`
+`report_autosuggestion_provider external:zsh-autosuggestions --tab=<id> --panel=<id>`
 
 or
 
-`report_autosuggestion_provider --shell=zsh --provider=cmux --tab=<id> --panel=<id>`
+`report_autosuggestion_provider cmux --tab=<id> --panel=<id>`
 
 At minimum, `Automatic` mode should back off when zsh reports a known external provider.
 
