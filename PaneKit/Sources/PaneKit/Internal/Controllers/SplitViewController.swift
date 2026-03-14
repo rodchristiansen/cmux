@@ -292,15 +292,22 @@ final class SplitViewController {
         }
 
         let newPane = PaneState(tabs: newTab.map { [$0] } ?? [])
-        let newFrame = paperCanvas.resolvedSplitFrame(
+        let placement = paperCanvas.resolvedSplitPlacement(
             for: target.frame,
             orientation: orientation,
-            insertFirst: insertFirst
+            insertFirst: insertFirst,
+            minimumSize: CGSize(width: minimumPaneWidth, height: minimumPaneHeight)
         )
+        target.frame = placement.existingFrame
 
-        _ = paperCanvas.addPane(newPane, frame: newFrame)
+        _ = paperCanvas.addPane(newPane, frame: placement.newFrame)
         focusedPaneId = newPane.id
-        paperCanvas.centerViewport(on: newFrame)
+        switch placement.mode {
+        case .localReflow:
+            paperCanvas.reveal(placement.newFrame, margin: 0)
+        case .canvasOverflow:
+            paperCanvas.centerViewport(on: placement.newFrame)
+        }
     }
 
     private func splitNodeRecursively(

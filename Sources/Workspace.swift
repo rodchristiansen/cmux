@@ -1195,10 +1195,8 @@ final class Workspace: Identifiable, ObservableObject {
         )
     }
 
-    private static let paperPaneLayoutDefaultsKey = "cmuxPaperPaneLayout"
-
     private static var paneLayoutStyle: PaneLayoutStyle {
-        UserDefaults.standard.bool(forKey: paperPaneLayoutDefaultsKey) ? .paperCanvas : .splitTree
+        .paperCanvas
     }
 
     private static func bonsplitAppearance(from config: GhosttyConfig) -> BonsplitConfiguration.Appearance {

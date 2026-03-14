@@ -80,7 +80,7 @@ public struct BonsplitConfiguration: Sendable {
     // MARK: - Initializer
 
     public init(
-        layoutStyle: PaneLayoutStyle = .splitTree,
+        layoutStyle: PaneLayoutStyle = .paperCanvas,
         allowSplits: Bool = true,
         allowCloseTabs: Bool = true,
         allowCloseLastPane: Bool = false,

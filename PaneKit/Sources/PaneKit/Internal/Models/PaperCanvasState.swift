@@ -16,6 +16,17 @@ final class PaperCanvasPane: Identifiable {
 
 @Observable
 final class PaperCanvasState {
+    struct SplitPlacement {
+        enum Mode {
+            case localReflow
+            case canvasOverflow
+        }
+
+        let existingFrame: CGRect
+        let newFrame: CGRect
+        let mode: Mode
+    }
+
     var panes: [PaperCanvasPane]
     var viewportOrigin: CGPoint
     var viewportSize: CGSize
@@ -230,13 +241,28 @@ final class PaperCanvasState {
         return target.frame
     }
 
-    func resolvedSplitFrame(
+    func resolvedSplitPlacement(
         for targetFrame: CGRect,
         orientation: SplitOrientation,
-        insertFirst: Bool
-    ) -> CGRect {
+        insertFirst: Bool,
+        minimumSize: CGSize
+    ) -> SplitPlacement {
+        if let localPlacement = localSplitPlacement(
+            for: targetFrame,
+            orientation: orientation,
+            insertFirst: insertFirst,
+            minimumSize: minimumSize
+        ) {
+            return localPlacement
+        }
+
         let translated = adjacentFrame(for: targetFrame, orientation: orientation, insertFirst: insertFirst)
-        return resolveCollisions(for: translated, orientation: orientation, insertFirst: insertFirst)
+        let overflowFrame = resolveCollisions(for: translated, orientation: orientation, insertFirst: insertFirst)
+        return SplitPlacement(
+            existingFrame: targetFrame.integral,
+            newFrame: overflowFrame,
+            mode: .canvasOverflow
+        )
     }
 
     private func adjacentFrame(
@@ -278,6 +304,79 @@ final class PaperCanvasState {
         )
         recomputeCanvasBounds()
         return proposedFrame.integral
+    }
+
+    private func localSplitPlacement(
+        for targetFrame: CGRect,
+        orientation: SplitOrientation,
+        insertFirst: Bool,
+        minimumSize: CGSize
+    ) -> SplitPlacement? {
+        switch orientation {
+        case .horizontal:
+            let availableWidth = targetFrame.width - paneGap
+            guard availableWidth >= minimumSize.width * 2 else {
+                return nil
+            }
+
+            let firstWidth = floor(availableWidth / 2)
+            let secondWidth = availableWidth - firstWidth
+            guard firstWidth >= minimumSize.width,
+                  secondWidth >= minimumSize.width else {
+                return nil
+            }
+
+            let leftFrame = CGRect(
+                x: targetFrame.minX,
+                y: targetFrame.minY,
+                width: firstWidth,
+                height: targetFrame.height
+            ).integral
+            let rightFrame = CGRect(
+                x: leftFrame.maxX + paneGap,
+                y: targetFrame.minY,
+                width: secondWidth,
+                height: targetFrame.height
+            ).integral
+
+            return SplitPlacement(
+                existingFrame: insertFirst ? rightFrame : leftFrame,
+                newFrame: insertFirst ? leftFrame : rightFrame,
+                mode: .localReflow
+            )
+
+        case .vertical:
+            let availableHeight = targetFrame.height - paneGap
+            guard availableHeight >= minimumSize.height * 2 else {
+                return nil
+            }
+
+            let firstHeight = floor(availableHeight / 2)
+            let secondHeight = availableHeight - firstHeight
+            guard firstHeight >= minimumSize.height,
+                  secondHeight >= minimumSize.height else {
+                return nil
+            }
+
+            let topFrame = CGRect(
+                x: targetFrame.minX,
+                y: targetFrame.minY,
+                width: targetFrame.width,
+                height: firstHeight
+            ).integral
+            let bottomFrame = CGRect(
+                x: targetFrame.minX,
+                y: topFrame.maxY + paneGap,
+                width: targetFrame.width,
+                height: secondHeight
+            ).integral
+
+            return SplitPlacement(
+                existingFrame: insertFirst ? bottomFrame : topFrame,
+                newFrame: insertFirst ? topFrame : bottomFrame,
+                mode: .localReflow
+            )
+        }
     }
 
     private func shiftCollisions(

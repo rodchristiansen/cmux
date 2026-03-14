@@ -498,7 +498,7 @@ final class BonsplitTests: XCTestCase {
     }
 
     @MainActor
-    func testPaperCanvasSplitDoesNotResizeExistingPane() {
+    func testPaperCanvasSplitLocallyReflowsWhenPaneCanFitTwoChildren() {
         let controller = BonsplitController(
             configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
         )
@@ -519,41 +519,52 @@ final class BonsplitTests: XCTestCase {
             return XCTFail("Expected paper-pane frames after split")
         }
 
-        XCTAssertEqual(originalFrameAfter.width, originalFrameBefore.width)
+        XCTAssertLessThan(originalFrameAfter.width, originalFrameBefore.width)
         XCTAssertEqual(originalFrameAfter.height, originalFrameBefore.height)
         XCTAssertEqual(originalFrameAfter.origin.x, originalFrameBefore.origin.x)
         XCTAssertEqual(originalFrameAfter.origin.y, originalFrameBefore.origin.y)
-        XCTAssertGreaterThanOrEqual(newFrame.minX, originalFrameAfter.maxX)
-        XCTAssertEqual(newFrame.size, originalFrameAfter.size)
+        XCTAssertEqual(originalFrameAfter.width, newFrame.width, accuracy: 1.0)
+        XCTAssertEqual(originalFrameAfter.maxX + 16, newFrame.minX, accuracy: 1.0)
+        XCTAssertEqual(newFrame.size.height, originalFrameAfter.size.height, accuracy: 0.001)
     }
 
     @MainActor
     func testPaperCanvasNavigationMovesViewportToFocusedNeighbor() {
         let controller = BonsplitController(
-            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+            configuration: BonsplitConfiguration(
+                layoutStyle: .paperCanvas,
+                appearance: BonsplitConfiguration.Appearance(minimumPaneWidth: 260)
+            )
         )
         controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1000, height: 700))
 
         guard let originalPane = controller.focusedPaneId else {
             return XCTFail("Expected focused pane")
         }
-        guard let rightPane = controller.splitPane(originalPane, orientation: .horizontal) else {
+        guard let farRightPane = controller.splitPane(originalPane, orientation: .horizontal) else {
             return XCTFail("Expected split pane")
         }
-
         controller.focusPane(originalPane)
+        guard let overflowPane = controller.splitPane(originalPane, orientation: .horizontal) else {
+            return XCTFail("Expected overflow split pane")
+        }
+
+        controller.focusPane(overflowPane)
         let beforeOrigin = controller.internalController.paperViewportOrigin
 
         controller.navigateFocus(direction: .right)
 
-        XCTAssertEqual(controller.focusedPaneId, rightPane)
+        XCTAssertEqual(controller.focusedPaneId, farRightPane)
         XCTAssertGreaterThan(controller.internalController.paperViewportOrigin.x, beforeOrigin.x)
     }
 
     @MainActor
-    func testPaperCanvasSplitShiftsExistingPaneChainInsteadOfOverlapping() {
+    func testPaperCanvasSplitSpillsAndShiftsExistingPaneChainOnceMinimumWidthIsReached() {
         let controller = BonsplitController(
-            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+            configuration: BonsplitConfiguration(
+                layoutStyle: .paperCanvas,
+                appearance: BonsplitConfiguration.Appearance(minimumPaneWidth: 260)
+            )
         )
         controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1000, height: 700))
 
@@ -574,6 +585,7 @@ final class BonsplitTests: XCTestCase {
             return XCTFail("Expected paper-pane frames")
         }
 
+        XCTAssertEqual(rootFrame.width, firstRightFrame.width, accuracy: 1.0)
         XCTAssertGreaterThanOrEqual(secondRightFrame.minX, rootFrame.maxX)
         XCTAssertGreaterThanOrEqual(firstRightFrame.minX, secondRightFrame.maxX)
     }
