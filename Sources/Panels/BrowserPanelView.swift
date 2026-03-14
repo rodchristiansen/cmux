@@ -4676,8 +4676,11 @@ struct WebViewRepresentable: NSViewRepresentable {
         reason: String
     ) {
         guard !container.isHidden, container.window != nil else { return }
-        if let lastRefreshToken = coordinator.lastLocalInlineRefreshToken,
-           lastRefreshToken == refreshToken {
+        guard let lastRefreshToken = coordinator.lastLocalInlineRefreshToken else {
+            coordinator.lastLocalInlineRefreshToken = refreshToken
+            return
+        }
+        if lastRefreshToken == refreshToken {
             return
         }
 
