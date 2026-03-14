@@ -296,6 +296,10 @@ final class FeedbackComposerShortcutUITests: XCTestCase {
 }
 
 final class CommandPaletteAllSurfacesUITests: XCTestCase {
+    private enum TestFailure: Error {
+        case missingElement(String)
+    }
+
     private var socketPath = ""
     private let hiddenSurfaceToken = "cmux-command-palette-hidden-surface"
     private let visibleSurfaceToken = "cmux-command-palette-visible-surface"
@@ -315,6 +319,7 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
     func testCmdShiftPBackspaceReturnsToWorkspaceResults() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments += ["-commandPalette.switcherSearchAllSurfaces", "NO"]
         app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
         launchAndActivate(app)
@@ -399,6 +404,7 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
     func testCmdPSearchCanIncludeSurfacesFromOtherWorkspacesWhenEnabled() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments += ["-commandPalette.switcherSearchAllSurfaces", "NO"]
         app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_SHOW_SETTINGS"] = "1"
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
@@ -536,7 +542,8 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
             }
         }
 
-        throw XCTSkip("Could not find the command palette all-surfaces toggle")
+        XCTFail("Could not find the command palette all-surfaces toggle")
+        throw TestFailure.missingElement(toggleId)
     }
 
     private func toggleIsOn(_ element: XCUIElement) -> Bool {
@@ -616,7 +623,7 @@ final class CommandPaletteAllSurfacesUITests: XCTestCase {
             guard (snapshot["query"] as? String) == query else { return false }
             return predicate?(snapshot) ?? true
         }
-        return matched ? latest : latest
+        return matched ? latest : nil
     }
 
     private func commandPaletteSnapshot(windowId: String) -> [String: Any]? {

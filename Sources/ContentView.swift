@@ -4136,10 +4136,14 @@ struct ContentView: View {
 
     private func commandPaletteOrderedSwitcherPanels(for workspace: Workspace) -> [UUID] {
         let orderedPanelIds = workspace.sidebarOrderedPanelIds()
-        guard orderedPanelIds.count < workspace.panels.count else { return orderedPanelIds }
+        let existingPanelIds = Set(workspace.panels.keys)
+        var panelIds: [UUID] = []
+        panelIds.reserveCapacity(existingPanelIds.count)
+        var seen: Set<UUID> = []
 
-        var panelIds = orderedPanelIds
-        var seen = Set(orderedPanelIds)
+        for panelId in orderedPanelIds where existingPanelIds.contains(panelId) && seen.insert(panelId).inserted {
+            panelIds.append(panelId)
+        }
         for panelId in workspace.panels.keys.sorted(by: { $0.uuidString < $1.uuidString })
         where seen.insert(panelId).inserted {
             panelIds.append(panelId)
