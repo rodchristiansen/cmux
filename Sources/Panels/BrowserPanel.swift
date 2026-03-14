@@ -1253,11 +1253,120 @@ final class BrowserPortalAnchorView: NSView {
     }
 }
 
+enum BrowserRuntimeBackendKind: String {
+    case localWebKit
+}
+
+struct BrowserRuntimeSurfaceConfiguration {
+    let bootstrapUserScriptSources: [String]
+    let underPageBackgroundColor: NSColor
+    let customUserAgent: String
+}
+
+@MainActor
+protocol BrowserSurfaceRuntime: AnyObject {
+    var backendKind: BrowserRuntimeBackendKind { get }
+    var webView: WKWebView { get }
+    var webViewInstanceID: UUID { get }
+
+    @discardableResult
+    func replaceWebView(
+        using configuration: BrowserRuntimeSurfaceConfiguration,
+        pageZoom: CGFloat?
+    ) -> WKWebView
+}
+
+@MainActor
+protocol BrowserSurfaceRuntimeFactory {
+    func makeSurface(using configuration: BrowserRuntimeSurfaceConfiguration) -> any BrowserSurfaceRuntime
+}
+
+@MainActor
+final class LocalWebKitBrowserSurfaceRuntimeFactory: BrowserSurfaceRuntimeFactory {
+    static let shared = LocalWebKitBrowserSurfaceRuntimeFactory()
+
+    private let processPool = WKProcessPool()
+
+    func makeSurface(using configuration: BrowserRuntimeSurfaceConfiguration) -> any BrowserSurfaceRuntime {
+        LocalWebKitBrowserSurfaceRuntime(
+            processPool: processPool,
+            configuration: configuration
+        )
+    }
+}
+
+@MainActor
+final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
+    let backendKind: BrowserRuntimeBackendKind = .localWebKit
+
+    private let processPool: WKProcessPool
+    private(set) var webView: WKWebView
+    private(set) var webViewInstanceID: UUID
+
+    init(
+        processPool: WKProcessPool,
+        configuration: BrowserRuntimeSurfaceConfiguration
+    ) {
+        self.processPool = processPool
+        let webView = Self.makeWebView(
+            processPool: processPool,
+            configuration: configuration
+        )
+        self.webView = webView
+        self.webViewInstanceID = UUID()
+    }
+
+    @discardableResult
+    func replaceWebView(
+        using configuration: BrowserRuntimeSurfaceConfiguration,
+        pageZoom: CGFloat?
+    ) -> WKWebView {
+        let replacement = Self.makeWebView(
+            processPool: processPool,
+            configuration: configuration
+        )
+        if let pageZoom {
+            replacement.pageZoom = pageZoom
+        }
+        webView = replacement
+        webViewInstanceID = UUID()
+        return replacement
+    }
+
+    private static func makeWebView(
+        processPool: WKProcessPool,
+        configuration: BrowserRuntimeSurfaceConfiguration
+    ) -> CmuxWebView {
+        let webViewConfiguration = WKWebViewConfiguration()
+        webViewConfiguration.processPool = processPool
+        webViewConfiguration.mediaTypesRequiringUserActionForPlayback = []
+        webViewConfiguration.websiteDataStore = .default()
+        webViewConfiguration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        webViewConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        for source in configuration.bootstrapUserScriptSources {
+            webViewConfiguration.userContentController.addUserScript(
+                WKUserScript(
+                    source: source,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: false
+                )
+            )
+        }
+
+        let webView = CmuxWebView(frame: .zero, configuration: webViewConfiguration)
+        webView.allowsBackForwardNavigationGestures = true
+        if #available(macOS 13.3, *) {
+            webView.isInspectable = true
+        }
+        webView.underPageBackgroundColor = configuration.underPageBackgroundColor
+        webView.customUserAgent = configuration.customUserAgent
+        return webView
+    }
+}
+
 @MainActor
 final class BrowserPanel: Panel, ObservableObject {
-    /// Shared process pool for cookie sharing across all browser panels
-    private static let sharedProcessPool = WKProcessPool()
-
     static let telemetryHookBootstrapScriptSource = """
     (() => {
       if (window.__cmuxHooksInstalled) return true;
@@ -1391,13 +1500,27 @@ final class BrowserPanel: Panel, ObservableObject {
         return NSColor.windowBackgroundColor
     }
 
+    private static func runtimeSurfaceConfiguration() -> BrowserRuntimeSurfaceConfiguration {
+        BrowserRuntimeSurfaceConfiguration(
+            bootstrapUserScriptSources: [
+                telemetryHookBootstrapScriptSource,
+                addressBarFocusTrackingBootstrapScript,
+            ],
+            underPageBackgroundColor: GhosttyBackgroundTheme.currentColor(),
+            customUserAgent: BrowserUserAgentSettings.safariUserAgent
+        )
+    }
+
     let id: UUID
     let panelType: PanelType = .browser
 
     /// The workspace ID this panel belongs to
     private(set) var workspaceId: UUID
 
-    /// The underlying web view
+    private let runtimeFactory: any BrowserSurfaceRuntimeFactory
+    private var runtime: any BrowserSurfaceRuntime
+
+    /// Cached reference to the active browser view. The runtime owns creation and replacement.
     private(set) var webView: WKWebView
 
     /// Monotonic identity for the current WKWebView instance.
@@ -1952,56 +2075,24 @@ final class BrowserPanel: Panel, ObservableObject {
         false
     }
 
-    private static func makeWebView() -> CmuxWebView {
-        let config = WKWebViewConfiguration()
-        config.processPool = BrowserPanel.sharedProcessPool
-        config.mediaTypesRequiringUserActionForPlayback = []
-        // Ensure browser cookies/storage persist across navigations and launches.
-        // This reduces repeated consent/bot-challenge flows on sites like Google.
-        config.websiteDataStore = .default()
-
-        // Enable developer extras (DevTools)
-        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-
-        // Enable JavaScript
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Keep browser console/error/dialog telemetry active from document start on every navigation.
-        config.userContentController.addUserScript(
-            WKUserScript(
-                source: Self.telemetryHookBootstrapScriptSource,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            )
+    private func replaceRuntimeWebView(pageZoom: CGFloat? = nil) -> WKWebView {
+        let replacement = runtime.replaceWebView(
+            using: Self.runtimeSurfaceConfiguration(),
+            pageZoom: pageZoom
         )
-        // Track the last editable focused element continuously so omnibar exit can
-        // restore page input focus even if capture runs after first-responder handoff.
-        config.userContentController.addUserScript(
-            WKUserScript(
-                source: Self.addressBarFocusTrackingBootstrapScript,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            )
-        )
-
-        let webView = CmuxWebView(frame: .zero, configuration: config)
-        webView.allowsBackForwardNavigationGestures = true
-        if #available(macOS 13.3, *) {
-            webView.isInspectable = true
-        }
-        // Match the empty-page background to the terminal theme so newly-created browsers
-        // don't flash white before content loads.
-        webView.underPageBackgroundColor = GhosttyBackgroundTheme.currentColor()
-        // Always present as Safari.
-        webView.customUserAgent = BrowserUserAgentSettings.safariUserAgent
-        return webView
+        webView = replacement
+        webViewInstanceID = runtime.webViewInstanceID
+        return replacement
     }
 
-    private func bindWebView(_ webView: CmuxWebView) {
-        webView.onContextMenuDownloadStateChanged = { [weak self] downloading in
-            if downloading {
-                self?.beginDownloadActivity()
-            } else {
-                self?.endDownloadActivity()
+    private func bindWebView(_ webView: WKWebView) {
+        if let cmuxWebView = webView as? CmuxWebView {
+            cmuxWebView.onContextMenuDownloadStateChanged = { [weak self] downloading in
+                if downloading {
+                    self?.beginDownloadActivity()
+                } else {
+                    self?.endDownloadActivity()
+                }
             }
         }
         webView.navigationDelegate = navigationDelegate
@@ -2015,14 +2106,22 @@ final class BrowserPanel: Panel, ObservableObject {
         return instanceID == webViewInstanceID
     }
 
-    init(workspaceId: UUID, initialURL: URL? = nil, bypassInsecureHTTPHostOnce: String? = nil) {
+    init(
+        workspaceId: UUID,
+        initialURL: URL? = nil,
+        bypassInsecureHTTPHostOnce: String? = nil,
+        runtimeFactory: (any BrowserSurfaceRuntimeFactory)? = nil
+    ) {
+        let runtimeFactory = runtimeFactory ?? LocalWebKitBrowserSurfaceRuntimeFactory.shared
         self.id = UUID()
         self.workspaceId = workspaceId
         self.insecureHTTPBypassHostOnce = BrowserInsecureHTTPSettings.normalizeHost(bypassInsecureHTTPHostOnce ?? "")
         self.browserThemeMode = BrowserThemeSettings.mode()
-
-        let webView = Self.makeWebView()
-        self.webView = webView
+        self.runtimeFactory = runtimeFactory
+        let runtime = runtimeFactory.makeSurface(using: Self.runtimeSurfaceConfiguration())
+        self.runtime = runtime
+        self.webView = runtime.webView
+        self.webViewInstanceID = runtime.webViewInstanceID
         self.insecureHTTPAlertFactory = { NSAlert() }
 
         // Set up navigation delegate
@@ -2089,7 +2188,7 @@ final class BrowserPanel: Panel, ObservableObject {
         }
         self.uiDelegate = browserUIDelegate
 
-        bindWebView(webView)
+        bindWebView(runtime.webView)
         installDetachedDeveloperToolsWindowCloseObserver()
         applyBrowserThemeModeIfNeeded()
         insecureHTTPAlertWindowProvider = { [weak self] in
@@ -2279,10 +2378,7 @@ final class BrowserPanel: Panel, ObservableObject {
             terminatedCmuxWebView.onContextMenuDownloadStateChanged = nil
         }
 
-        let replacement = Self.makeWebView()
-        replacement.pageZoom = desiredZoom
-        webViewInstanceID = UUID()
-        webView = replacement
+        let replacement = replaceRuntimeWebView(pageZoom: desiredZoom)
         shouldRenderWebView = wasRenderable
 
         bindWebView(replacement)
@@ -2830,9 +2926,7 @@ extension BrowserPanel {
             oldCmuxWebView.onContextMenuDownloadStateChanged = nil
         }
 
-        let replacement = Self.makeWebView()
-        webViewInstanceID = UUID()
-        webView = replacement
+        let replacement = replaceRuntimeWebView()
         shouldRenderWebView = false
         bindWebView(replacement)
         applyBrowserThemeModeIfNeeded()

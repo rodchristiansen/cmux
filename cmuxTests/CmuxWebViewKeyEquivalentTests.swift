@@ -14523,6 +14523,95 @@ final class GhosttyTerminalViewVisibilityPolicyTests: XCTestCase {
     }
 }
 
+@MainActor
+final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
+    private func assertColorsEqual(
+        _ lhs: NSColor?,
+        _ rhs: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let lhsComponents = lhs?.usingColorSpace(.deviceRGB)?.cgColor.components
+        let rhsComponents = rhs.usingColorSpace(.deviceRGB)?.cgColor.components
+        XCTAssertNotNil(lhsComponents, file: file, line: line)
+        XCTAssertNotNil(rhsComponents, file: file, line: line)
+        guard let lhsComponents, let rhsComponents else { return }
+        XCTAssertEqual(lhsComponents.count, rhsComponents.count, file: file, line: line)
+        for (left, right) in zip(lhsComponents, rhsComponents) {
+            XCTAssertEqual(left, right, accuracy: 0.01, file: file, line: line)
+        }
+    }
+
+    private func makeConfiguration(
+        backgroundColor: NSColor = NSColor.systemTeal.withAlphaComponent(0.4),
+        customUserAgent: String = "cmux-runtime-test",
+        scriptSources: [String] = [
+            "window.__cmuxRuntimeTestOne = true;",
+            "window.__cmuxRuntimeTestTwo = true;",
+        ]
+    ) -> BrowserRuntimeSurfaceConfiguration {
+        BrowserRuntimeSurfaceConfiguration(
+            bootstrapUserScriptSources: scriptSources,
+            underPageBackgroundColor: backgroundColor,
+            customUserAgent: customUserAgent
+        )
+    }
+
+    func testFactoryUsesSharedProcessPoolAcrossSurfaces() {
+        let factory = LocalWebKitBrowserSurfaceRuntimeFactory.shared
+
+        let first = factory.makeSurface(using: makeConfiguration())
+        let second = factory.makeSurface(using: makeConfiguration(customUserAgent: "cmux-runtime-test-2"))
+
+        XCTAssertTrue(first.webView.configuration.processPool === second.webView.configuration.processPool)
+    }
+
+    func testSurfaceAppliesConfigurationToCreatedWebView() {
+        let configuration = makeConfiguration()
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: configuration
+        )
+        guard let webView = surface.webView as? CmuxWebView else {
+            return XCTFail("Expected CmuxWebView runtime surface")
+        }
+
+        XCTAssertEqual(webView.customUserAgent, configuration.customUserAgent)
+        assertColorsEqual(webView.underPageBackgroundColor, configuration.underPageBackgroundColor)
+        XCTAssertEqual(
+            webView.configuration.userContentController.userScripts.map(\.source),
+            configuration.bootstrapUserScriptSources
+        )
+    }
+
+    func testReplaceWebViewCreatesNewInstanceAndPreservesRequestedPageZoom() {
+        let processPool = WKProcessPool()
+        let initialConfiguration = makeConfiguration(customUserAgent: "cmux-runtime-test-initial")
+        let replacementConfiguration = makeConfiguration(
+            backgroundColor: NSColor.systemPink.withAlphaComponent(0.3),
+            customUserAgent: "cmux-runtime-test-replacement"
+        )
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: processPool,
+            configuration: initialConfiguration
+        )
+
+        let originalWebView = surface.webView
+        let originalInstanceID = surface.webViewInstanceID
+        let replacement = surface.replaceWebView(
+            using: replacementConfiguration,
+            pageZoom: 1.75
+        )
+
+        XCTAssertFalse(replacement === originalWebView)
+        XCTAssertNotEqual(surface.webViewInstanceID, originalInstanceID)
+        XCTAssertTrue(replacement.configuration.processPool === processPool)
+        XCTAssertEqual(replacement.pageZoom, 1.75, accuracy: 0.001)
+        XCTAssertEqual(replacement.customUserAgent, replacementConfiguration.customUserAgent)
+        assertColorsEqual(replacement.underPageBackgroundColor, replacementConfiguration.underPageBackgroundColor)
+    }
+}
+
 final class TerminalControllerSocketListenerHealthTests: XCTestCase {
     private func makeTempSocketPath() -> String {
         "/tmp/cmux-socket-health-\(UUID().uuidString).sock"
