@@ -1590,6 +1590,11 @@ struct BrowserSurfaceRuntimeState: Equatable {
     let pageZoom: CGFloat
 }
 
+struct BrowserSurfaceRuntimeAttachmentState: Equatable {
+    let isAttachedToSuperview: Bool
+    let isInWindow: Bool
+}
+
 enum BrowserSurfaceDeveloperToolsVisibilityState: Equatable {
     case unavailable
     case hidden
@@ -1621,6 +1626,7 @@ protocol BrowserSurfaceRuntime: AnyObject {
     var webView: WKWebView { get }
     var webViewInstanceID: UUID { get }
     var state: BrowserSurfaceRuntimeState { get }
+    var attachmentState: BrowserSurfaceRuntimeAttachmentState { get }
     var eventHandlers: BrowserSurfaceRuntimeEventHandlers { get set }
     var onStateChange: ((BrowserSurfaceRuntimeState) -> Void)? { get set }
 
@@ -1715,6 +1721,13 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
             canGoForward: webView.canGoForward,
             estimatedProgress: webView.estimatedProgress,
             pageZoom: webView.pageZoom
+        )
+    }
+
+    var attachmentState: BrowserSurfaceRuntimeAttachmentState {
+        BrowserSurfaceRuntimeAttachmentState(
+            isAttachedToSuperview: webView.superview != nil,
+            isInWindow: webView.window != nil
         )
     }
 
@@ -3087,8 +3100,8 @@ final class BrowserPanel: Panel, ObservableObject {
             guard let self else { return }
             // If loading restarted, ignore this end.
             guard self.loadingGeneration == genAtEnd else { return }
-            // If WebKit is still loading, ignore.
-            guard !self.webView.isLoading else { return }
+            // If the runtime still reports a live load, ignore.
+            guard !self.runtime.state.isLoading else { return }
             self.isLoading = false
         }
         loadingEndWorkItem = work
@@ -3268,7 +3281,8 @@ final class BrowserPanel: Panel, ObservableObject {
 
 extension BrowserPanel {
     private var needsWorkspaceContextReset: Bool {
-        shouldRenderWebView ||
+        let attachmentState = runtime.attachmentState
+        return shouldRenderWebView ||
         currentURL != nil ||
         !pageTitle.isEmpty ||
         faviconPNGData != nil ||
@@ -3283,7 +3297,7 @@ extension BrowserPanel {
         isDownloading ||
         activeDownloadCount != 0 ||
         preferredDeveloperToolsVisible ||
-        webView.superview != nil
+        attachmentState.isAttachedToSuperview
     }
 
     func resetForWorkspaceContextChange(reason: String) {
@@ -3907,12 +3921,13 @@ extension BrowserPanel {
     }
 
     func shouldPreserveDeveloperToolsIntentWhileDetached() -> Bool {
-        preferredDeveloperToolsVisible &&
+        let attachmentState = runtime.attachmentState
+        return preferredDeveloperToolsVisible &&
             (
                 forceDeveloperToolsRefreshOnNextAttach ||
                 developerToolsRestoreRetryWorkItem != nil ||
-                webView.superview == nil ||
-                webView.window == nil
+                !attachmentState.isAttachedToSuperview ||
+                !attachmentState.isInWindow
             )
     }
 
@@ -4632,11 +4647,12 @@ extension BrowserPanel {
 
     func debugDeveloperToolsStateSummary() -> String {
         let visibilityState = runtime.developerToolsVisibilityState()
+        let attachmentState = runtime.attachmentState
         let preferred = preferredDeveloperToolsVisible ? 1 : 0
         let visible = visibilityState.isVisible ? 1 : 0
         let inspector = visibilityState.isAvailable ? 1 : 0
-        let attached = webView.superview == nil ? 0 : 1
-        let inWindow = webView.window == nil ? 0 : 1
+        let attached = attachmentState.isAttachedToSuperview ? 1 : 0
+        let inWindow = attachmentState.isInWindow ? 1 : 0
         let forceRefresh = forceDeveloperToolsRefreshOnNextAttach ? 1 : 0
         let transitionTarget = developerToolsTransitionTargetVisible.map { $0 ? "1" : "0" } ?? "nil"
         let pendingTarget = pendingDeveloperToolsTransitionTargetVisible.map { $0 ? "1" : "0" } ?? "nil"

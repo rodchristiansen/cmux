@@ -14692,6 +14692,37 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertTrue(secondScriptApplied)
     }
 
+    func testAttachmentStateReflectsWebViewHostingLifecycle() {
+        _ = NSApplication.shared
+
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+        XCTAssertEqual(
+            surface.attachmentState,
+            BrowserSurfaceRuntimeAttachmentState(isAttachedToSuperview: false, isInWindow: false)
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: window.contentRect(forFrameRect: window.frame))
+        window.contentView = container
+        container.addSubview(surface.webView)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        drainMainQueue()
+
+        XCTAssertEqual(
+            surface.attachmentState,
+            BrowserSurfaceRuntimeAttachmentState(isAttachedToSuperview: true, isInWindow: true)
+        )
+    }
+
     func testReplaceWebViewCreatesNewInstanceAndPreservesRequestedPageZoom() {
         let processPool = WKProcessPool()
         let initialConfiguration = makeConfiguration(customUserAgent: "cmux-runtime-test-initial")
@@ -15039,6 +15070,10 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         var webView: WKWebView
         var webViewInstanceID = UUID()
         var state: BrowserSurfaceRuntimeState
+        var currentAttachmentState = BrowserSurfaceRuntimeAttachmentState(
+            isAttachedToSuperview: false,
+            isInWindow: false
+        )
         var eventHandlers = BrowserSurfaceRuntimeEventHandlers()
         var onStateChange: ((BrowserSurfaceRuntimeState) -> Void)?
 
@@ -15086,6 +15121,10 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
                 estimatedProgress: 0,
                 pageZoom: webView.pageZoom
             )
+        }
+
+        var attachmentState: BrowserSurfaceRuntimeAttachmentState {
+            currentAttachmentState
         }
 
         @discardableResult
@@ -15284,6 +15323,26 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         }
     }
 
+    private func makeRuntimeState(
+        currentURL: URL? = nil,
+        title: String? = nil,
+        isLoading: Bool = false,
+        canGoBack: Bool = false,
+        canGoForward: Bool = false,
+        estimatedProgress: Double = 0,
+        pageZoom: CGFloat = 1.0
+    ) -> BrowserSurfaceRuntimeState {
+        BrowserSurfaceRuntimeState(
+            currentURL: currentURL,
+            title: title,
+            isLoading: isLoading,
+            canGoBack: canGoBack,
+            canGoForward: canGoForward,
+            estimatedProgress: estimatedProgress,
+            pageZoom: pageZoom
+        )
+    }
+
     func testBrowserPanelConfiguresRuntimeCallbacksOnInit() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let factory = RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
@@ -15397,6 +15456,59 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
 
         XCTAssertNil(panel.searchState)
         XCTAssertEqual(runtime.clearFindInPageCallCount, baselineClearCallCount + 1)
+    }
+
+    func testBrowserPanelContextResetUsesRuntimeAttachmentStateBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.currentAttachmentState = BrowserSurfaceRuntimeAttachmentState(
+            isAttachedToSuperview: true,
+            isInWindow: false
+        )
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+        let priorWebView = panel.webView
+        let priorInstanceID = panel.webViewInstanceID
+
+        panel.resetForWorkspaceContextChange(reason: "runtime-attachment")
+
+        XCTAssertFalse(panel.webView === priorWebView)
+        XCTAssertNotEqual(panel.webViewInstanceID, priorInstanceID)
+        XCTAssertFalse(panel.shouldRenderWebView)
+    }
+
+    func testBrowserPanelLoadingIndicatorSettlingUsesRuntimeStateBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        runtime.emitState(makeRuntimeState(isLoading: true))
+        XCTAssertTrue(panel.isLoading)
+
+        runtime.emitState(makeRuntimeState(isLoading: false))
+        runtime.state = makeRuntimeState(isLoading: true)
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(panel.isLoading)
+    }
+
+    func testBrowserPanelDetachedDeveloperToolsIntentUsesRuntimeAttachmentStateBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.currentDeveloperToolsVisibilityState = .hidden
+        runtime.currentAttachmentState = BrowserSurfaceRuntimeAttachmentState(
+            isAttachedToSuperview: true,
+            isInWindow: true
+        )
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        XCTAssertFalse(panel.shouldPreserveDeveloperToolsIntentWhileDetached())
     }
 
     func testBrowserPanelDeveloperToolsVisibilityUsesRuntimeBoundary() {
