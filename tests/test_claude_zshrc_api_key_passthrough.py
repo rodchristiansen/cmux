@@ -35,6 +35,9 @@ def main() -> int:
     if not (SHELL_WRAPPER_DIR / ".zshenv").exists():
         print(f"SKIP: missing zsh wrapper at {SHELL_WRAPPER_DIR}")
         return 0
+    if shutil.which("zsh") is None:
+        print("SKIP: zsh is not available on PATH")
+        return 0
     if not SOURCE_CLAUDE_WRAPPER.exists():
         print(f"SKIP: missing Claude wrapper at {SOURCE_CLAUDE_WRAPPER}")
         return 0
