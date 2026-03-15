@@ -12,11 +12,11 @@ When we change the fork, update this document and the parent submodule SHA.
 
 ## Current fork changes
 
-Fork rebased onto upstream `v1.3.0` plus newer `main` commits as of March 12, 2026.
+Fork rebased onto upstream `main` at `a2b2b883e` as of March 15, 2026.
 
 ### 1) OSC 99 (kitty) notification parser
 
-- Commit: `a2252e7a9` (Add OSC 99 notification parser)
+- Commit: `7a8fcb0b7` (Add OSC 99 notification parser)
 - Files:
   - `src/terminal/osc.zig`
   - `src/terminal/osc/parsers.zig`
@@ -26,7 +26,7 @@ Fork rebased onto upstream `v1.3.0` plus newer `main` commits as of March 12, 20
 
 ### 2) macOS display link restart on display changes
 
-- Commit: `c07e6c5a5` (macos: restart display link after display ID change)
+- Commit: `3d4450b54` (macos: restart display link after display ID change)
 - Files:
   - `src/renderer/generic.zig`
 - Summary:
@@ -35,7 +35,7 @@ Fork rebased onto upstream `v1.3.0` plus newer `main` commits as of March 12, 20
 
 ### 3) Keyboard copy mode selection C API
 
-- Commit: `a50579bd5` (Add C API for keyboard copy mode selection)
+- Commit: `3ee622a8a` (Add C API for keyboard copy mode selection)
 - Files:
   - `src/Surface.zig`
   - `src/apprt/embedded.zig`
@@ -50,8 +50,8 @@ applied earlier than the section 3 copy-mode commit, but they are kept together 
 touch the same stale-frame mitigation path and tend to conflict in the same files during rebases.
 
 - Commits:
-  - `769bbf7a9` (macos: reduce transient blank/scaled frames during resize)
-  - `9efcdfdf8` (macos: keep top-left gravity for stale-frame replay)
+  - `b97871f60` (macos: reduce transient blank/scaled frames during resize)
+  - `c27d59178` (macos: keep top-left gravity for stale-frame replay)
 - Files:
   - `pkg/macos/animation.zig`
   - `src/Surface.zig`
@@ -63,34 +63,27 @@ touch the same stale-frame mitigation path and tend to conflict in the same file
   - Replays the last rendered frame during resize and keeps its geometry anchored correctly.
   - Reduces transient blank or scaled frames while a macOS window is being resized.
 
-### 5) zsh prompt redraw markers use OSC 133 P
+### 5) zsh Pure-style prompt redraw markers
 
-- Commit: `8ade43ce5` (zsh: use OSC 133 P for prompt redraws)
+- Commit: `15b92f134` (Fix Pure prompt redraw markers)
 - Files:
   - `src/shell-integration/zsh/ghostty-integration`
 - Summary:
-  - Emits one `OSC 133;A` fresh-prompt mark for real prompt transitions.
-  - Uses `OSC 133;P` markers for prompt redraws so async zsh themes do not look like extra prompt lines.
+  - Emits one `OSC 133;A` fresh-prompt mark for real prompt transitions and uses `OSC 133;P` markers for redraws.
+  - Handles multiline prompts that use `\n%{\r%}` to return to column 0 before the visible prompt line.
+  - Avoids inserting an explicit continuation marker after Pure's hidden carriage return, because Ghostty already tracks the newline as prompt continuation and the extra marker duplicates the preprompt row.
+  - Keeps the current upstream prompt-preservation flow intact while restoring the Pure-specific redraw behavior cmux needs.
 
-### 6) zsh Pure-style multiline prompt redraws
+### 6) cmux theme picker helper hooks
 
 - Commits:
-  - `0cf559581` (zsh: fix Pure-style multiline prompt redraws)
-  - `312c7b23a` (zsh: avoid extra Pure continuation markers)
-  - `404a3f175` (Fix Pure prompt redraw markers)
-- Files:
-  - `src/shell-integration/zsh/ghostty-integration`
-- Summary:
-  - Handles multiline prompts that use `\n%{\r%}` to return to column 0 before the visible prompt line.
-  - Keeps redraw-safe prompt-start markers for async themes.
-  - Avoids inserting an explicit continuation marker after Pure's hidden carriage return, because Ghostty already tracks the newline as prompt continuation and the extra marker duplicates the preprompt row.
-  - Restores that prompt-marker behavior on top of the current Ghostty `main` base after the older redraw fix drifted out during later submodule updates.
-
-The fork branch HEAD is now the section 6 zsh redraw follow-up commit.
-
-### 7) cmux theme picker helper hooks
-
-- Commit: `0c52c987b` (Add cmux theme picker helper hooks)
+  - `ddf0e2746` (Add cmux theme picker helper hooks)
+  - `a0929c1e9` (Fix cmux theme picker preview writes)
+  - `6c5aea40e` (Improve cmux theme picker footer contrast)
+  - `a35a4f698` (Respect system theme in cmux picker)
+  - `a0fdcc911` (Skip theme detection in cmux picker)
+  - `a0dfa8c23` (Match Ghostty theme picker startup)
+  - `3cc60d5e3` (Harden cmux theme override writes)
 - Files:
   - `build.zig`
   - `src/cli/list_themes.zig`
@@ -99,8 +92,9 @@ The fork branch HEAD is now the section 6 zsh redraw follow-up commit.
   - Adds a `zig build cli-helper` step so cmux can bundle Ghostty's CLI helper binary on macOS.
   - Lets `+list-themes` switch into a cmux-managed mode via env vars, writing the cmux theme override file and posting the existing cmux reload notification for live app-wide preview.
   - Fixes the helper-only `app-runtime=none` stdout path so the Ghostty CLI binary builds with the current Zig toolchain.
+  - Aligns preview startup, system-theme handling, footer contrast, and override-file writes with the current upstream picker UI.
 
-The fork branch HEAD is now the section 7 cmux theme picker helper commit.
+The fork branch HEAD is now the section 6 theme-picker hardening commit.
 
 ## Upstreamed fork changes
 
@@ -124,6 +118,8 @@ These files change frequently upstream; be careful when rebasing the fork:
   - Prompt marker handling is easy to regress when upstream adjusts zsh redraw behavior. Keep the
     `OSC 133;A` vs `OSC 133;P` split intact for redraw-heavy themes. Pure-style `\n%{\r%}`
     prompt newlines should not get an extra explicit continuation marker after the hidden CR.
+  - Current upstream also preserves a clean prompt around async redraws, so keep that behavior while
+    applying the Pure-specific newline guard.
 
 - `src/cli/list_themes.zig`
   - cmux now relies on the upstream picker UI plus local env-driven hooks for live preview and restore.
