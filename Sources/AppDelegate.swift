@@ -6453,6 +6453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let env = ProcessInfo.processInfo.environment
         guard env["CMUX_UI_TEST_BONSPLIT_TAB_DRAG_SETUP"] == "1" else { return }
         guard tabManager != nil else { return }
+        let startWithHiddenSidebar = env["CMUX_UI_TEST_BONSPLIT_START_WITH_HIDDEN_SIDEBAR"] == "1"
 
         let deadline = Date().addingTimeInterval(20.0)
         func hasMainTerminalWindow() -> Bool {
@@ -6510,8 +6511,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
 
             workspace.setPanelCustomTitle(panelId: betaPanelId, title: betaTitle)
+            if startWithHiddenSidebar {
+                self.sidebarState?.isVisible = false
+            }
             self.writeBonsplitTabDragUITestData([
                 "ready": "1",
+                "sidebarVisible": startWithHiddenSidebar ? "0" : "1",
                 "workspaceId": workspace.id.uuidString,
                 "workspaceTitle": workspaceTitle,
                 "alphaTitle": alphaTitle,
