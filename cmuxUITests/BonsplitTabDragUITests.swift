@@ -199,6 +199,55 @@ final class BonsplitTabDragUITests: XCTestCase {
         )
     }
 
+    func testHiddenWorkspaceTitlebarCollapsedSidebarKeepsControlsSuppressed() {
+        let (app, dataPath) = launchConfiguredApp(startWithHiddenSidebar: true)
+
+        XCTAssertTrue(
+            ensureForegroundAfterLaunch(app, timeout: launchTimeout),
+            "Expected app to launch for collapsed-sidebar hidden-titlebar controls UI test. state=\(app.state.rawValue)"
+        )
+        XCTAssertTrue(waitForAnyJSON(atPath: dataPath, timeout: setupTimeout), "Expected tab-drag setup data at \(dataPath)")
+        guard let ready = waitForJSONKey("ready", equals: "1", atPath: dataPath, timeout: setupTimeout) else {
+            XCTFail("Timed out waiting for ready=1. data=\(loadJSON(atPath: dataPath) ?? [:])")
+            return
+        }
+
+        if let setupError = ready["setupError"], !setupError.isEmpty {
+            XCTFail("Setup failed: \(setupError)")
+            return
+        }
+
+        XCTAssertEqual(ready["sidebarVisible"], "0", "Expected hidden-sidebar UI test setup to collapse the sidebar. data=\(ready)")
+
+        let window = app.windows.element(boundBy: 0)
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window to exist")
+
+        let alphaTitle = ready["alphaTitle"] ?? "UITest Alpha"
+        let alphaTab = app.buttons[alphaTitle]
+        XCTAssertTrue(alphaTab.waitForExistence(timeout: 5.0), "Expected alpha tab to exist")
+
+        let toggleSidebarButton = app.descendants(matching: .any).matching(identifier: "titlebarControl.toggleSidebar").firstMatch
+        let notificationsButton = app.descendants(matching: .any).matching(identifier: "titlebarControl.showNotifications").firstMatch
+        let newWorkspaceButton = app.descendants(matching: .any).matching(identifier: "titlebarControl.newTab").firstMatch
+
+        hover(in: window, at: CGPoint(x: window.frame.maxX - 48, y: window.frame.minY + 18))
+        XCTAssertTrue(
+            waitForCondition(timeout: 2.0) {
+                (!toggleSidebarButton.exists || !toggleSidebarButton.isHittable) &&
+                    (!notificationsButton.exists || !notificationsButton.isHittable) &&
+                    (!newWorkspaceButton.exists || !newWorkspaceButton.isHittable)
+            },
+            "Expected collapsed-sidebar hidden-titlebar mode to keep titlebar controls suppressed. toggle=\(toggleSidebarButton.debugDescription) notifications=\(notificationsButton.debugDescription) new=\(newWorkspaceButton.debugDescription)"
+        )
+
+        let leadingInset = alphaTab.frame.minX - window.frame.minX
+        XCTAssertLessThan(
+            leadingInset,
+            96,
+            "Expected pane tabs to stay near the leading edge when collapsed-sidebar hidden-titlebar mode removes the titlebar accessory lane. window=\(window.frame) alphaTab=\(alphaTab.frame) leadingInset=\(leadingInset)"
+        )
+    }
+
     func testPaneTabBarControlsRevealWhenHoveringAnywhereOnPaneTabBar() {
         let (app, dataPath) = launchConfiguredApp()
 
@@ -253,13 +302,16 @@ final class BonsplitTabDragUITests: XCTestCase {
         )
     }
 
-    private func launchConfiguredApp() -> (XCUIApplication, String) {
+    private func launchConfiguredApp(startWithHiddenSidebar: Bool = false) -> (XCUIApplication, String) {
         let app = XCUIApplication()
         let dataPath = "/tmp/cmux-ui-test-bonsplit-tab-drag-\(UUID().uuidString).json"
         try? FileManager.default.removeItem(atPath: dataPath)
 
         app.launchEnvironment["CMUX_UI_TEST_BONSPLIT_TAB_DRAG_SETUP"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_BONSPLIT_TAB_DRAG_PATH"] = dataPath
+        if startWithHiddenSidebar {
+            app.launchEnvironment["CMUX_UI_TEST_BONSPLIT_START_WITH_HIDDEN_SIDEBAR"] = "1"
+        }
         app.launchArguments += ["-workspaceTitlebarVisible", "NO"]
         app.launchArguments += ["-titlebarControlsVisibilityMode", "onHover"]
         app.launchArguments += ["-paneTabBarControlsVisibilityMode", "onHover"]
