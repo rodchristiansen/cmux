@@ -932,7 +932,7 @@ class TabManager: ObservableObject {
         dlog("find.searchSelection workspace=\(panel.workspaceId.uuidString.prefix(5)) panel=\(panel.id.uuidString.prefix(5))")
 #endif
         NotificationCenter.default.post(name: .ghosttySearchFocus, object: panel.surface)
-        _ = panel.performBindingAction("search_selection")
+        _ = panel.performBindingAction("search_selection", viewportChangeSource: .userInteraction)
     }
 
     func findNext() {
@@ -940,7 +940,7 @@ class TabManager: ObservableObject {
             browser.findNext()
             return
         }
-        _ = selectedTerminalPanel?.performBindingAction("search:next")
+        _ = selectedTerminalPanel?.performBindingAction("search:next", viewportChangeSource: .userInteraction)
     }
 
     func findPrevious() {
@@ -948,7 +948,7 @@ class TabManager: ObservableObject {
             browser.findPrevious()
             return
         }
-        _ = selectedTerminalPanel?.performBindingAction("search:previous")
+        _ = selectedTerminalPanel?.performBindingAction("search:previous", viewportChangeSource: .userInteraction)
     }
 
     @discardableResult
