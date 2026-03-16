@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+private let configurationErrorsWindowSize = NSSize(width: 620, height: 320)
+
 protocol GhosttyConfigurationErrorsPresenting: AnyObject {
     var displayedErrors: [String] { get set }
     var isShowingConfigurationErrors: Bool { get }
@@ -13,6 +15,8 @@ enum GhosttyConfigurationErrors {
         _ errors: [String],
         presenter: GhosttyConfigurationErrorsPresenting
     ) {
+        let previousErrors = presenter.displayedErrors
+        let wasShowing = presenter.isShowingConfigurationErrors
         presenter.displayedErrors = errors
 
         if errors.isEmpty {
@@ -20,14 +24,18 @@ enum GhosttyConfigurationErrors {
             return
         }
 
-        guard !presenter.isShowingConfigurationErrors else { return }
+        if !wasShowing, previousErrors == errors {
+            return
+        }
+
+        guard !wasShowing else { return }
         presenter.showConfigurationErrorsWindow()
     }
 }
 
 private protocol ConfigurationErrorsViewModel: ObservableObject {
     var displayedErrors: [String] { get }
-    func ignoreErrors()
+    func dismissWarning()
     func reloadConfiguration()
 }
 
@@ -38,8 +46,8 @@ final class ConfigurationErrorsController: NSWindowController, ObservableObject 
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 420),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(origin: .zero, size: configurationErrorsWindowSize),
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
@@ -47,8 +55,8 @@ final class ConfigurationErrorsController: NSWindowController, ObservableObject 
 
         shouldCascadeWindows = false
         window.center()
-        window.level = .popUpMenu
-        window.minSize = NSSize(width: 560, height: 320)
+        window.minSize = configurationErrorsWindowSize
+        window.maxSize = configurationErrorsWindowSize
         window.isReleasedWhenClosed = false
         window.identifier = NSUserInterfaceItemIdentifier("cmux.configuration-errors")
         window.title = String(
@@ -71,11 +79,8 @@ extension ConfigurationErrorsController: GhosttyConfigurationErrorsPresenting {
 
     func showConfigurationErrorsWindow() {
         guard let window else { return }
-        if NSApp.isActive {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            window.orderFront(nil)
-        }
+        window.setContentSize(configurationErrorsWindowSize)
+        window.orderFront(nil)
     }
 
     func closeConfigurationErrorsWindow() {
@@ -84,8 +89,8 @@ extension ConfigurationErrorsController: GhosttyConfigurationErrorsPresenting {
 }
 
 extension ConfigurationErrorsController: ConfigurationErrorsViewModel {
-    func ignoreErrors() {
-        GhosttyConfigurationErrors.synchronize([], presenter: self)
+    func dismissWarning() {
+        closeConfigurationErrorsWindow()
     }
 
     func reloadConfiguration() {
@@ -99,7 +104,7 @@ private struct ConfigurationErrorsView<Model: ConfigurationErrorsViewModel>: Vie
     private var summaryText: String {
         let format = String(
             localized: "config.errors.summary",
-            defaultValue: "%lld error(s) were found while loading the configuration. Please review the errors below and reload your configuration or ignore the erroneous lines."
+            defaultValue: "%lld configuration error(s) were found. Review them below, reload your configuration, or close this warning and keep working."
         )
         return String(
             format: format,
@@ -147,10 +152,10 @@ private struct ConfigurationErrorsView<Model: ConfigurationErrorsViewModel>: Vie
                 Button(
                     String(
                         localized: "config.errors.ignore",
-                        defaultValue: "Ignore"
+                        defaultValue: "Close"
                     )
                 ) {
-                    model.ignoreErrors()
+                    model.dismissWarning()
                 }
                 Button(
                     String(
@@ -164,5 +169,9 @@ private struct ConfigurationErrorsView<Model: ConfigurationErrorsViewModel>: Vie
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
         }
+        .frame(
+            width: configurationErrorsWindowSize.width,
+            height: configurationErrorsWindowSize.height
+        )
     }
 }
