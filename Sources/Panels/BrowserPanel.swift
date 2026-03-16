@@ -4657,8 +4657,9 @@ func browserNavigationShouldCreatePopup(
 func browserNavigationShouldFallbackNilTargetToNewTab(
     navigationType: WKNavigationType
 ) -> Bool {
-    _ = navigationType
-    return true
+    // Scripted popups rely on WKUIDelegate.createWebViewWith returning a live
+    // web view so window.opener/postMessage remain intact across OAuth flows.
+    navigationType != .other
 }
 
 private class BrowserNavigationDelegate: NSObject, WKNavigationDelegate {
