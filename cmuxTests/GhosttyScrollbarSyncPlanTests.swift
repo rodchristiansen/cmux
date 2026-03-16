@@ -69,4 +69,34 @@ final class GhosttyScrollbarSyncPlanTests: XCTestCase {
             65
         )
     }
+
+    func testPassivePlanDoesNotPinStartupViewportToTop() {
+        let plan = ghosttyPassiveScrollViewportSyncPlan(
+            scrollbar: GhosttyScrollbar(total: 100, offset: 80, len: 20),
+            storedTopVisibleRow: nil,
+            currentViewportTopVisibleRow: 0,
+            currentViewportRowFromBottom: 80,
+            hasPendingAnchorCorrection: false,
+            hasAcceptedScrollbarState: false
+        )
+
+        XCTAssertEqual(plan.targetTopVisibleRow, 80)
+        XCTAssertEqual(plan.targetRowFromBottom, 0)
+        XCTAssertNil(plan.storedTopVisibleRow)
+    }
+
+    func testPassivePlanRecoversTopOfScrollbackAfterAcceptedScrollbarStateExists() {
+        let plan = ghosttyPassiveScrollViewportSyncPlan(
+            scrollbar: GhosttyScrollbar(total: 100, offset: 80, len: 20),
+            storedTopVisibleRow: nil,
+            currentViewportTopVisibleRow: 0,
+            currentViewportRowFromBottom: 80,
+            hasPendingAnchorCorrection: false,
+            hasAcceptedScrollbarState: true
+        )
+
+        XCTAssertEqual(plan.targetTopVisibleRow, 0)
+        XCTAssertEqual(plan.targetRowFromBottom, 80)
+        XCTAssertEqual(plan.storedTopVisibleRow, 0)
+    }
 }

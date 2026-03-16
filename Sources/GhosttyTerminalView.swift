@@ -8228,7 +8228,8 @@ final class GhosttySurfaceScrollView: NSView {
             storedTopVisibleRow: surfaceView.terminalSurface?.storedScrollViewportAnchorTopVisibleRow(),
             currentViewportTopVisibleRow: viewportRows?.topVisibleRow,
             currentViewportRowFromBottom: viewportRows?.rowFromBottom,
-            hasPendingAnchorCorrection: pendingAnchorCorrectionRow != nil
+            hasPendingAnchorCorrection: pendingAnchorCorrectionRow != nil,
+            hasAcceptedScrollbarState: lastAcceptedScrollbar != nil
         )
     }
 
@@ -8286,7 +8287,8 @@ final class GhosttySurfaceScrollView: NSView {
             currentViewportTopVisibleRow: viewportRows?.topVisibleRow,
             currentViewportRowFromBottom: viewportRows?.rowFromBottom,
             isExplicitViewportChange: isExplicitViewportChange,
-            hasPendingAnchorCorrection: pendingAnchorCorrectionRow != nil
+            hasPendingAnchorCorrection: pendingAnchorCorrectionRow != nil,
+            hasAcceptedScrollbarState: lastAcceptedScrollbar != nil
         )
         let scrollbar = ghosttyReconciledViewportScrollbar(
             incomingScrollbar: incomingScrollbar,

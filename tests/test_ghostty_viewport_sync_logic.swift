@@ -86,6 +86,54 @@ func testLastSentRowUsesAppKitRowFromBottom() {
     )
 }
 
+func testPassivePlanDoesNotPinStartupViewportToTop() {
+    let plan = ghosttyPassiveScrollViewportSyncPlan(
+        scrollbar: GhosttyScrollbar(total: 100, offset: 80, len: 20),
+        storedTopVisibleRow: nil,
+        currentViewportTopVisibleRow: 0,
+        currentViewportRowFromBottom: 80,
+        hasPendingAnchorCorrection: false,
+        hasAcceptedScrollbarState: false
+    )
+
+    expect(
+        plan.targetTopVisibleRow == 80,
+        "when no scrollback anchor exists yet, passive sync should trust the incoming bottom scrollbar position instead of the startup top clip position"
+    )
+    expect(
+        plan.targetRowFromBottom == 0,
+        "startup passive sync should land at the bottom when the incoming scrollbar is already at bottom"
+    )
+    expect(
+        plan.storedTopVisibleRow == nil,
+        "bottom-follow startup sync should not create a stored scrollback anchor"
+    )
+}
+
+func testPassivePlanRecoversTopOfScrollbackAfterAcceptedScrollbarStateExists() {
+    let plan = ghosttyPassiveScrollViewportSyncPlan(
+        scrollbar: GhosttyScrollbar(total: 100, offset: 80, len: 20),
+        storedTopVisibleRow: nil,
+        currentViewportTopVisibleRow: 0,
+        currentViewportRowFromBottom: 80,
+        hasPendingAnchorCorrection: false,
+        hasAcceptedScrollbarState: true
+    )
+
+    expect(
+        plan.targetTopVisibleRow == 0,
+        "once the scroll view has accepted a real scrollbar snapshot, passive recovery should preserve the actual top-of-scrollback viewport"
+    )
+    expect(
+        plan.targetRowFromBottom == 80,
+        "top-of-scrollback recovery should keep the same bottom-origin row distance"
+    )
+    expect(
+        plan.storedTopVisibleRow == 0,
+        "recovering the top of scrollback should restore the stored top-visible-row anchor"
+    )
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -94,6 +142,8 @@ struct TestRunner {
         testPassiveScrollbarAcceptanceReconcilesIncomingOffsetToStoredTopRow()
         testRegressivePassiveScrollbarSnapshotIsIgnoredWhileReviewingScrollback()
         testLastSentRowUsesAppKitRowFromBottom()
+        testPassivePlanDoesNotPinStartupViewportToTop()
+        testPassivePlanRecoversTopOfScrollbackAfterAcceptedScrollbarStateExists()
         print("PASS: ghostty viewport sync logic")
     }
 }

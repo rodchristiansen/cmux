@@ -175,7 +175,8 @@ func ghosttyResolvedStoredTopVisibleRow(
     currentViewportTopVisibleRow: Int?,
     currentViewportRowFromBottom: Int?,
     isExplicitViewportChange: Bool,
-    hasPendingAnchorCorrection: Bool
+    hasPendingAnchorCorrection: Bool,
+    hasAcceptedScrollbarState: Bool
 ) -> Int? {
     guard !isExplicitViewportChange, !hasPendingAnchorCorrection else {
         return storedTopVisibleRow
@@ -183,9 +184,12 @@ func ghosttyResolvedStoredTopVisibleRow(
     guard storedTopVisibleRow == nil else {
         return storedTopVisibleRow
     }
+    guard hasAcceptedScrollbarState else {
+        return storedTopVisibleRow
+    }
     guard let currentViewportTopVisibleRow,
           let currentViewportRowFromBottom,
-          currentViewportTopVisibleRow > 0 || currentViewportRowFromBottom > 0 else {
+          currentViewportRowFromBottom > 0 else {
         return storedTopVisibleRow
     }
     return currentViewportTopVisibleRow
@@ -196,14 +200,16 @@ func ghosttyPassiveScrollViewportSyncPlan(
     storedTopVisibleRow: Int?,
     currentViewportTopVisibleRow: Int?,
     currentViewportRowFromBottom: Int?,
-    hasPendingAnchorCorrection: Bool
+    hasPendingAnchorCorrection: Bool,
+    hasAcceptedScrollbarState: Bool
 ) -> GhosttyScrollViewportSyncPlan {
     let resolvedStoredTopVisibleRow = ghosttyResolvedStoredTopVisibleRow(
         storedTopVisibleRow: storedTopVisibleRow,
         currentViewportTopVisibleRow: currentViewportTopVisibleRow,
         currentViewportRowFromBottom: currentViewportRowFromBottom,
         isExplicitViewportChange: false,
-        hasPendingAnchorCorrection: hasPendingAnchorCorrection
+        hasPendingAnchorCorrection: hasPendingAnchorCorrection,
+        hasAcceptedScrollbarState: hasAcceptedScrollbarState
     )
     return ghosttyScrollViewportSyncPlan(
         scrollbar: scrollbar,
