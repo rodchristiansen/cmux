@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-private let configurationErrorsWindowSize = NSSize(width: 620, height: 320)
+private let configurationErrorsWindowMinimumSize = NSSize(width: 480, height: 270)
 
 protocol GhosttyConfigurationErrorsPresenting: AnyObject {
     var displayedErrors: [String] { get set }
@@ -43,11 +43,12 @@ final class ConfigurationErrorsController: NSWindowController, ObservableObject 
     static let shared = ConfigurationErrorsController()
 
     @Published var displayedErrors: [String] = []
+    private var pendingPresentationWorkItem: DispatchWorkItem?
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: configurationErrorsWindowSize),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(origin: .zero, size: configurationErrorsWindowMinimumSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -55,8 +56,7 @@ final class ConfigurationErrorsController: NSWindowController, ObservableObject 
 
         shouldCascadeWindows = false
         window.center()
-        window.minSize = configurationErrorsWindowSize
-        window.maxSize = configurationErrorsWindowSize
+        window.minSize = configurationErrorsWindowMinimumSize
         window.isReleasedWhenClosed = false
         window.identifier = NSUserInterfaceItemIdentifier("cmux.configuration-errors")
         window.title = String(
@@ -78,12 +78,45 @@ extension ConfigurationErrorsController: GhosttyConfigurationErrorsPresenting {
     }
 
     func showConfigurationErrorsWindow() {
-        guard let window else { return }
-        window.setContentSize(configurationErrorsWindowSize)
-        window.orderFront(nil)
+        pendingPresentationWorkItem?.cancel()
+        pendingPresentationWorkItem = nil
+        scheduleConfigurationErrorsWindowPresentation()
+    }
+
+    private func scheduleConfigurationErrorsWindowPresentation(retryDelay: TimeInterval? = nil) {
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.presentConfigurationErrorsWindowWhenReady()
+        }
+        pendingPresentationWorkItem = workItem
+        if let retryDelay {
+            DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay, execute: workItem)
+        } else {
+            DispatchQueue.main.async(execute: workItem)
+        }
+    }
+
+    private func presentConfigurationErrorsWindowWhenReady() {
+        guard let window else {
+            pendingPresentationWorkItem = nil
+            return
+        }
+        guard !displayedErrors.isEmpty else {
+            pendingPresentationWorkItem = nil
+            return
+        }
+
+        if AppDelegate.shared?.ensureMainWindowVisibleForConfigurationWarning() != nil {
+            pendingPresentationWorkItem = nil
+            window.orderFront(nil)
+            return
+        }
+
+        scheduleConfigurationErrorsWindowPresentation(retryDelay: 0.05)
     }
 
     func closeConfigurationErrorsWindow() {
+        pendingPresentationWorkItem?.cancel()
+        pendingPresentationWorkItem = nil
         window?.performClose(nil)
     }
 }
@@ -114,37 +147,36 @@ private struct ConfigurationErrorsView<Model: ConfigurationErrorsViewModel>: Vie
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 16) {
+        VStack {
+            HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.yellow)
                     .font(.system(size: 52))
-                    .frame(width: 88, alignment: .center)
+                    .padding()
+                    .frame(alignment: .center)
 
                 Text(summaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .padding()
             }
-            .padding(24)
 
             GeometryReader { geometry in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading) {
                         ForEach(model.displayedErrors, id: \.self) { error in
                             Text(error)
+                                .lineLimit(nil)
                                 .font(.system(size: 12).monospaced())
                                 .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
+
+                        Spacer()
                     }
-                    .padding(20)
-                    .frame(
-                        minWidth: geometry.size.width,
-                        minHeight: geometry.size.height,
-                        alignment: .topLeading
-                    )
+                    .padding(.all)
+                    .frame(minHeight: geometry.size.height)
+                    .background(Color(nsColor: .controlBackgroundColor))
                 }
-                .background(Color(nsColor: .controlBackgroundColor))
             }
 
             HStack {
@@ -166,12 +198,8 @@ private struct ConfigurationErrorsView<Model: ConfigurationErrorsViewModel>: Vie
                     model.reloadConfiguration()
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding([.bottom, .trailing], 16)
         }
-        .frame(
-            width: configurationErrorsWindowSize.width,
-            height: configurationErrorsWindowSize.height
-        )
+        .frame(minWidth: configurationErrorsWindowMinimumSize.width, maxWidth: 960, minHeight: configurationErrorsWindowMinimumSize.height)
     }
 }
