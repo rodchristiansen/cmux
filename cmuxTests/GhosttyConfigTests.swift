@@ -670,6 +670,39 @@ final class GhosttyConfigurationErrorsPresentationTests: XCTestCase {
         XCTAssertEqual(presenter.showCount, 1)
         XCTAssertEqual(presenter.closeCount, 1)
     }
+
+    func testSynchronizeDoesNotReopenDismissedWarningsUntilErrorsChange() {
+        let presenter = PresenterSpy()
+
+        GhosttyConfigurationErrors.synchronize(
+            ["background-opacity 1: unknown field"],
+            presenter: presenter
+        )
+
+        presenter.isShowingConfigurationErrors = false
+
+        GhosttyConfigurationErrors.synchronize(
+            ["background-opacity 1: unknown field"],
+            presenter: presenter
+        )
+
+        XCTAssertEqual(presenter.showCount, 1)
+        XCTAssertEqual(
+            presenter.displayedErrors,
+            ["background-opacity 1: unknown field"]
+        )
+
+        GhosttyConfigurationErrors.synchronize(
+            ["font-size nope: invalid value"],
+            presenter: presenter
+        )
+
+        XCTAssertEqual(presenter.showCount, 2)
+        XCTAssertEqual(
+            presenter.displayedErrors,
+            ["font-size nope: invalid value"]
+        )
+    }
 }
 
 final class WorkspaceChromeThemeTests: XCTestCase {
