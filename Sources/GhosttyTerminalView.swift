@@ -5791,18 +5791,6 @@ private extension NSScreen {
     }
 }
 
-struct GhosttyScrollbar {
-    let total: UInt64
-    let offset: UInt64
-    let len: UInt64
-
-    init(c: ghostty_action_scrollbar_s) {
-        total = c.total
-        offset = c.offset
-        len = c.len
-    }
-}
-
 enum GhosttyNotificationKey {
     static let scrollbar = "ghostty.scrollbar"
     static let cellSize = "ghostty.cellSize"
@@ -5813,6 +5801,14 @@ enum GhosttyNotificationKey {
     static let backgroundOpacity = "ghostty.backgroundOpacity"
     static let backgroundEventId = "ghostty.backgroundEventId"
     static let backgroundSource = "ghostty.backgroundSource"
+}
+
+extension GhosttyScrollbar {
+    init(c: ghostty_action_scrollbar_s) {
+        total = c.total
+        offset = c.offset
+        len = c.len
+    }
 }
 
 extension Notification.Name {
