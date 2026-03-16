@@ -31,6 +31,7 @@ final class AuthPersistenceUITests: XCTestCase {
 
     func testSignedOutLaunchShowsSignInWithoutRestoreFlash() {
         let app = XCUIApplication()
+        app.launchEnvironment["CMUX_UITEST_MOCK_DATA"] = "0"
         app.launchEnvironment["CMUX_UITEST_CLEAR_AUTH"] = "1"
         app.launch()
 
@@ -42,14 +43,16 @@ final class AuthPersistenceUITests: XCTestCase {
     private func ensureSignedIn(app: XCUIApplication) {
         let emailField = app.textFields["Email"]
         if emailField.waitForExistence(timeout: 2) {
-            XCTFail("Sign-in screen visible. Ensure CMUX_UITEST_STACK_EMAIL/PASSWORD are set.")
+            XCTFail("Sign-in screen visible. Ensure the auth fixture launch environment is enabled.")
         }
     }
 
     private func configureAutoAuth(_ app: XCUIApplication) {
         app.launchEnvironment["CMUX_UITEST_MOCK_DATA"] = "0"
-        app.launchEnvironment["CMUX_UITEST_STACK_EMAIL"] = "l@l.com"
-        app.launchEnvironment["CMUX_UITEST_STACK_PASSWORD"] = "abc123"
+        app.launchEnvironment["CMUX_UITEST_AUTH_FIXTURE"] = "1"
+        app.launchEnvironment["CMUX_UITEST_AUTH_USER_ID"] = "auth-persistence-user"
+        app.launchEnvironment["CMUX_UITEST_AUTH_EMAIL"] = "auth-persistence@cmux.local"
+        app.launchEnvironment["CMUX_UITEST_AUTH_NAME"] = "Auth Persistence"
     }
 
     private func waitForTerminalHome(app: XCUIApplication) {

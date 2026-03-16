@@ -27,6 +27,24 @@ public enum CMUXAuthLaunchConfig {
         }
         return CMUXAuthAutoLoginCredentials(email: email, password: password)
     }
+
+    public static func fixtureUser(
+        from environment: [String: String],
+        clearAuth: Bool,
+        mockDataEnabled: Bool
+    ) -> CMUXAuthUser? {
+        if clearAuth || mockDataEnabled {
+            return nil
+        }
+        guard environment["CMUX_UITEST_AUTH_FIXTURE"] == "1" else {
+            return nil
+        }
+        return CMUXAuthUser(
+            id: environment["CMUX_UITEST_AUTH_USER_ID"] ?? "uitest_user",
+            primaryEmail: environment["CMUX_UITEST_AUTH_EMAIL"] ?? "uitest@cmux.local",
+            displayName: environment["CMUX_UITEST_AUTH_NAME"] ?? "UI Test"
+        )
+    }
 }
 
 public enum CMUXAuthMagicLinkCode {
@@ -49,6 +67,7 @@ public struct CMUXAuthState: Equatable, Sendable {
     public static func primed(
         clearAuthRequested: Bool,
         mockDataEnabled: Bool,
+        fixtureUser: CMUXAuthUser?,
         autoLoginCredentials: CMUXAuthAutoLoginCredentials?,
         cachedUser: CMUXAuthUser?,
         hasTokens: Bool,
@@ -60,6 +79,10 @@ public struct CMUXAuthState: Equatable, Sendable {
 
         if mockDataEnabled {
             return Self(isAuthenticated: true, currentUser: mockUser, isRestoringSession: false)
+        }
+
+        if let fixtureUser {
+            return Self(isAuthenticated: true, currentUser: fixtureUser, isRestoringSession: false)
         }
 
         if autoLoginCredentials != nil {

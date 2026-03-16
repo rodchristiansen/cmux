@@ -66,6 +66,24 @@ final class StackAuthSessionTests: XCTestCase {
         XCTAssertNil(noPassword)
     }
 
+    func testAuthLaunchConfigReturnsFixtureUserWhenEnabled() {
+        let fixtureUser = AuthLaunchConfig.fixtureUser(
+            from: [
+                "CMUX_UITEST_AUTH_FIXTURE": "1",
+                "CMUX_UITEST_AUTH_USER_ID": "fixture-user",
+                "CMUX_UITEST_AUTH_EMAIL": "fixture@example.com",
+                "CMUX_UITEST_AUTH_NAME": "Fixture User"
+            ],
+            clearAuth: false,
+            mockDataEnabled: false
+        )
+
+        XCTAssertEqual(
+            fixtureUser,
+            StackAuthUser(id: "fixture-user", primaryEmail: "fixture@example.com", displayName: "Fixture User")
+        )
+    }
+
     func testUITestConfigAllowsExplicitMockDataOptOut() {
         XCTAssertFalse(
             UITestConfig.mockDataEnabled(

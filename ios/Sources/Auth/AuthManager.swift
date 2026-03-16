@@ -35,6 +35,14 @@ class AuthManager: ObservableObject {
         )
     }
 
+    private var authFixtureUser: StackAuthUser? {
+        AuthLaunchConfig.fixtureUser(
+            from: ProcessInfo.processInfo.environment,
+            clearAuth: clearAuthRequested,
+            mockDataEnabled: UITestConfig.mockDataEnabled
+        )
+    }
+
     // MARK: - Session Management
 
     private func primeSessionState() {
@@ -52,9 +60,25 @@ class AuthManager: ObservableObject {
                 CMUXAuthState.primed(
                     clearAuthRequested: false,
                     mockDataEnabled: true,
+                    fixtureUser: nil,
                     autoLoginCredentials: nil,
                     cachedUser: nil,
                     hasTokens: false,
+                    mockUser: uiTestMockUser
+                )
+            )
+            return
+        }
+
+        if let authFixtureUser {
+            applyAuthState(
+                CMUXAuthState.primed(
+                    clearAuthRequested: false,
+                    mockDataEnabled: false,
+                    fixtureUser: authFixtureUser,
+                    autoLoginCredentials: nil,
+                    cachedUser: authFixtureUser,
+                    hasTokens: true,
                     mockUser: uiTestMockUser
                 )
             )
@@ -66,6 +90,7 @@ class AuthManager: ObservableObject {
                 CMUXAuthState.primed(
                     clearAuthRequested: false,
                     mockDataEnabled: false,
+                    fixtureUser: nil,
                     autoLoginCredentials: autoLoginCredentials,
                     cachedUser: authUserCache.load(),
                     hasTokens: authSessionCache.hasTokens,
@@ -80,6 +105,7 @@ class AuthManager: ObservableObject {
             CMUXAuthState.primed(
                 clearAuthRequested: false,
                 mockDataEnabled: false,
+                fixtureUser: nil,
                 autoLoginCredentials: nil,
                 cachedUser: authUserCache.load(),
                 hasTokens: authSessionCache.hasTokens,
@@ -95,6 +121,14 @@ class AuthManager: ObservableObject {
 
         #if DEBUG
         if UITestConfig.mockDataEnabled {
+            return
+        }
+
+        if let fixtureUser = authFixtureUser {
+            authUserCache.save(fixtureUser)
+            authSessionCache.setHasTokens(true)
+            currentUser = fixtureUser
+            isAuthenticated = true
             return
         }
 
@@ -318,6 +352,18 @@ enum AuthLaunchConfig {
             clearAuth: clearAuth,
             mockDataEnabled: mockDataEnabled
         )
+    }
+
+    static func fixtureUser(
+        from environment: [String: String],
+        clearAuth: Bool,
+        mockDataEnabled: Bool
+    ) -> StackAuthUser? {
+        CMUXAuthLaunchConfig.fixtureUser(
+            from: environment,
+            clearAuth: clearAuth,
+            mockDataEnabled: mockDataEnabled
+        ).map { StackAuthUser(id: $0.id, primaryEmail: $0.primaryEmail, displayName: $0.displayName) }
     }
 }
 

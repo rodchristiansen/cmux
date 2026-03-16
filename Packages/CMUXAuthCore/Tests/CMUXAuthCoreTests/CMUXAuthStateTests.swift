@@ -84,12 +84,49 @@ struct CMUXAuthStateTests {
         )
     }
 
+    @Test("Launch config returns fixture user only when enabled")
+    func launchConfigReturnsFixtureUserOnlyWhenEnabled() {
+        let environment = [
+            "CMUX_UITEST_AUTH_FIXTURE": "1",
+            "CMUX_UITEST_AUTH_USER_ID": "fixture-user",
+            "CMUX_UITEST_AUTH_EMAIL": "fixture@example.com",
+            "CMUX_UITEST_AUTH_NAME": "Fixture User",
+        ]
+
+        #expect(
+            CMUXAuthLaunchConfig.fixtureUser(
+                from: environment,
+                clearAuth: false,
+                mockDataEnabled: false
+            ) == CMUXAuthUser(
+                id: "fixture-user",
+                primaryEmail: "fixture@example.com",
+                displayName: "Fixture User"
+            )
+        )
+        #expect(
+            CMUXAuthLaunchConfig.fixtureUser(
+                from: environment,
+                clearAuth: true,
+                mockDataEnabled: false
+            ) == nil
+        )
+        #expect(
+            CMUXAuthLaunchConfig.fixtureUser(
+                from: environment,
+                clearAuth: false,
+                mockDataEnabled: true
+            ) == nil
+        )
+    }
+
     @Test("Primed state restores cached user and token state")
     func primedStateRestoresCachedUserAndTokenState() {
         let user = CMUXAuthUser(id: "user_123", primaryEmail: "user@example.com", displayName: "Test User")
         let state = CMUXAuthState.primed(
             clearAuthRequested: false,
             mockDataEnabled: false,
+            fixtureUser: nil,
             autoLoginCredentials: nil,
             cachedUser: user,
             hasTokens: true,
@@ -98,6 +135,24 @@ struct CMUXAuthStateTests {
 
         #expect(state.isAuthenticated)
         #expect(state.currentUser == user)
+        #expect(!state.isRestoringSession)
+    }
+
+    @Test("Primed state uses fixture user")
+    func primedStateUsesFixtureUser() {
+        let fixtureUser = CMUXAuthUser(id: "fixture", primaryEmail: "fixture@example.com", displayName: "Fixture")
+        let state = CMUXAuthState.primed(
+            clearAuthRequested: false,
+            mockDataEnabled: false,
+            fixtureUser: fixtureUser,
+            autoLoginCredentials: nil,
+            cachedUser: nil,
+            hasTokens: false,
+            mockUser: CMUXAuthUser(id: "mock", primaryEmail: "mock@example.com", displayName: "Mock")
+        )
+
+        #expect(state.isAuthenticated)
+        #expect(state.currentUser == fixtureUser)
         #expect(!state.isRestoringSession)
     }
 
