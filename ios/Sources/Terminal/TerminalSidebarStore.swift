@@ -7,6 +7,7 @@ import UIKit
 enum TerminalSessionUpdate {
     case phase(TerminalConnectionPhase, String?)
     case preview(String, Date)
+    case bell(Date)
     case trustedHostKey(String)
     case pendingHostKey(String)
     case remoteDaemonResumeState(TerminalRemoteDaemonResumeState?)
@@ -493,6 +494,12 @@ final class TerminalSidebarStore: ObservableObject {
                 workspaces[index].unread = true
             }
             sortWorkspaces()
+        case .bell(let date):
+            workspaces[index].lastActivity = date
+            if selectedWorkspaceID != workspaceID {
+                workspaces[index].unread = true
+            }
+            sortWorkspaces()
         case .trustedHostKey(let hostKey):
             guard let hostIndex = hosts.firstIndex(where: { $0.id == workspaces[index].hostID }) else { break }
             hosts[hostIndex].trustedHostKey = hostKey
@@ -673,6 +680,7 @@ final class TerminalSessionController: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var statusMessageTask: Task<Void, Never>?
     private var surfaceCloseObserver: NSObjectProtocol?
+    private var surfaceBellObserver: NSObjectProtocol?
     private var shouldReconnect = true
     private var transportConnectGeneration = 0
     private var pendingReconnectAfterTransportWork = false
@@ -724,6 +732,9 @@ final class TerminalSessionController: ObservableObject {
     deinit {
         if let surfaceCloseObserver {
             NotificationCenter.default.removeObserver(surfaceCloseObserver)
+        }
+        if let surfaceBellObserver {
+            NotificationCenter.default.removeObserver(surfaceBellObserver)
         }
     }
 
@@ -1035,6 +1046,10 @@ final class TerminalSessionController: ObservableObject {
             NotificationCenter.default.removeObserver(surfaceCloseObserver)
             self.surfaceCloseObserver = nil
         }
+        if let surfaceBellObserver {
+            NotificationCenter.default.removeObserver(surfaceBellObserver)
+            self.surfaceBellObserver = nil
+        }
         surfaceView?.disposeSurface()
         terminalSurface = nil
         surfaceView = nil
@@ -1043,6 +1058,9 @@ final class TerminalSessionController: ObservableObject {
     private func observeSurfaceClose(for surface: any TerminalSurfaceHosting) {
         if let surfaceCloseObserver {
             NotificationCenter.default.removeObserver(surfaceCloseObserver)
+        }
+        if let surfaceBellObserver {
+            NotificationCenter.default.removeObserver(surfaceBellObserver)
         }
         surfaceCloseObserver = NotificationCenter.default.addObserver(
             forName: .ghosttySurfaceDidRequestClose,
@@ -1054,6 +1072,19 @@ final class TerminalSessionController: ObservableObject {
                 self?.handleSurfaceCloseRequest(processAlive: processAlive)
             }
         }
+        surfaceBellObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttySurfaceDidRingBell,
+            object: surface,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleSurfaceBell()
+            }
+        }
+    }
+
+    private func handleSurfaceBell() {
+        onUpdate?(.bell(.now))
     }
 
     private func handleSurfaceCloseRequest(processAlive _: Bool) {

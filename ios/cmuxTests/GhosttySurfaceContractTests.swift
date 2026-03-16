@@ -101,6 +101,39 @@ final class GhosttySurfaceContractTests: XCTestCase {
         XCTAssertEqual(copiedValue, "deploy terminal")
     }
 
+    func testRingBellActionPostsSurfaceBellNotification() async throws {
+        let (surfaceView, _) = try await MainActor.run {
+            try makeSurfaceView()
+        }
+
+        let bellExpectation = expectation(description: "ring bell action posts surface notification")
+        let observer = await MainActor.run {
+            NotificationCenter.default.addObserver(
+                forName: .ghosttySurfaceDidRingBell,
+                object: surfaceView,
+                queue: .main
+            ) { _ in
+                bellExpectation.fulfill()
+            }
+        }
+        defer {
+            Task { @MainActor in
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+
+        let handled = try await MainActor.run {
+            let surface = try XCTUnwrap(surfaceView.surface)
+            return GhosttyRuntime.simulateSurfaceActionForTesting(
+                surface: surface,
+                tag: GHOSTTY_ACTION_RING_BELL
+            )
+        }
+
+        XCTAssertTrue(handled)
+        await fulfillment(of: [bellExpectation], timeout: 2.0)
+    }
+
     @MainActor
     private func makeSurfaceView() throws -> (GhosttySurfaceView, GhosttySurfaceTestDelegate) {
         let runtime = try GhosttyRuntime.shared()

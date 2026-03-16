@@ -173,6 +173,15 @@ final class GhosttyRuntime {
             return true
         }
 
+        if action.tag == GHOSTTY_ACTION_RING_BELL {
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface else { return false }
+            Task { @MainActor in
+                GhosttySurfaceView.ringBell(for: surface)
+            }
+            return true
+        }
+
         return false
     }
 
@@ -286,4 +295,5 @@ extension Optional where Wrapped == String {
 
 extension Notification.Name {
     static let ghosttySurfaceDidRequestClose = Notification.Name("ghosttySurfaceDidRequestClose")
+    static let ghosttySurfaceDidRingBell = Notification.Name("ghosttySurfaceDidRingBell")
 }

@@ -74,7 +74,7 @@ Convex conversation/task flows stay in repo as legacy code paths and can be reac
 
 ## Risks / Open Questions
 - iOS process sandboxing can constrain shell/process behavior across device/simulator.
-- Current runtime action callback handles URL opens, show-on-screen-keyboard requests, and copy-title-to-clipboard using the hosted surface title cache, but more Ghostty actions still need app-side routing.
+- Current runtime action callback handles URL opens, ring-bell attention, show-on-screen-keyboard requests, and copy-title-to-clipboard using the hosted surface title cache, but more Ghostty actions still need app-side routing.
 - Keyboard, IME, software accessory keys, software control and alt latches, software accessory meta-prefix, word-nav and delete shortcuts, hardware control, shifted control aliases, control-digit and control-symbol aliases, navigation, option-word-movement, plus option-delete behavior now have unit coverage, but real device validation for hardware and third-party keyboards is still pending.
 - Reconnect UX, network path recovery, and surface-close recovery are test-covered, but real device validation for ticket issuance, direct TLS policy, and Wi-Fi or cellular handoff is still pending.
 - SSH bootstrap and raw SSH now rely on explicit host-key review only. Unknown keys fail closed and are not auto-pinned after connect.

@@ -185,6 +185,46 @@ final class TerminalSessionControllerTests: XCTestCase {
         XCTAssertEqual(controller.errorMessage, StubSurfaceFactoryError.transient.localizedDescription)
     }
 
+    func testSurfaceBellRequestEmitsBellUpdate() async throws {
+        let host = TerminalHost(
+            name: "Mac Mini",
+            hostname: "cmux-macmini",
+            username: "cmux",
+            symbolName: "desktopcomputer",
+            palette: .mint,
+            transportPreference: .rawSSH
+        )
+        let workspace = TerminalWorkspace(
+            hostID: host.id,
+            title: "Mac Mini",
+            tmuxSessionName: "cmux-mac-mini"
+        )
+        let credentialsStore = InMemoryTerminalCredentialsStore(passwords: [host.id: "secret"])
+        let surface = StubTerminalSurface()
+        let transport = ConnectedStubTerminalTransport()
+
+        let bellExpectation = expectation(description: "controller emitted bell update")
+
+        let controller = TerminalSessionController(
+            workspace: workspace,
+            host: host,
+            credentialsStore: credentialsStore,
+            transportFactory: StubTerminalTransportFactory(transport: transport),
+            surfaceFactory: { _ in surface }
+        )
+        controller.onUpdate = { update in
+            guard case .bell = update else { return }
+            bellExpectation.fulfill()
+        }
+
+        NotificationCenter.default.post(
+            name: .ghosttySurfaceDidRingBell,
+            object: surface
+        )
+
+        await fulfillment(of: [bellExpectation], timeout: 1.0)
+    }
+
     func testSuspendPreservingStateDisconnectsTransportAndReconnectsWithSavedResumeState() async throws {
         let host = TerminalHost(
             name: "Mac Mini",

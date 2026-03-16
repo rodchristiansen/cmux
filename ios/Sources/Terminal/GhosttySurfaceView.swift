@@ -447,8 +447,21 @@ final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
     }
 
     @MainActor
+    static func ringBell(for surface: ghostty_surface_t) {
+        view(for: surface)?.handleBell()
+    }
+
+    @MainActor
     static func title(for surface: ghostty_surface_t) -> String? {
         view(for: surface)?.surfaceTitle
+    }
+
+    private func handleBell() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        NotificationCenter.default.post(
+            name: .ghosttySurfaceDidRingBell,
+            object: self
+        )
     }
 }
 

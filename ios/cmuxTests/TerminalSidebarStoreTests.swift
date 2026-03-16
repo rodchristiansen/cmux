@@ -398,6 +398,58 @@ final class TerminalSidebarStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testBellUpdatesSelectedWorkspaceActivityWithoutMarkingUnread() async throws {
+        let host = TerminalHost(
+            name: "Mac Mini",
+            hostname: "cmux-macmini",
+            username: "cmux",
+            symbolName: "desktopcomputer",
+            palette: .mint,
+            transportPreference: .rawSSH
+        )
+        let workspace = TerminalWorkspace(
+            hostID: host.id,
+            title: "Primary Terminal",
+            tmuxSessionName: "cmux-primary",
+            lastActivity: Date(timeIntervalSince1970: 10)
+        )
+        let surface = StubTerminalSurface()
+        let fixture = makeStore(
+            snapshot: TerminalStoreSnapshot(
+                hosts: [host],
+                workspaces: [workspace],
+                selectedWorkspaceID: workspace.id
+            ),
+            passwords: [host.id: "secret"],
+            controllerFactory: { workspace, host, credentialsStore, transportFactory in
+                TerminalSessionController(
+                    workspace: workspace,
+                    host: host,
+                    credentialsStore: credentialsStore,
+                    transportFactory: transportFactory,
+                    surfaceFactory: { _ in surface }
+                )
+            }
+        )
+
+        _ = fixture.store.openWorkspace(workspace)
+
+        NotificationCenter.default.post(
+            name: .ghosttySurfaceDidRingBell,
+            object: surface
+        )
+
+        try await waitForCondition {
+            guard let updatedWorkspace = fixture.store.workspace(with: workspace.id) else { return false }
+            return updatedWorkspace.lastActivity > workspace.lastActivity
+        }
+
+        let updatedWorkspace = try XCTUnwrap(fixture.store.workspace(with: workspace.id))
+        XCTAssertEqual(fixture.store.selectedWorkspaceID, workspace.id)
+        XCTAssertFalse(updatedWorkspace.unread)
+    }
+
+    @MainActor
     func testSaveHostPersistsPasswordAndHostMetadata() throws {
         let fixture = makeStore()
         let store = fixture.store
