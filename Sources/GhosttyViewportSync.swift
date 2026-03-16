@@ -40,14 +40,44 @@ struct GhosttyExplicitViewportChangeConsumption: Equatable {
     let remainingPendingExplicitViewportChange: Bool
 }
 
+struct GhosttyScrollCorrectionDispatchState: Equatable {
+    let lastSentRow: Int?
+    let pendingAnchorCorrectionRow: Int?
+}
+
 func ghosttyScrollViewportSyncPlan(
     scrollbar: GhosttyScrollbar,
     storedTopVisibleRow: Int?,
     isExplicitViewportChange: Bool
 ) -> GhosttyScrollViewportSyncPlan {
-    let targetTopVisibleRow = scrollbar.incomingTopVisibleRow
-    let targetRowFromBottom = scrollbar.rowFromBottom
-    let resultingStoredTopVisibleRow = targetRowFromBottom > 0 ? targetTopVisibleRow : nil
+    guard scrollbar.visibleRows > 0 else {
+        return GhosttyScrollViewportSyncPlan(
+            targetTopVisibleRow: 0,
+            targetRowFromBottom: 0,
+            storedTopVisibleRow: nil
+        )
+    }
+
+    let clampedStoredTopVisibleRow = storedTopVisibleRow.map {
+        max(0, min($0, scrollbar.maxTopVisibleRow))
+    }
+    let targetTopVisibleRow: Int
+    if isExplicitViewportChange {
+        targetTopVisibleRow = scrollbar.incomingTopVisibleRow
+    } else if let clampedStoredTopVisibleRow {
+        targetTopVisibleRow = clampedStoredTopVisibleRow
+    } else {
+        targetTopVisibleRow = scrollbar.incomingTopVisibleRow
+    }
+    let targetRowFromBottom = max(0, scrollbar.maxTopVisibleRow - targetTopVisibleRow)
+    let resultingStoredTopVisibleRow: Int?
+    if isExplicitViewportChange {
+        resultingStoredTopVisibleRow = targetRowFromBottom > 0 ? targetTopVisibleRow : nil
+    } else if let clampedStoredTopVisibleRow {
+        resultingStoredTopVisibleRow = clampedStoredTopVisibleRow
+    } else {
+        resultingStoredTopVisibleRow = targetRowFromBottom > 0 ? targetTopVisibleRow : nil
+    }
     return GhosttyScrollViewportSyncPlan(
         targetTopVisibleRow: targetTopVisibleRow,
         targetRowFromBottom: targetRowFromBottom,
@@ -94,10 +124,106 @@ func ghosttyConsumeExplicitViewportChange(
             remainingPendingExplicitViewportChange: false
         )
     }
+    guard let baselineScrollbar else {
+        return GhosttyExplicitViewportChangeConsumption(
+            isExplicitViewportChange: true,
+            remainingPendingExplicitViewportChange: false
+        )
+    }
+    if incomingScrollbar == baselineScrollbar {
+        return GhosttyExplicitViewportChangeConsumption(
+            isExplicitViewportChange: false,
+            remainingPendingExplicitViewportChange: true
+        )
+    }
+    if incomingScrollbar.totalRows != baselineScrollbar.totalRows ||
+        incomingScrollbar.visibleRows != baselineScrollbar.visibleRows {
+        let preservedPassiveTopVisibleRow: Int
+        if baselineScrollbar.offsetRows >= baselineScrollbar.maxTopVisibleRow {
+            preservedPassiveTopVisibleRow = incomingScrollbar.maxTopVisibleRow
+        } else {
+            preservedPassiveTopVisibleRow = max(
+                0,
+                min(baselineScrollbar.incomingTopVisibleRow, incomingScrollbar.maxTopVisibleRow)
+            )
+        }
+        if incomingScrollbar.incomingTopVisibleRow == preservedPassiveTopVisibleRow {
+            return GhosttyExplicitViewportChangeConsumption(
+                isExplicitViewportChange: false,
+                remainingPendingExplicitViewportChange: false
+            )
+        }
+        return GhosttyExplicitViewportChangeConsumption(
+            isExplicitViewportChange: true,
+            remainingPendingExplicitViewportChange: false
+        )
+    }
+    if incomingScrollbar.incomingTopVisibleRow != baselineScrollbar.incomingTopVisibleRow {
+        return GhosttyExplicitViewportChangeConsumption(
+            isExplicitViewportChange: true,
+            remainingPendingExplicitViewportChange: false
+        )
+    }
     return GhosttyExplicitViewportChangeConsumption(
-        isExplicitViewportChange: true,
+        isExplicitViewportChange: false,
         remainingPendingExplicitViewportChange: false
     )
+}
+
+func ghosttyResolvedStoredTopVisibleRow(
+    storedTopVisibleRow: Int?,
+    currentViewportTopVisibleRow: Int?,
+    currentViewportRowFromBottom: Int?,
+    isExplicitViewportChange: Bool,
+    hasPendingAnchorCorrection: Bool
+) -> Int? {
+    guard !isExplicitViewportChange, !hasPendingAnchorCorrection else {
+        return storedTopVisibleRow
+    }
+    guard storedTopVisibleRow == nil else {
+        return storedTopVisibleRow
+    }
+    guard let currentViewportTopVisibleRow,
+          let currentViewportRowFromBottom,
+          currentViewportTopVisibleRow > 0 || currentViewportRowFromBottom > 0 else {
+        return storedTopVisibleRow
+    }
+    return currentViewportTopVisibleRow
+}
+
+func ghosttyPassiveScrollViewportSyncPlan(
+    scrollbar: GhosttyScrollbar,
+    storedTopVisibleRow: Int?,
+    currentViewportTopVisibleRow: Int?,
+    currentViewportRowFromBottom: Int?,
+    hasPendingAnchorCorrection: Bool
+) -> GhosttyScrollViewportSyncPlan {
+    let resolvedStoredTopVisibleRow = ghosttyResolvedStoredTopVisibleRow(
+        storedTopVisibleRow: storedTopVisibleRow,
+        currentViewportTopVisibleRow: currentViewportTopVisibleRow,
+        currentViewportRowFromBottom: currentViewportRowFromBottom,
+        isExplicitViewportChange: false,
+        hasPendingAnchorCorrection: hasPendingAnchorCorrection
+    )
+    return ghosttyScrollViewportSyncPlan(
+        scrollbar: scrollbar,
+        storedTopVisibleRow: resolvedStoredTopVisibleRow,
+        isExplicitViewportChange: false
+    )
+}
+
+func ghosttyBaselineScrollbarForIncomingUpdate(
+    lastAcceptedScrollbar: GhosttyScrollbar?,
+    currentSurfaceScrollbar: GhosttyScrollbar?
+) -> GhosttyScrollbar? {
+    lastAcceptedScrollbar ?? currentSurfaceScrollbar
+}
+
+func ghosttyEffectiveViewportScrollbar(
+    lastAcceptedScrollbar: GhosttyScrollbar?,
+    currentSurfaceScrollbar: GhosttyScrollbar?
+) -> GhosttyScrollbar? {
+    lastAcceptedScrollbar ?? currentSurfaceScrollbar
 }
 
 func ghosttyReconciledViewportScrollbar(
@@ -105,7 +231,18 @@ func ghosttyReconciledViewportScrollbar(
     storedTopVisibleRow: Int?,
     isExplicitViewportChange: Bool
 ) -> GhosttyScrollbar {
-    incomingScrollbar
+    guard !isExplicitViewportChange,
+          let storedTopVisibleRow,
+          incomingScrollbar.visibleRows > 0 else {
+        return incomingScrollbar
+    }
+
+    let clampedTopVisibleRow = max(0, min(storedTopVisibleRow, incomingScrollbar.maxTopVisibleRow))
+    return GhosttyScrollbar(
+        total: incomingScrollbar.totalRows,
+        offset: clampedTopVisibleRow,
+        len: incomingScrollbar.visibleRows
+    )
 }
 
 func ghosttyShouldIgnoreStalePassiveScrollbarUpdate(
@@ -115,11 +252,20 @@ func ghosttyShouldIgnoreStalePassiveScrollbarUpdate(
     resultingStoredTopVisibleRow: Int?,
     isExplicitViewportChange: Bool
 ) -> Bool {
-    false
+    guard !isExplicitViewportChange else {
+        return false
+    }
+    guard let previousScrollbar else {
+        return false
+    }
+    guard incomingScrollbar.totalRows < previousScrollbar.totalRows else {
+        return false
+    }
+    return resolvedStoredTopVisibleRow != nil || resultingStoredTopVisibleRow == nil
 }
 
 func ghosttyLastSentRowAfterViewportSync(scrollbar: GhosttyScrollbar) -> Int {
-    scrollbar.offsetRows
+    scrollbar.rowFromBottom
 }
 
 func ghosttyDocumentHeight(
@@ -133,4 +279,30 @@ func ghosttyDocumentHeight(
     let documentGridHeight = CGFloat(scrollbar.total) * cellHeight
     let padding = contentHeight - (CGFloat(scrollbar.len) * cellHeight)
     return documentGridHeight + padding
+}
+
+func ghosttyScrollbarMatchesViewportTarget(
+    scrollbar: GhosttyScrollbar,
+    syncPlan: GhosttyScrollViewportSyncPlan
+) -> Bool {
+    scrollbar.incomingTopVisibleRow == syncPlan.targetTopVisibleRow
+}
+
+func ghosttyScrollCorrectionDispatchState(
+    previousLastSentRow: Int?,
+    previousPendingAnchorCorrectionRow: Int?,
+    targetRowFromBottom: Int,
+    dispatchSucceeded: Bool
+) -> GhosttyScrollCorrectionDispatchState {
+    guard dispatchSucceeded else {
+        return GhosttyScrollCorrectionDispatchState(
+            lastSentRow: previousLastSentRow,
+            pendingAnchorCorrectionRow: previousPendingAnchorCorrectionRow
+        )
+    }
+
+    return GhosttyScrollCorrectionDispatchState(
+        lastSentRow: targetRowFromBottom,
+        pendingAnchorCorrectionRow: targetRowFromBottom
+    )
 }
