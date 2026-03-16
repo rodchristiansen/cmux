@@ -3981,6 +3981,27 @@ final class BrowserZoomShortcutRoutingPolicyTests: XCTestCase {
     }
 }
 
+final class GhosttyUnshiftedCodepointTests: XCTestCase {
+    func testCommandAwareLayoutTranslationWinsForCommandShortcutKeys() {
+        let codepoint = ghosttyUnshiftedCodepoint(
+            keyCode: 24,
+            modifierFlags: [.command],
+            charactersIgnoringModifiers: "=",
+            characters: "=",
+            layoutCharacterProvider: { keyCode, modifierFlags in
+                guard keyCode == 24 else { return nil }
+                return modifierFlags.contains(.command) ? "=" : ";"
+            }
+        )
+
+        XCTAssertEqual(
+            codepoint,
+            "=".unicodeScalars.first?.value,
+            "Command-aware keyboard layouts should preserve the command shortcut character Ghostty binds against"
+        )
+    }
+}
+
 final class GhosttyResponderResolutionTests: XCTestCase {
     private final class FocusProbeView: NSView {
         override var acceptsFirstResponder: Bool { true }
