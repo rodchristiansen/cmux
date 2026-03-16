@@ -1009,6 +1009,22 @@ class GhosttyApp {
     }
     #endif
 
+    static func configurationDiagnostics(from config: ghostty_config_t?) -> [String] {
+        guard let config else { return [] }
+
+        let count = Int(ghostty_config_diagnostics_count(config))
+        guard count > 0 else { return [] }
+
+        var errors: [String] = []
+        errors.reserveCapacity(count)
+        for i in 0..<count {
+            let diag = ghostty_config_get_diagnostic(config, UInt32(i))
+            let message = diag.message.flatMap { String(cString: $0) } ?? "(null)"
+            errors.append(message)
+        }
+        return errors
+    }
+
     private func initializeGhostty() {
         // Ensure TUI apps can use colors even if NO_COLOR is set in the launcher env.
         if getenv("NO_COLOR") != nil {
@@ -1031,6 +1047,7 @@ class GhosttyApp {
         // Load default config (includes user config). If this fails hard (e.g. due to
         // invalid user config), ghostty_app_new may return nil; we fall back below.
         loadDefaultConfigFilesWithLegacyFallback(primaryConfig)
+        let primaryConfigErrors = Self.configurationDiagnostics(from: primaryConfig)
         updateDefaultBackground(from: primaryConfig, source: "initialize.primaryConfig")
 
         // Create runtime config with callbacks
@@ -1179,6 +1196,7 @@ class GhosttyApp {
         // Notify observers that a usable config is available (initial load).
         lastAppearanceColorScheme = GhosttyConfig.currentColorSchemePreference()
         NotificationCenter.default.post(name: .ghosttyConfigDidReload, object: nil)
+        synchronizeConfigurationErrors(primaryConfigErrors)
 
         #if os(macOS)
         if let app {
@@ -1579,6 +1597,7 @@ class GhosttyApp {
             return
         }
         loadDefaultConfigFilesWithLegacyFallback(newConfig)
+        let configErrors = Self.configurationDiagnostics(from: newConfig)
         ghostty_app_update_config(app, newConfig)
         updateDefaultBackground(
             from: newConfig,
@@ -1592,10 +1611,26 @@ class GhosttyApp {
             ghostty_config_free(oldConfig)
         }
         config = newConfig
+        synchronizeConfigurationErrors(configErrors)
         lastAppearanceColorScheme = GhosttyConfig.currentColorSchemePreference()
         NotificationCenter.default.post(name: .ghosttyConfigDidReload, object: nil)
         scheduleSurfaceRefreshAfterConfigurationReload(source: source)
         logThemeAction("reload end source=\(source) soft=\(soft) mode=full")
+    }
+
+    private func synchronizeConfigurationErrors(_ errors: [String]) {
+        let applyPresentation = {
+            GhosttyConfigurationErrors.synchronize(
+                errors,
+                presenter: ConfigurationErrorsController.shared
+            )
+        }
+
+        if Thread.isMainThread {
+            applyPresentation()
+        } else {
+            DispatchQueue.main.async(execute: applyPresentation)
+        }
     }
 
     private func scheduleSurfaceRefreshAfterConfigurationReload(source: String) {
