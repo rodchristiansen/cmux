@@ -13576,10 +13576,8 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
         realizeWindowLayout(firstWindow)
         realizeWindowLayout(secondWindow)
 
-        let firstAnchorCenter = NSPoint(x: firstAnchor.bounds.midX, y: firstAnchor.bounds.midY)
-        let secondAnchorCenter = NSPoint(x: secondAnchor.bounds.midX, y: secondAnchor.bounds.midY)
-        let originalFirstPoint = firstAnchor.convert(firstAnchorCenter, to: nil)
-        let originalSecondPoint = secondAnchor.convert(secondAnchorCenter, to: nil)
+        let originalFirstFrameInWindow = firstAnchor.convert(firstAnchor.bounds, to: nil)
+        let originalSecondFrameInWindow = secondAnchor.convert(secondAnchor.bounds, to: nil)
 
         firstContainer.frame.origin.x += 72
         secondContainer.frame.origin.x += 88
@@ -13588,8 +13586,24 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
         firstWindow.displayIfNeeded()
         secondWindow.displayIfNeeded()
 
-        let shiftedFirstPoint = firstAnchor.convert(firstAnchorCenter, to: nil)
-        let shiftedSecondPoint = secondAnchor.convert(secondAnchorCenter, to: nil)
+        let shiftedFirstFrameInWindow = firstAnchor.convert(firstAnchor.bounds, to: nil)
+        let shiftedSecondFrameInWindow = secondAnchor.convert(secondAnchor.bounds, to: nil)
+        let retiredFirstPoint = NSPoint(
+            x: (originalFirstFrameInWindow.minX + shiftedFirstFrameInWindow.minX) / 2,
+            y: shiftedFirstFrameInWindow.midY
+        )
+        let shiftedFirstPoint = NSPoint(
+            x: (originalFirstFrameInWindow.maxX + shiftedFirstFrameInWindow.maxX) / 2,
+            y: shiftedFirstFrameInWindow.midY
+        )
+        let retiredSecondPoint = NSPoint(
+            x: (originalSecondFrameInWindow.minX + shiftedSecondFrameInWindow.minX) / 2,
+            y: shiftedSecondFrameInWindow.midY
+        )
+        let shiftedSecondPoint = NSPoint(
+            x: (originalSecondFrameInWindow.maxX + shiftedSecondFrameInWindow.maxX) / 2,
+            y: shiftedSecondFrameInWindow.midY
+        )
         XCTAssertNil(
             TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedFirstPoint, in: firstWindow),
             "First window should remain stale until its scheduled external geometry sync runs"
@@ -13598,10 +13612,18 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
             TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedSecondPoint, in: secondWindow),
             "Second window should remain stale until its scheduled external geometry sync runs"
         )
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(retiredSecondPoint, in: secondWindow),
+            "Before syncing, unrelated windows should still report the stale portal location"
+        )
 
         TerminalWindowPortalRegistry.scheduleExternalGeometrySynchronize(for: firstWindow)
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(retiredFirstPoint, in: firstWindow),
+            "Window-scoped sync should clear the stale location in the requested window"
+        )
         XCTAssertNotNil(
             TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedFirstPoint, in: firstWindow),
             "Window-scoped sync should refresh the requested window"
@@ -13611,7 +13633,7 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
             "Window-scoped sync should not refresh unrelated windows"
         )
         XCTAssertNotNil(
-            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(originalSecondPoint, in: secondWindow),
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(retiredSecondPoint, in: secondWindow),
             "Unrelated windows should retain their stale geometry until their own sync runs"
         )
     }

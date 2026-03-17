@@ -680,7 +680,7 @@ final class WindowTerminalPortal: NSObject {
         geometryObservers.removeAll()
     }
 
-    private func scheduleExternalGeometrySynchronize() {
+    fileprivate func scheduleExternalGeometrySynchronize() {
         guard !hasExternalGeometrySyncScheduled else { return }
         hasExternalGeometrySyncScheduled = true
         let isDragEvent = TerminalWindowPortalRegistry.isInteractiveGeometryResizeActive
@@ -1661,11 +1661,7 @@ enum TerminalWindowPortalRegistry {
 #if DEBUG
         if Self.isPointerDragActiveForTesting { return true }
 #endif
-        if Self.interactiveGeometryResizeCount > 0 { return true }
-        switch NSApp.currentEvent?.type {
-        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
-        default: return false
-        }
+        return Self.interactiveGeometryResizeCount > 0
     }
 
     private static func bindBlockReason(
@@ -1750,6 +1746,15 @@ enum TerminalWindowPortalRegistry {
         return portal
     }
 
+    private static func existingPortal(for window: NSWindow) -> WindowTerminalPortal? {
+        if let existing = objc_getAssociatedObject(window, &cmuxWindowTerminalPortalKey) as? WindowTerminalPortal {
+            portalsByWindowId[ObjectIdentifier(window)] = existing
+            installWindowCloseObserverIfNeeded(for: window)
+            return existing
+        }
+        return portalsByWindowId[ObjectIdentifier(window)]
+    }
+
     static func bind(
         hostedView: GhosttySurfaceScrollView,
         to anchorView: NSView,
@@ -1806,6 +1811,10 @@ enum TerminalWindowPortalRegistry {
         guard let window = anchorView.window else { return }
         let portal = portal(for: window)
         portal.synchronizeHostedViewForAnchor(anchorView)
+    }
+
+    static func scheduleExternalGeometrySynchronize(for window: NSWindow) {
+        existingPortal(for: window)?.scheduleExternalGeometrySynchronize()
     }
 
     static func beginInteractiveGeometryResize() {
