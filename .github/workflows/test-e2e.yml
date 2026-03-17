@@ -14,6 +14,10 @@ on:
         description: "Per-test timeout in seconds"
         required: false
         default: "120"
+      job_timeout_minutes:
+        description: "Job timeout in minutes"
+        required: false
+        default: "20"
       record_video:
         description: Record the virtual display during tests
         required: false
@@ -31,7 +35,7 @@ on:
 jobs:
   e2e:
     runs-on: ${{ inputs.runner || 'depot-macos-latest' }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ fromJSON(inputs.job_timeout_minutes || '20') }}
     env:
       TEST_REF: ${{ inputs.ref || github.ref }}
     steps:
