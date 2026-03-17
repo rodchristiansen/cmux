@@ -2023,6 +2023,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var jumpUnreadFocusObserver: NSObjectProtocol?
     private var didSetupGotoSplitUITest = false
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
+    private var didSetupTerminalFontZoomUITest = false
+    private var terminalFontZoomUITestObservers: [NSObjectProtocol] = []
+    private var terminalFontZoomUITestStateUpdatePending = false
+    private var terminalFontZoomUITestUpdateSerial: UInt64 = 0
+    private var terminalFontZoomUITestRequestedSurface = false
     private var didSetupSocketSanityUITest = false
     private var didSetupMultiWindowNotificationsUITest = false
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
@@ -2410,6 +2415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #if DEBUG
         setupJumpUnreadUITestIfNeeded()
         setupGotoSplitUITestIfNeeded()
+        setupTerminalFontZoomUITestIfNeeded()
         setupSocketSanityUITestIfNeeded()
         setupMultiWindowNotificationsUITestIfNeeded()
 
@@ -7566,6 +7572,195 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return object
     }
 
+    private func terminalFontZoomUITestPath() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        guard env["CMUX_UI_TEST_TERMINAL_FONT_ZOOM_SETUP"] == "1",
+              let path = env["CMUX_UI_TEST_TERMINAL_FONT_ZOOM_PATH"],
+              !path.isEmpty else {
+            return nil
+        }
+        return path
+    }
+
+    private func setupTerminalFontZoomUITestIfNeeded() {
+        guard !didSetupTerminalFontZoomUITest else { return }
+        didSetupTerminalFontZoomUITest = true
+        guard let path = terminalFontZoomUITestPath() else { return }
+
+        try? FileManager.default.removeItem(atPath: path)
+
+        terminalFontZoomUITestObservers.append(NotificationCenter.default.addObserver(
+            forName: .mainWindowContextsDidChange,
+            object: self,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleTerminalFontZoomUITestStateUpdate(source: "mainWindowContextsDidChange")
+        })
+        terminalFontZoomUITestObservers.append(NotificationCenter.default.addObserver(
+            forName: .ghosttyDidBecomeFirstResponderSurface,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleTerminalFontZoomUITestStateUpdate(source: "ghosttyDidBecomeFirstResponderSurface")
+        })
+        terminalFontZoomUITestObservers.append(NotificationCenter.default.addObserver(
+            forName: .ghosttyDidFocusSurface,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleTerminalFontZoomUITestStateUpdate(source: "ghosttyDidFocusSurface")
+        })
+        terminalFontZoomUITestObservers.append(NotificationCenter.default.addObserver(
+            forName: .terminalSurfaceDidBecomeReady,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleTerminalFontZoomUITestStateUpdate(source: "terminalSurfaceDidBecomeReady")
+        })
+        terminalFontZoomUITestObservers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let window = notification.object as? NSWindow,
+                  self.contextForMainTerminalWindow(window) != nil else { return }
+            self.scheduleTerminalFontZoomUITestStateUpdate(source: "windowDidBecomeKey")
+        })
+
+        scheduleTerminalFontZoomUITestStateUpdate(source: "setup")
+    }
+
+    fileprivate func scheduleTerminalFontZoomUITestStateUpdate(source: String) {
+        guard terminalFontZoomUITestPath() != nil else { return }
+        guard !terminalFontZoomUITestStateUpdatePending else { return }
+        terminalFontZoomUITestStateUpdatePending = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.terminalFontZoomUITestStateUpdatePending = false
+            self.publishTerminalFontZoomUITestStateIfNeeded(source: source)
+        }
+    }
+
+    private func publishTerminalFontZoomUITestStateIfNeeded(source: String) {
+        guard let path = terminalFontZoomUITestPath() else { return }
+        writeMultiWindowNotificationTestData(terminalFontZoomUITestSnapshot(source: source), at: path)
+    }
+
+    private func terminalFontZoomUITestSnapshot(source: String) -> [String: String] {
+        terminalFontZoomUITestUpdateSerial &+= 1
+
+        var payload: [String: String] = [
+            "source": source,
+            "updateSerial": String(terminalFontZoomUITestUpdateSerial),
+            "ready": "pending",
+            "failure": "",
+            "windowId": "",
+            "tabId": "",
+            "surfaceId": "",
+            "windowFrontmost": "0",
+            "firstResponder": "0",
+            "surfaceReady": "0",
+            "fontSize": "",
+        ]
+
+        guard let context = preferredTerminalFontZoomUITestContext() else {
+            payload["failure"] = "window_missing"
+            return payload
+        }
+
+        payload["windowId"] = context.windowId.uuidString
+
+        guard let window = resolvedWindow(for: context) else {
+            payload["failure"] = "window_missing"
+            return payload
+        }
+
+        let tabManager = context.tabManager
+        if tabManager.selectedTabId == nil, let firstTab = tabManager.tabs.first {
+            tabManager.selectTab(firstTab)
+        }
+
+        guard let workspace = tabManager.selectedWorkspace ?? tabManager.tabs.first else {
+            payload["failure"] = "workspace_missing"
+            return payload
+        }
+
+        if tabManager.selectedTabId != workspace.id {
+            tabManager.selectTab(workspace)
+        }
+
+        payload["tabId"] = workspace.id.uuidString
+
+        let terminalPanel = workspace.focusedTerminalPanel ?? workspace.panels.values
+            .compactMap { $0 as? TerminalPanel }
+            .sorted(by: { $0.id.uuidString < $1.id.uuidString })
+            .first
+
+        guard let terminalPanel else {
+            if !terminalFontZoomUITestRequestedSurface {
+                terminalFontZoomUITestRequestedSurface = true
+                tabManager.newSurface()
+            }
+            payload["failure"] = "creating_terminal"
+            return payload
+        }
+
+        terminalFontZoomUITestRequestedSurface = false
+        payload["surfaceId"] = terminalPanel.id.uuidString
+
+        let isWindowFrontmost = NSApp.keyWindow === window || NSApp.mainWindow === window
+        if !isWindowFrontmost {
+            _ = focusMainWindow(windowId: context.windowId)
+        }
+        let windowFrontmost = NSApp.keyWindow === window || NSApp.mainWindow === window
+        payload["windowFrontmost"] = windowFrontmost ? "1" : "0"
+
+        if workspace.focusedPanelId != terminalPanel.id {
+            tabManager.focusSurface(tabId: workspace.id, surfaceId: terminalPanel.id)
+        }
+
+        let isFirstResponder = terminalPanel.hostedView.isSurfaceViewFirstResponder()
+        payload["firstResponder"] = isFirstResponder ? "1" : "0"
+
+        guard let surface = terminalPanel.surface.surface else {
+            payload["failure"] = "surface_not_ready"
+            return payload
+        }
+
+        payload["surfaceReady"] = "1"
+
+        guard let fontSize = cmuxCurrentSurfaceFontSizePoints(surface) else {
+            payload["failure"] = "font_size_unavailable"
+            return payload
+        }
+
+        payload["fontSize"] = String(format: "%.2f", Double(fontSize))
+        if windowFrontmost && isFirstResponder {
+            payload["ready"] = "1"
+        } else {
+            payload["failure"] = isFirstResponder ? "window_not_frontmost" : "terminal_not_first_responder"
+        }
+
+        return payload
+    }
+
+    private func preferredTerminalFontZoomUITestContext() -> MainWindowContext? {
+        if let keyWindow = NSApp.keyWindow,
+           let context = contextForMainTerminalWindow(keyWindow) {
+            return context
+        }
+        if let mainWindow = NSApp.mainWindow,
+           let context = contextForMainTerminalWindow(mainWindow) {
+            return context
+        }
+
+        return mainWindowContexts.values
+            .sorted(by: { $0.windowId.uuidString < $1.windowId.uuidString })
+            .first
+    }
+
     private func setupMultiWindowNotificationsUITestIfNeeded() {
         guard !didSetupMultiWindowNotificationsUITest else { return }
         didSetupMultiWindowNotificationsUITest = true
@@ -11830,6 +12025,13 @@ private extension NSWindow {
         let firstResponderWebView = self.firstResponder.flatMap {
             Self.cmuxOwningWebView(for: $0, in: self, event: event)
         }
+        let isTerminalZoomShortcut = shouldRouteTerminalFontZoomShortcutToGhostty(
+            firstResponderIsGhostty: firstResponderGhosttyView != nil,
+            flags: event.modifierFlags,
+            chars: event.charactersIgnoringModifiers ?? "",
+            keyCode: event.keyCode,
+            literalChars: event.characters
+        )
         if let ghosttyView = firstResponderGhosttyView {
             // If the IME is composing and the key has no Cmd modifier, don't intercept —
             // let it flow through normal AppKit event dispatch so the input method can
@@ -11851,15 +12053,12 @@ private extension NSWindow {
             // Preserve Ghostty's terminal font-size shortcuts (Cmd +/−/0) when
             // the terminal is focused. Otherwise our browser menu shortcuts can
             // consume the event even when no browser panel is focused.
-            if shouldRouteTerminalFontZoomShortcutToGhostty(
-                firstResponderIsGhostty: true,
-                flags: event.modifierFlags,
-                chars: event.charactersIgnoringModifiers ?? "",
-                keyCode: event.keyCode,
-                literalChars: event.characters
-            ) {
+            if isTerminalZoomShortcut {
                 ghosttyView.keyDown(with: event)
 #if DEBUG
+                AppDelegate.shared?.scheduleTerminalFontZoomUITestStateUpdate(
+                    source: "window.ghosttyKeyDownDirect"
+                )
                 dlog("zoom.shortcut stage=window.ghosttyKeyDownDirect event=\(Self.keyDescription(event)) handled=1")
 #endif
                 return true
@@ -11923,6 +12122,11 @@ private extension NSWindow {
                 // Fall through to the original performKeyEquivalent path below.
             } else {
 #if DEBUG
+                if isTerminalZoomShortcut {
+                    AppDelegate.shared?.scheduleTerminalFontZoomUITestStateUpdate(
+                        source: "window.mainMenuBypass"
+                    )
+                }
                 dlog("  → consumed by mainMenu (bypassed SwiftUI)")
 #endif
                 return true
@@ -11931,6 +12135,11 @@ private extension NSWindow {
 
         let result = cmux_performKeyEquivalent(with: event)
 #if DEBUG
+        if result && isTerminalZoomShortcut {
+            AppDelegate.shared?.scheduleTerminalFontZoomUITestStateUpdate(
+                source: "window.originalPerformKeyEquivalent"
+            )
+        }
         if result { dlog("  → consumed by original performKeyEquivalent") }
 #endif
         return result

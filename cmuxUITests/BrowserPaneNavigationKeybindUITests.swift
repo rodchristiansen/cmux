@@ -1009,110 +1009,61 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 
 final class TerminalFontZoomShortcutUITests: XCTestCase {
     private var launchTag = ""
-    private var socketPath = ""
     private var dataPath = ""
 
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
         launchTag = "ui-tests-terminal-font-zoom-\(UUID().uuidString.prefix(8))"
-        socketPath = "/tmp/cmux-ui-test-terminal-font-zoom-\(UUID().uuidString).sock"
         dataPath = "/tmp/cmux-ui-test-terminal-font-zoom-\(UUID().uuidString).json"
         try? FileManager.default.removeItem(atPath: dataPath)
-        try? FileManager.default.removeItem(atPath: socketPath)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(atPath: dataPath)
-        try? FileManager.default.removeItem(atPath: socketPath)
         super.tearDown()
     }
 
     func testCmdEqualZoomsInFocusedTerminal() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["-socketControlMode", "allowAll"]
         app.launchEnvironment["CMUX_TAG"] = launchTag
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_SOCKET_MODE"] = "allowAll"
-        app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
-        app.launchEnvironment["CMUX_ALLOW_SOCKET_OVERRIDE"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
-        app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_TERMINAL_FONT_ZOOM_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_TERMINAL_FONT_ZOOM_PATH"] = dataPath
         app.launch()
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch in foreground. state=\(app.state.rawValue)"
         )
 
-        XCTAssertTrue(
-            waitForSocketSetup(timeout: 20.0),
-            "Expected control socket setup data. requested=\(socketPath) tagged=\(taggedDebugSocketPath()) data=\(dataPath)"
+        let baselineState = try XCTUnwrap(
+            waitForTerminalZoomState(timeout: 20.0) { state in
+                guard state["ready"] == "1" else { return false }
+                return self.fontSize(from: state) != nil
+            },
+            "Expected terminal zoom state before Cmd+=. data=\(terminalZoomDiagnostics(from: loadTerminalZoomState()))"
         )
-
-        guard let setup = loadSocketSetupData() else {
-            XCTFail("Missing control socket setup data at \(dataPath)")
-            return
-        }
-
-        if let expectedSocketPath = setup["socketExpectedPath"], !expectedSocketPath.isEmpty {
-            socketPath = expectedSocketPath
-        }
-        if setup["socketReady"] != "1" {
-            XCTFail(
-                "Control socket unavailable in this test environment. expected=\(socketPath) " +
-                    socketDiagnostics(from: setup)
-            )
-            return
-        }
-        guard setup["socketPingResponse"] == "PONG" else {
-            XCTFail(
-                "Control socket ping sanity check failed. path=\(socketPath) " +
-                    socketDiagnostics(from: setup)
-            )
-            return
-        }
-        let pingResponse = waitForSocketPong(timeout: 12.0)
-        XCTAssertEqual(
-            pingResponse,
-            "PONG",
-            "Expected control socket at \(socketPath). " +
-                "setup=\(socketDiagnostics(from: setup)) lastResponse=\(pingResponse ?? "<nil>")"
-        )
-
-        let surfaceId = try XCTUnwrap(okUUID(from: socketCommand("new_surface --type=terminal")))
-        XCTAssertEqual(socketCommand("focus_surface \(surfaceId)"), "OK")
-        XCTAssertTrue(
-            waitForTerminalFocus(surfaceId: surfaceId, timeout: 6.0),
-            "Expected socket focus command to focus terminal surface \(surfaceId)"
-        )
-
-        let baselineFontSize = try XCTUnwrap(
-            waitForTerminalFontSize(surfaceId: surfaceId, timeout: 6.0),
-            "Expected terminal font size before Cmd+="
-        )
+        let baselineFontSize = try XCTUnwrap(fontSize(from: baselineState))
 
         app.typeKey("=", modifierFlags: [.command])
 
-        let increasedFontSize = try XCTUnwrap(
-            waitForTerminalFontSize(surfaceId: surfaceId, timeout: 6.0) { $0 > baselineFontSize + 0.4 },
+        let increasedState = try XCTUnwrap(
+            waitForTerminalZoomState(timeout: 6.0) { state in
+                guard state["ready"] == "1",
+                      let fontSize = self.fontSize(from: state) else {
+                    return false
+                }
+                return fontSize > baselineFontSize + 0.4
+            },
             "Expected Cmd+= to increase terminal font size from \(baselineFontSize). " +
-                "lastResponse=\(socketCommand("read_terminal_font_size \(surfaceId)") ?? "nil")"
+                "data=\(terminalZoomDiagnostics(from: loadTerminalZoomState()))"
         )
+        let increasedFontSize = try XCTUnwrap(fontSize(from: increasedState))
 
         XCTAssertGreaterThan(
             increasedFontSize,
             baselineFontSize,
             "Expected Cmd+= to increase terminal font size. baseline=\(baselineFontSize) increased=\(increasedFontSize)"
         )
-    }
-
-    private func waitForSocketPong(timeout: TimeInterval) -> String? {
-        var lastResponse: String?
-        _ = waitForCondition(timeout: timeout) {
-            lastResponse = self.socketCommand("ping")
-            return lastResponse == "PONG"
-        }
-        return lastResponse == "PONG" ? "PONG" : (socketCommand("ping") ?? lastResponse)
     }
 
     private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
@@ -1126,115 +1077,38 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
         return false
     }
 
-    private func waitForTerminalFocus(surfaceId: String, timeout: TimeInterval) -> Bool {
-        waitForCondition(timeout: timeout) {
-            self.socketCommand("is_terminal_focused \(surfaceId)") == "true"
-        }
-    }
-
-    private func waitForTerminalFontSize(
-        surfaceId: String,
-        timeout: TimeInterval,
-        predicate: ((Double) -> Bool)? = nil
-    ) -> Double? {
-        var lastValue: Double?
-        let matched = waitForCondition(timeout: timeout) {
-            guard let value = self.readTerminalFontSize(surfaceId: surfaceId) else { return false }
-            lastValue = value
-            return predicate?(value) ?? true
-        }
-        return matched ? lastValue : lastValue
-    }
-
-    private func readTerminalFontSize(surfaceId: String) -> Double? {
-        guard let response = socketCommand("read_terminal_font_size \(surfaceId)"),
-              response.hasPrefix("OK ") else {
-            return nil
-        }
-        let payload = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return Double(payload)
-    }
-
-    private func okUUID(from response: String?) -> String? {
-        guard let response, response.hasPrefix("OK ") else { return nil }
-        let value = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return UUID(uuidString: value) != nil ? value : nil
-    }
-
-    private func waitForSocketSetup(timeout: TimeInterval) -> Bool {
-        waitForCondition(timeout: timeout) {
-            guard let data = self.loadSocketSetupData() else { return false }
-            let socketReady = data["socketReady"] ?? ""
-            return !socketReady.isEmpty && socketReady != "pending"
-        }
-    }
-
-    private func loadSocketSetupData() -> [String: String]? {
+    private func loadTerminalZoomState() -> [String: String]? {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: dataPath)) else {
             return nil
         }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
     }
 
-    private func socketDiagnostics(from data: [String: String]) -> String {
-        let pingResponse = data["socketPingResponse"].flatMap { $0.isEmpty ? nil : $0 } ?? "<nil>"
-        return "mode=\(data["socketMode"] ?? "") running=\(data["socketIsRunning"] ?? "") " +
-            "acceptLoopAlive=\(data["socketAcceptLoopAlive"] ?? "") pathMatches=\(data["socketPathMatches"] ?? "") " +
-            "pathExists=\(data["socketPathExists"] ?? "") ping=\(pingResponse) " +
-            "signals=\(data["socketFailureSignals"] ?? "")"
-    }
-
-    private func taggedDebugSocketPath() -> String {
-        let slug = launchTag
-            .lowercased()
-            .replacingOccurrences(of: ".", with: "-")
-            .replacingOccurrences(of: "_", with: "-")
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: "-")
-        return "/tmp/cmux-debug-\(slug).sock"
-    }
-
-    private func socketCommand(_ command: String, responseTimeout: TimeInterval = 2.0) -> String? {
-        if let response = ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendLine(command) {
-            return response
+    private func waitForTerminalZoomState(
+        timeout: TimeInterval,
+        predicate: @escaping ([String: String]) -> Bool
+    ) -> [String: String]? {
+        var lastState: [String: String]?
+        let matched = waitForCondition(timeout: timeout) {
+            guard let state = self.loadTerminalZoomState() else { return false }
+            lastState = state
+            return predicate(state)
         }
-        return socketCommandViaNetcat(command, responseTimeout: responseTimeout)
+        return matched ? lastState : lastState
     }
 
-    private func socketCommandViaNetcat(_ command: String, responseTimeout: TimeInterval = 2.0) -> String? {
-        let nc = "/usr/bin/nc"
-        guard FileManager.default.isExecutableFile(atPath: nc) else { return nil }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-        let timeoutSeconds = max(1, Int(ceil(responseTimeout)))
-        let script = "printf '%s\\n' \(shellSingleQuote(command)) | \(nc) -U \(shellSingleQuote(socketPath)) -w \(timeoutSeconds) 2>/dev/null"
-        proc.arguments = ["-lc", script]
-
-        let outPipe = Pipe()
-        proc.standardOutput = outPipe
-
-        do {
-            try proc.run()
-        } catch {
-            return nil
-        }
-
-        proc.waitUntilExit()
-
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let outStr = String(data: outData, encoding: .utf8) else { return nil }
-        if let first = outStr.split(separator: "\n", maxSplits: 1).first {
-            return String(first).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let trimmed = outStr.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    private func fontSize(from data: [String: String]) -> Double? {
+        guard let raw = data["fontSize"], !raw.isEmpty else { return nil }
+        return Double(raw)
     }
 
-    private func shellSingleQuote(_ value: String) -> String {
-        if value.isEmpty { return "''" }
-        return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    private func terminalZoomDiagnostics(from data: [String: String]?) -> String {
+        guard let data else { return "<nil>" }
+        return "ready=\(data["ready"] ?? "") failure=\(data["failure"] ?? "") " +
+            "frontmost=\(data["windowFrontmost"] ?? "") firstResponder=\(data["firstResponder"] ?? "") " +
+            "surfaceReady=\(data["surfaceReady"] ?? "") fontSize=\(data["fontSize"] ?? "") " +
+            "surfaceId=\(data["surfaceId"] ?? "") source=\(data["source"] ?? "") " +
+            "updateSerial=\(data["updateSerial"] ?? "")"
     }
 
     private func waitForCondition(timeout: TimeInterval, predicate: @escaping () -> Bool) -> Bool {
@@ -1243,99 +1117,5 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
             object: nil
         )
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
-    }
-
-    private final class ControlSocketClient {
-        private let path: String
-        private let responseTimeout: TimeInterval
-
-        init(path: String, responseTimeout: TimeInterval) {
-            self.path = path
-            self.responseTimeout = responseTimeout
-        }
-
-        func sendLine(_ line: String) -> String? {
-            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-            guard fd >= 0 else { return nil }
-            defer { close(fd) }
-
-#if os(macOS)
-            var noSigPipe: Int32 = 1
-            _ = withUnsafePointer(to: &noSigPipe) { ptr in
-                setsockopt(
-                    fd,
-                    SOL_SOCKET,
-                    SO_NOSIGPIPE,
-                    ptr,
-                    socklen_t(MemoryLayout<Int32>.size)
-                )
-            }
-#endif
-
-            var address = sockaddr_un()
-            memset(&address, 0, MemoryLayout<sockaddr_un>.size)
-            address.sun_family = sa_family_t(AF_UNIX)
-
-            let maxLen = MemoryLayout.size(ofValue: address.sun_path)
-            let bytes = Array(path.utf8CString)
-            guard bytes.count <= maxLen else { return nil }
-            withUnsafeMutablePointer(to: &address.sun_path) { ptr in
-                let raw = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
-                memset(raw, 0, maxLen)
-                for index in 0..<bytes.count {
-                    raw[index] = bytes[index]
-                }
-            }
-
-            let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
-            let addressLength = socklen_t(pathOffset + bytes.count)
-#if os(macOS)
-            address.sun_len = UInt8(min(Int(addressLength), 255))
-#endif
-
-            let connected = withUnsafePointer(to: &address) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    connect(fd, sa, addressLength)
-                }
-            }
-            guard connected == 0 else { return nil }
-
-            let terminated = line + "\n"
-            let wrote: Bool = terminated.withCString { cString in
-                var remaining = strlen(cString)
-                var pointer = UnsafeRawPointer(cString)
-                while remaining > 0 {
-                    let written = write(fd, pointer, remaining)
-                    if written <= 0 { return false }
-                    remaining -= written
-                    pointer = pointer.advanced(by: written)
-                }
-                return true
-            }
-            guard wrote else { return nil }
-
-            let deadline = Date().addingTimeInterval(responseTimeout)
-            var accum = ""
-            var buf = [UInt8](repeating: 0, count: 4096)
-            while Date() < deadline {
-                var pollDescriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-                let ready = poll(&pollDescriptor, 1, 100)
-                if ready < 0 {
-                    return nil
-                }
-                if ready == 0 {
-                    continue
-                }
-                let n = read(fd, &buf, buf.count)
-                if n <= 0 { break }
-                if let chunk = String(bytes: buf[0..<n], encoding: .utf8) {
-                    accum.append(chunk)
-                    if let idx = accum.firstIndex(of: "\n") {
-                        return String(accum[..<idx])
-                    }
-                }
-            }
-            return accum.isEmpty ? nil : accum.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
     }
 }
