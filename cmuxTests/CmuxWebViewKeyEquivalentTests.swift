@@ -1349,6 +1349,24 @@ final class WorkspaceSSHHostTitleTests: XCTestCase {
         XCTAssertEqual(workspace.panelTitle(panelId: panelId), "vps-1")
         XCTAssertEqual(workspace.title, "vps-1")
     }
+
+    func testFocusedSplitWorkspaceUpdatesWorkspaceTitleWhenPanelTitleChanges() {
+        let workspace = Workspace()
+        guard let leftPanelId = workspace.focusedPanelId,
+              let rightPanel = workspace.newTerminalSplit(from: leftPanelId, orientation: .horizontal) else {
+            XCTFail("Expected split terminal panel to be created")
+            return
+        }
+
+        XCTAssertEqual(workspace.focusedPanelId, rightPanel.id)
+
+        workspace.applyProcessTitle("cmux-macmini: claude --dangerously-skip-permissions")
+        XCTAssertEqual(workspace.title, "cmux-macmini: claude --dangerously-skip-permissions")
+
+        XCTAssertTrue(workspace.updatePanelTitle(panelId: rightPanel.id, title: "cmux-macmini: codex"))
+        XCTAssertEqual(workspace.panelTitle(panelId: rightPanel.id), "cmux-macmini: codex")
+        XCTAssertEqual(workspace.title, "cmux-macmini: codex")
+    }
 }
 
 final class PortScannerSSHHostParsingTests: XCTestCase {
