@@ -255,11 +255,18 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
 
     private func expectedSocketCandidates(includeFallback: Bool) -> [String] {
         var candidates = [socketPath]
-        candidates.append("/tmp/cmux-debug-\(launchTag).sock")
+        let sanitizedTag = sanitizeTagSlug(launchTag)
+        if !sanitizedTag.isEmpty {
+            candidates.append("/tmp/cmux-debug-\(sanitizedTag).sock")
+            candidates.append("/tmp/cmux-\(sanitizedTag).sock")
+        }
 
         if includeFallback {
+            candidates.append(contentsOf: lastSocketPathCandidates())
             candidates.append(contentsOf: discoverTmpSocketCandidates(limit: 12))
             candidates.append("/tmp/cmux-debug.sock")
+            candidates.append(stableSocketPath())
+            candidates.append("/tmp/cmux.sock")
         }
 
         var unique: [String] = []
@@ -270,6 +277,37 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
             }
         }
         return unique
+    }
+
+    private func sanitizeTagSlug(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+
+        let pieces = trimmed
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let slug = pieces.joined(separator: "-")
+        return slug.isEmpty ? "agent" : slug
+    }
+
+    private func lastSocketPathCandidates() -> [String] {
+        [
+            readTrimmedFile(atPath: stableSocketDirectory().appendingPathComponent("last-socket-path").path),
+            readTrimmedFile(atPath: "/tmp/cmux-last-socket-path"),
+        ]
+        .compactMap { $0 }
+    }
+
+    private func stableSocketPath() -> String {
+        stableSocketDirectory()
+            .appendingPathComponent("cmux.sock")
+            .path
+    }
+
+    private func stableSocketDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("cmux", isDirectory: true)
+            ?? URL(fileURLWithPath: "/tmp")
     }
 
     private func discoverTmpSocketCandidates(limit: Int) -> [String] {
