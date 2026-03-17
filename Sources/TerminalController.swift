@@ -891,22 +891,26 @@ class TerminalController {
             ]
         )
 
-        // Wire batched port scanner results back to workspace state.
-        PortScanner.shared.onPortsUpdated = { [weak self] workspaceId, panelId, ports in
+        // Wire batched TTY scan results back to workspace state.
+        PortScanner.shared.onPanelScanned = { [weak self] workspaceId, panelId, result in
             MainActor.assumeIsolated {
                 guard let self, let tabManager = self.tabManager else { return }
                 guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return }
                 let validSurfaceIds = Set(workspace.panels.keys)
                 guard validSurfaceIds.contains(panelId) else { return }
-                let nextPorts = Array(Set(ports)).sorted()
+                let nextPorts = Array(Set(result.ports)).sorted()
                 let currentPorts = workspace.surfaceListeningPorts[panelId] ?? []
-                guard currentPorts != nextPorts else { return }
-                if nextPorts.isEmpty {
-                    workspace.surfaceListeningPorts.removeValue(forKey: panelId)
-                } else {
-                    workspace.surfaceListeningPorts[panelId] = nextPorts
+                let portsChanged = currentPorts != nextPorts
+                if portsChanged {
+                    if nextPorts.isEmpty {
+                        workspace.surfaceListeningPorts.removeValue(forKey: panelId)
+                    } else {
+                        workspace.surfaceListeningPorts[panelId] = nextPorts
+                    }
+                    workspace.recomputeListeningPorts()
                 }
-                workspace.recomputeListeningPorts()
+
+                _ = workspace.updatePanelSSHHost(panelId: panelId, host: result.sshHost)
             }
         }
 

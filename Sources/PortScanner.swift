@@ -15,8 +15,20 @@ import Foundation
 final class PortScanner: @unchecked Sendable {
     static let shared = PortScanner()
 
-    /// Callback delivers `(workspaceId, panelId, ports)` on main thread.
-    var onPortsUpdated: ((_ workspaceId: UUID, _ panelId: UUID, _ ports: [Int]) -> Void)?
+    struct PanelScanResult: Equatable {
+        let ports: [Int]
+        let sshHost: String?
+    }
+
+    struct TTYProcess: Equatable {
+        let pid: Int
+        let tty: String
+        let command: String
+        let arguments: [String]
+    }
+
+    /// Callback delivers `(workspaceId, panelId, result)` on main thread.
+    var onPanelScanned: ((_ workspaceId: UUID, _ panelId: UUID, _ result: PanelScanResult) -> Void)?
 
     // MARK: - State (all guarded by `queue`)
 
@@ -38,6 +50,31 @@ final class PortScanner: @unchecked Sendable {
     /// Each scan fires at this absolute offset; the recursive scheduler
     /// converts to relative delays between consecutive scans.
     private static let burstOffsets: [Double] = [0.5, 1.5, 3, 5, 7.5, 10]
+    nonisolated private static let sshCommands = Set(["ssh", "autossh"])
+    nonisolated private static let sshOptionsWithArguments = Set([
+        Character("B"),
+        Character("b"),
+        Character("c"),
+        Character("D"),
+        Character("E"),
+        Character("e"),
+        Character("F"),
+        Character("I"),
+        Character("i"),
+        Character("J"),
+        Character("L"),
+        Character("l"),
+        Character("M"),
+        Character("m"),
+        Character("O"),
+        Character("o"),
+        Character("p"),
+        Character("Q"),
+        Character("R"),
+        Character("S"),
+        Character("W"),
+        Character("w"),
+    ])
 
     // MARK: - Public API
 
@@ -139,16 +176,17 @@ final class PortScanner: @unchecked Sendable {
         let uniqueTTYs = Set(snapshot.values)
         let ttyList = uniqueTTYs.joined(separator: ",")
 
-        // 1. ps -t tty1,tty2,... -o pid=,tty=
-        let pidToTTY = runPS(ttyList: ttyList)
-        guard !pidToTTY.isEmpty else {
-            // No processes on any TTY — clear ports for all panels.
-            let results = snapshot.map { ($0.key, [Int]()) }
+        // 1. ps -t tty1,tty2,... -o pid=,tty=,comm=,args=
+        let processes = runPS(ttyList: ttyList)
+        guard !processes.isEmpty else {
+            // No processes on any TTY. Clear ephemeral scan-derived metadata.
+            let results = snapshot.map { ($0.key, PanelScanResult(ports: [], sshHost: nil)) }
             deliverResults(results)
             return
         }
 
         // 2. lsof -nP -a -p <all_pids> -iTCP -sTCP:LISTEN -F pn
+        let pidToTTY = Dictionary(uniqueKeysWithValues: processes.map { ($0.pid, $0.tty) })
         let allPids = pidToTTY.keys.sorted().map(String.init).joined(separator: ",")
         let pidToPorts = runLsof(pidsCsv: allPids)
 
@@ -159,55 +197,180 @@ final class PortScanner: @unchecked Sendable {
             portsByTTY[tty, default: []].formUnion(ports)
         }
 
+        let processesByTTY = Dictionary(grouping: processes, by: \.tty)
+
         // 4. Map to per-panel port lists.
-        var results: [(PanelKey, [Int])] = []
+        var results: [(PanelKey, PanelScanResult)] = []
         for (key, tty) in snapshot {
             let ports = portsByTTY[tty].map { Array($0).sorted() } ?? []
-            results.append((key, ports))
+            let sshHost = processesByTTY[tty].flatMap(Self.detectedSSHHost(in:))
+            results.append((key, PanelScanResult(ports: ports, sshHost: sshHost)))
         }
 
         deliverResults(results)
     }
 
-    private func deliverResults(_ results: [(PanelKey, [Int])]) {
-        guard let callback = onPortsUpdated else { return }
+    private func deliverResults(_ results: [(PanelKey, PanelScanResult)]) {
+        guard let callback = onPanelScanned else { return }
         DispatchQueue.main.async {
-            for (key, ports) in results {
-                callback(key.workspaceId, key.panelId, ports)
+            for (key, result) in results {
+                callback(key.workspaceId, key.panelId, result)
             }
         }
     }
 
     // MARK: - Process helpers
 
-    private func runPS(ttyList: String) -> [Int: String] {
-        // `ps -t tty1,tty2,... -o pid=,tty=` — targeted scan, much cheaper than -ax.
+    nonisolated static func detectedSSHHost(in processes: [TTYProcess]) -> String? {
+        let sorted = processes.sorted { lhs, rhs in
+            if lhs.pid == rhs.pid {
+                return lhs.command < rhs.command
+            }
+            return lhs.pid < rhs.pid
+        }
+
+        for process in sorted.reversed() {
+            let commandName = normalizedCommandName(process.command)
+            guard sshCommands.contains(commandName) else { continue }
+            if let host = sshHost(fromArguments: process.arguments) {
+                return host
+            }
+        }
+
+        return nil
+    }
+
+    nonisolated static func sshHost(fromArguments arguments: [String]) -> String? {
+        guard !arguments.isEmpty else { return nil }
+
+        var index = 0
+        if sshCommands.contains(normalizedCommandName(arguments[0])) {
+            index = 1
+        }
+
+        while index < arguments.count {
+            let token = arguments[index]
+            guard !token.isEmpty else {
+                index += 1
+                continue
+            }
+
+            if token == "--" {
+                index += 1
+                break
+            }
+
+            if let first = token.first, first == "-" {
+                let shortName = token.dropFirst().first
+                if let shortName,
+                   sshOptionsWithArguments.contains(shortName),
+                   token.count == 2 {
+                    index += 2
+                } else {
+                    index += 1
+                }
+                continue
+            }
+
+            return normalizedSSHDestination(token)
+        }
+
+        while index < arguments.count {
+            let token = arguments[index]
+            if let destination = normalizedSSHDestination(token) {
+                return destination
+            }
+            index += 1
+        }
+
+        return nil
+    }
+
+    private static func normalizedCommandName(_ command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return (trimmed as NSString).lastPathComponent.lowercased()
+    }
+
+    private static func normalizedSSHDestination(_ rawDestination: String) -> String? {
+        let trimmed = rawDestination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let url = URL(string: trimmed),
+           let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !host.isEmpty {
+            return host
+        }
+
+        var destination = trimmed
+        if let atIndex = destination.lastIndex(of: "@") {
+            destination = String(destination[destination.index(after: atIndex)...])
+        }
+
+        if destination.hasPrefix("["),
+           let closingBracket = destination.firstIndex(of: "]") {
+            let host = destination[destination.index(after: destination.startIndex)..<closingBracket]
+            let normalized = String(host).trimmingCharacters(in: .whitespacesAndNewlines)
+            return normalized.isEmpty ? nil : normalized
+        }
+
+        return destination
+    }
+
+    private func runPS(ttyList: String) -> [TTYProcess] {
+        // Targeted scan, much cheaper than `ps -ax`.
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-t", ttyList, "-o", "pid=,tty="]
+        process.arguments = ["-t", ttyList, "-o", "pid=,tty=,comm=,args="]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
         } catch {
-            return [:]
+            return []
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
-        guard let output = String(data: data, encoding: .utf8) else { return [:] }
+        guard let output = String(data: data, encoding: .utf8) else { return [] }
+        return Self.parsePSOutput(output)
+    }
 
-        var mapping: [Int: String] = [:]
+    private static func parsePSOutput(_ output: String) -> [TTYProcess] {
+        var processes: [TTYProcess] = []
+
         for line in output.split(separator: "\n") {
-            let parts = line.split(whereSeparator: \.isWhitespace)
-            guard parts.count >= 2,
-                  let pid = Int(parts[0]) else { continue }
-            mapping[pid] = String(parts[1])
+            let parts = line.split(
+                maxSplits: 3,
+                omittingEmptySubsequences: true,
+                whereSeparator: \.isWhitespace
+            )
+            guard parts.count >= 3,
+                  let pid = Int(parts[0]) else {
+                continue
+            }
+
+            let tty = String(parts[1])
+            let command = String(parts[2])
+            let argumentSource = parts.count == 4 ? String(parts[3]) : command
+            let arguments = argumentSource
+                .split(whereSeparator: \.isWhitespace)
+                .map(String.init)
+
+            processes.append(
+                TTYProcess(
+                    pid: pid,
+                    tty: tty,
+                    command: command,
+                    arguments: arguments.isEmpty ? [command] : arguments
+                )
+            )
         }
-        return mapping
+
+        return processes
     }
 
     private func runLsof(pidsCsv: String) -> [Int: Set<Int>] {

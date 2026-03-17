@@ -1318,6 +1318,75 @@ final class AppDelegateWindowContextRoutingTests: XCTestCase {
 }
 
 @MainActor
+final class WorkspaceSSHHostTitleTests: XCTestCase {
+    func testSingleTerminalWorkspaceComposesSSHHostWithProcessTitle() {
+        let workspace = Workspace()
+        guard let panelId = workspace.focusedPanelId,
+              let tabId = workspace.surfaceIdFromPanelId(panelId) else {
+            XCTFail("Expected initial focused terminal panel")
+            return
+        }
+
+        XCTAssertTrue(workspace.updatePanelSSHHost(panelId: panelId, host: "myserver"))
+        XCTAssertEqual(workspace.panelTitle(panelId: panelId), "myserver")
+        XCTAssertEqual(workspace.title, "myserver")
+        XCTAssertEqual(workspace.bonsplitController.tab(tabId)?.title, "myserver")
+
+        XCTAssertTrue(workspace.updatePanelTitle(panelId: panelId, title: "Claude Code"))
+        XCTAssertEqual(workspace.panelTitle(panelId: panelId), "myserver: Claude Code")
+        XCTAssertEqual(workspace.title, "myserver: Claude Code")
+        XCTAssertEqual(workspace.bonsplitController.tab(tabId)?.title, "myserver: Claude Code")
+    }
+
+    func testSingleTerminalWorkspaceKeepsOnlySSHHostForGenericTerminalTitle() {
+        let workspace = Workspace()
+        guard let panelId = workspace.focusedPanelId else {
+            XCTFail("Expected initial focused terminal panel")
+            return
+        }
+
+        XCTAssertTrue(workspace.updatePanelSSHHost(panelId: panelId, host: "vps-1"))
+        XCTAssertEqual(workspace.panelTitle(panelId: panelId), "vps-1")
+        XCTAssertEqual(workspace.title, "vps-1")
+    }
+}
+
+final class PortScannerSSHHostParsingTests: XCTestCase {
+    func testSSHHostParsesUserAtHostArguments() {
+        XCTAssertEqual(
+            PortScanner.sshHost(fromArguments: ["/usr/bin/ssh", "ubuntu@myserver"]),
+            "myserver"
+        )
+    }
+
+    func testSSHHostParsesOptionsBeforeDestination() {
+        XCTAssertEqual(
+            PortScanner.sshHost(
+                fromArguments: [
+                    "/usr/bin/ssh",
+                    "-i", "/tmp/id_ed25519",
+                    "-p2222",
+                    "-oProxyCommand=proxy",
+                    "deploy@vps.example.com",
+                    "claude"
+                ]
+            ),
+            "vps.example.com"
+        )
+    }
+
+    func testDetectedSSHHostPrefersNewestSSHProcessOnTTY() {
+        let processes: [PortScanner.TTYProcess] = [
+            .init(pid: 100, tty: "ttys001", command: "/bin/zsh", arguments: ["/bin/zsh"]),
+            .init(pid: 140, tty: "ttys001", command: "/usr/bin/ssh", arguments: ["/usr/bin/ssh", "old-host"]),
+            .init(pid: 180, tty: "ttys001", command: "/usr/bin/ssh", arguments: ["/usr/bin/ssh", "new-host"]),
+        ]
+
+        XCTAssertEqual(PortScanner.detectedSSHHost(in: processes), "new-host")
+    }
+}
+
+@MainActor
 final class AppDelegateLaunchServicesRegistrationTests: XCTestCase {
     func testScheduleLaunchServicesRegistrationDefersRegisterWork() {
         _ = NSApplication.shared

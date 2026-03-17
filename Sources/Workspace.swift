@@ -999,6 +999,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var panelPullRequests: [UUID: SidebarPullRequestState] = [:]
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     @Published var listeningPorts: [Int] = []
+    @Published private(set) var panelSSHHosts: [UUID: String] = [:]
     var surfaceTTYNames: [UUID: String] = [:]
     private var panelShellActivityStates: [UUID: PanelShellActivityState] = [:]
     /// PIDs associated with agent status entries (e.g. claude_code), keyed by status key.
@@ -1306,6 +1307,7 @@ final class Workspace: Identifiable, ObservableObject {
         let isPinned: Bool
         let directory: String?
         let cachedTitle: String?
+        let sshHost: String?
         let customTitle: String?
         let manuallyUnread: Bool
     }
@@ -1459,7 +1461,66 @@ final class Workspace: Identifiable, ObservableObject {
            !custom.isEmpty {
             return custom
         }
-        return fallbackTitle
+        guard panels[panelId] is TerminalPanel,
+              let sshHost = panelSSHHosts[panelId]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sshHost.isEmpty else {
+            return fallbackTitle
+        }
+        return Self.resolvedTerminalWorkspaceTitle(remoteHost: sshHost, processTitle: fallbackTitle)
+    }
+
+    private func resolvedWorkspaceTitle() -> String {
+        if let customTitle = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !customTitle.isEmpty {
+            return customTitle
+        }
+
+        if panels.count == 1,
+           let panelId = panels.keys.first,
+           let panel = panels[panelId] {
+            let trimmedProcessTitle = processTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawFallback = trimmedProcessTitle.isEmpty
+                ? (panelTitles[panelId] ?? panel.displayTitle)
+                : trimmedProcessTitle
+            let fallback = rawFallback.isEmpty ? panel.displayTitle : rawFallback
+            return resolvedPanelTitle(panelId: panelId, fallback: fallback)
+        }
+
+        let trimmedProcessTitle = processTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedProcessTitle.isEmpty {
+            return trimmedProcessTitle
+        }
+
+        return String(localized: "workspace.displayName.fallback", defaultValue: "Workspace")
+    }
+
+    private static func resolvedTerminalWorkspaceTitle(remoteHost: String, processTitle: String) -> String {
+        let trimmedHost = remoteHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProcessTitle = processTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedProcessTitle = trimmedProcessTitle.isEmpty ? "Tab" : trimmedProcessTitle
+
+        guard !trimmedHost.isEmpty else { return normalizedProcessTitle }
+
+        if normalizedProcessTitle.caseInsensitiveCompare(trimmedHost) == .orderedSame {
+            return trimmedHost
+        }
+
+        if ["Terminal", "Tab"].contains(where: { $0.caseInsensitiveCompare(normalizedProcessTitle) == .orderedSame }) {
+            return trimmedHost
+        }
+
+        if normalizedProcessTitle.localizedCaseInsensitiveContains(trimmedHost) {
+            return normalizedProcessTitle
+        }
+
+        return String(
+            format: String(
+                localized: "workspace.title.remoteHostComposite",
+                defaultValue: "%1$@: %2$@"
+            ),
+            trimmedHost,
+            normalizedProcessTitle
+        )
     }
 
     private func syncPinnedStateForTab(_ tabId: TabID, panelId: UUID) {
@@ -1674,7 +1735,7 @@ final class Workspace: Identifiable, ObservableObject {
     func applyProcessTitle(_ title: String) {
         processTitle = title
         guard customTitle == nil else { return }
-        self.title = title
+        self.title = resolvedWorkspaceTitle()
     }
 
     func setCustomColor(_ hex: String?) {
@@ -1689,7 +1750,7 @@ final class Workspace: Identifiable, ObservableObject {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
             customTitle = nil
-            self.title = processTitle
+            self.title = resolvedWorkspaceTitle()
         } else {
             customTitle = trimmed
             self.title = trimmed
@@ -1850,16 +1911,49 @@ final class Workspace: Identifiable, ObservableObject {
 
         // If this is the only panel and no custom title, update workspace title
         if panels.count == 1, customTitle == nil {
-            if self.title != trimmed {
-                self.title = trimmed
-                didMutate = true
-            }
             if processTitle != trimmed {
                 processTitle = trimmed
+            }
+            let resolvedTitle = resolvedWorkspaceTitle()
+            if self.title != resolvedTitle {
+                self.title = resolvedTitle
+                didMutate = true
             }
         }
 
         return didMutate
+    }
+
+    @discardableResult
+    func updatePanelSSHHost(panelId: UUID, host: String?) -> Bool {
+        guard let panel = panels[panelId] else { return false }
+
+        let trimmedHost = host?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedHost = trimmedHost.isEmpty ? nil : trimmedHost
+        if panelSSHHosts[panelId] == normalizedHost {
+            return false
+        }
+
+        if let normalizedHost {
+            panelSSHHosts[panelId] = normalizedHost
+        } else {
+            panelSSHHosts.removeValue(forKey: panelId)
+        }
+
+        if let tabId = surfaceIdFromPanelId(panelId) {
+            let baseTitle = panelTitles[panelId] ?? panel.displayTitle
+            bonsplitController.updateTab(
+                tabId,
+                title: resolvedPanelTitle(panelId: panelId, fallback: baseTitle),
+                hasCustomTitle: panelCustomTitles[panelId] != nil
+            )
+        }
+
+        if panels.count == 1, customTitle == nil {
+            self.title = resolvedWorkspaceTitle()
+        }
+
+        return true
     }
 
     func pruneSurfaceMetadata(validSurfaceIds: Set<UUID>) {
@@ -1871,6 +1965,7 @@ final class Workspace: Identifiable, ObservableObject {
         panelGitBranches = panelGitBranches.filter { validSurfaceIds.contains($0.key) }
         manualUnreadMarkedAt = manualUnreadMarkedAt.filter { validSurfaceIds.contains($0.key) }
         surfaceListeningPorts = surfaceListeningPorts.filter { validSurfaceIds.contains($0.key) }
+        panelSSHHosts = panelSSHHosts.filter { validSurfaceIds.contains($0.key) }
         surfaceTTYNames = surfaceTTYNames.filter { validSurfaceIds.contains($0.key) }
         panelShellActivityStates = panelShellActivityStates.filter { validSurfaceIds.contains($0.key) }
         panelPullRequests = panelPullRequests.filter { validSurfaceIds.contains($0.key) }
@@ -3071,6 +3166,9 @@ final class Workspace: Identifiable, ObservableObject {
         if let cachedTitle = detached.cachedTitle {
             panelTitles[detached.panelId] = cachedTitle
         }
+        if let sshHost = detached.sshHost {
+            panelSSHHosts[detached.panelId] = sshHost
+        }
         if let customTitle = detached.customTitle {
             panelCustomTitles[detached.panelId] = customTitle
         }
@@ -3101,6 +3199,7 @@ final class Workspace: Identifiable, ObservableObject {
             panels.removeValue(forKey: detached.panelId)
             panelDirectories.removeValue(forKey: detached.panelId)
             panelTitles.removeValue(forKey: detached.panelId)
+            panelSSHHosts.removeValue(forKey: detached.panelId)
             panelCustomTitles.removeValue(forKey: detached.panelId)
             pinnedPanelIds.remove(detached.panelId)
             manualUnreadPanelIds.remove(detached.panelId)
@@ -4777,6 +4876,7 @@ extension Workspace: BonsplitDelegate {
                 isPinned: pinnedPanelIds.contains(panelId),
                 directory: panelDirectories[panelId],
                 cachedTitle: cachedTitle,
+                sshHost: panelSSHHosts[panelId],
                 customTitle: panelCustomTitles[panelId],
                 manuallyUnread: manualUnreadPanelIds.contains(panelId)
             )
@@ -4793,6 +4893,7 @@ extension Workspace: BonsplitDelegate {
         panelGitBranches.removeValue(forKey: panelId)
         panelPullRequests.removeValue(forKey: panelId)
         panelTitles.removeValue(forKey: panelId)
+        panelSSHHosts.removeValue(forKey: panelId)
         panelCustomTitles.removeValue(forKey: panelId)
         pinnedPanelIds.remove(panelId)
         manualUnreadPanelIds.remove(panelId)
@@ -4974,6 +5075,7 @@ extension Workspace: BonsplitDelegate {
                 panelGitBranches.removeValue(forKey: panelId)
                 panelPullRequests.removeValue(forKey: panelId)
                 panelTitles.removeValue(forKey: panelId)
+                panelSSHHosts.removeValue(forKey: panelId)
                 panelCustomTitles.removeValue(forKey: panelId)
                 pinnedPanelIds.remove(panelId)
                 manualUnreadPanelIds.remove(panelId)

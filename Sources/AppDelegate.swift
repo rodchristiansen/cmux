@@ -10073,7 +10073,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         context.sidebarSelectionState.selection = .tabs
         bringToFront(window)
-        guard context.tabManager.focusTabFromNotification(tabId, surfaceId: surfaceId) else {
+        let resolvedSurfaceId = resolvedNotificationSurfaceId(
+            tabManager: context.tabManager,
+            tabId: tabId,
+            requestedSurfaceId: surfaceId
+        )
+        guard context.tabManager.focusTabFromNotification(tabId, surfaceId: resolvedSurfaceId) else {
 #if DEBUG
             recordMultiWindowNotificationOpenFailureIfNeeded(
                 tabId: tabId,
@@ -10094,7 +10099,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         recordJumpUnreadFocusFromModelIfNeeded(
             tabManager: context.tabManager,
             tabId: tabId,
-            expectedSurfaceId: surfaceId
+            expectedSurfaceId: resolvedSurfaceId
         )
 #endif
 
@@ -10102,7 +10107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             markReadIfFocused(
                 notificationId: notificationId,
                 tabId: tabId,
-                surfaceId: surfaceId,
+                surfaceId: resolvedSurfaceId,
                 tabManager: context.tabManager,
                 notificationStore: store
             )
@@ -10112,7 +10117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         recordMultiWindowNotificationFocusIfNeeded(
             windowId: context.windowId,
             tabId: tabId,
-            surfaceId: surfaceId,
+            surfaceId: resolvedSurfaceId,
             sidebarSelection: context.sidebarSelectionState.selection
         )
         if ProcessInfo.processInfo.environment["CMUX_UI_TEST_JUMP_UNREAD_SETUP"] == "1" {
@@ -10151,7 +10156,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         sidebarSelectionState?.selection = .tabs
         bringToFront(window)
-        guard tabManager.focusTabFromNotification(tabId, surfaceId: surfaceId) else {
+        let resolvedSurfaceId = resolvedNotificationSurfaceId(
+            tabManager: tabManager,
+            tabId: tabId,
+            requestedSurfaceId: surfaceId
+        )
+        guard tabManager.focusTabFromNotification(tabId, surfaceId: resolvedSurfaceId) else {
 #if DEBUG
             if ProcessInfo.processInfo.environment["CMUX_UI_TEST_JUMP_UNREAD_SETUP"] == "1" {
                 writeJumpUnreadTestData([
@@ -10167,7 +10177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         recordJumpUnreadFocusFromModelIfNeeded(
             tabManager: tabManager,
             tabId: tabId,
-            expectedSurfaceId: surfaceId
+            expectedSurfaceId: resolvedSurfaceId
         )
 #endif
 
@@ -10175,7 +10185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             markReadIfFocused(
                 notificationId: notificationId,
                 tabId: tabId,
-                surfaceId: surfaceId,
+                surfaceId: resolvedSurfaceId,
                 tabManager: tabManager,
                 notificationStore: store
             )
@@ -10228,6 +10238,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return context.tabManager.tabs.first(where: { $0.id == tabId })?.title
         }
         return tabManager?.tabs.first(where: { $0.id == tabId })?.title
+    }
+
+    private func resolvedNotificationSurfaceId(
+        tabManager: TabManager,
+        tabId: UUID,
+        requestedSurfaceId: UUID?
+    ) -> UUID? {
+        guard let tab = tabManager.tabs.first(where: { $0.id == tabId }) else {
+            return requestedSurfaceId
+        }
+
+        guard let requestedSurfaceId else { return nil }
+        if tab.panels[requestedSurfaceId] != nil {
+            return requestedSurfaceId
+        }
+
+        if let latestUnreadSurfaceId = notificationStore?.latestNotification(forTabId: tabId)?.surfaceId,
+           tab.panels[latestUnreadSurfaceId] != nil {
+            return latestUnreadSurfaceId
+        }
+
+        if let focusedPanelId = tab.focusedPanelId,
+           tab.panels[focusedPanelId] != nil {
+            return focusedPanelId
+        }
+
+        return tab.panels.keys.sorted { $0.uuidString < $1.uuidString }.first
     }
 
     private func bringToFront(_ window: NSWindow) {
