@@ -6729,6 +6729,37 @@ final class WorkspacePanelGitBranchTests: XCTestCase {
         XCTAssertEqual(workspace.gitBranch?.isDirty, false)
     }
 
+    func testClosingRightColumnBottomFirstKeepsFocusOnBottomLeftPanel() {
+        let workspace = Workspace()
+        guard let topLeftPanelId = workspace.focusedPanelId,
+              let topRightPanel = workspace.newTerminalSplit(from: topLeftPanelId, orientation: .horizontal),
+              let bottomLeftPanel = workspace.newTerminalSplit(from: topLeftPanelId, orientation: .vertical),
+              let bottomRightPanel = workspace.newTerminalSplit(from: topRightPanel.id, orientation: .vertical) else {
+            XCTFail("Expected 2x2 split setup to succeed")
+            return
+        }
+
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            bottomRightPanel.id,
+            "Expected the bottom-right panel to be focused before the close sequence"
+        )
+
+        XCTAssertTrue(workspace.closePanel(bottomRightPanel.id, force: true), "Expected bottom-right close to succeed")
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            bottomLeftPanel.id,
+            "Expected the first close to restore focus to the bottom-left panel"
+        )
+        XCTAssertTrue(workspace.closePanel(topRightPanel.id, force: true), "Expected top-right close to succeed")
+        XCTAssertEqual(workspace.panels.count, 2, "Expected only the left column to remain")
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            bottomLeftPanel.id,
+            "Expected focus to stay on the bottom-left panel after closing the right column bottom-first"
+        )
+    }
+
     func testSidebarGitBranchesFollowLeftToRightSplitOrder() {
         let workspace = Workspace()
         guard let leftPanelId = workspace.focusedPanelId else {
