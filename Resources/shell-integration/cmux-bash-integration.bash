@@ -454,11 +454,18 @@ _cmux_prompt_command() {
     if [[ -n "$_CMUX_GIT_HEAD_PATH" ]]; then
         local head_signature
         head_signature="$(_cmux_git_head_signature "$_CMUX_GIT_HEAD_PATH" 2>/dev/null || true)"
-        if [[ -n "$head_signature" && "$head_signature" != "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
-            _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
-            git_head_changed=1
-            # Also invalidate the PR poller so it refreshes with the new branch.
-            _CMUX_PR_FORCE=1
+        if [[ -n "$head_signature" ]]; then
+            if [[ -z "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
+                # The first observed HEAD value is just the session baseline.
+                # Treating it as a branch change clears restore-seeded PR badges
+                # before the first background probe can confirm the current PR.
+                _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
+            elif [[ "$head_signature" != "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
+                _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
+                git_head_changed=1
+                # Also invalidate the PR poller so it refreshes with the new branch.
+                _CMUX_PR_FORCE=1
+            fi
         fi
     fi
 
