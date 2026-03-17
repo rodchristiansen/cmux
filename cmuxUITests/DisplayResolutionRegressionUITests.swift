@@ -3,6 +3,7 @@ import Foundation
 
 final class DisplayResolutionRegressionUITests: XCTestCase {
     private let displayHarnessManifestPath = "/tmp/cmux-ui-test-display-harness.json"
+    private var launchTag = ""
     private var socketPath = ""
     private var diagnosticsPath = ""
     private var displayReadyPath = ""
@@ -18,6 +19,7 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         continueAfterFailure = false
 
         let token = UUID().uuidString
+        launchTag = "ui-tests-display-resolution-\(token.prefix(8))"
         socketPath = "/tmp/cmux-ui-test-display-churn-\(token).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-display-churn-\(token).json"
         displayReadyPath = "/tmp/cmux-ui-test-display-ready-\(token)"
@@ -55,11 +57,20 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] = diagnosticsPath
         app.launchEnvironment["CMUX_UI_TEST_TARGET_DISPLAY_ID"] = targetDisplayID
+        app.launchEnvironment["CMUX_TAG"] = launchTag
         app.launch()
         app.activate()
 
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 12.0), "Expected cmux window to appear")
-        XCTAssertTrue(waitForSocketPong(timeout: 12.0), "Expected control socket to respond at \(socketPath)")
+        guard let resolvedSocketPath = resolveSocketPath(timeout: 12.0) else {
+            XCTFail(
+                "Expected control socket to respond. requested=\(socketPath) tag=\(launchTag) " +
+                "candidates=\(expectedSocketCandidates(includeFallback: true)) diagnostics=\(loadDiagnostics() ?? [:])"
+            )
+            return
+        }
+        socketPath = resolvedSocketPath
+        XCTAssertTrue(waitForSocketPong(timeout: 4.0), "Expected control socket to respond at \(socketPath)")
         XCTAssertTrue(
             waitForTargetDisplayMove(targetDisplayID: targetDisplayID, timeout: 12.0),
             "Expected app window to move to display \(targetDisplayID). diagnostics=\(loadDiagnostics() ?? [:])"
@@ -213,6 +224,79 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
             return diagnostics["targetDisplayMoveSucceeded"] == "1" &&
                 diagnostics["windowScreenDisplayIDs"]?.contains(targetDisplayID) == true
         }
+    }
+
+    private func resolveSocketPath(timeout: TimeInterval) -> String? {
+        let primaryCandidates = expectedSocketCandidates(includeFallback: false)
+        let fallbackCandidates = expectedSocketCandidates(includeFallback: true)
+            .filter { !primaryCandidates.contains($0) }
+
+        var resolvedPath: String?
+        _ = waitForCondition(timeout: timeout) {
+            for candidate in primaryCandidates {
+                guard FileManager.default.fileExists(atPath: candidate) else { continue }
+                if self.socketRespondsToPing(at: candidate) {
+                    resolvedPath = candidate
+                    return true
+                }
+            }
+            for candidate in fallbackCandidates {
+                guard FileManager.default.fileExists(atPath: candidate) else { continue }
+                if self.socketRespondsToPing(at: candidate) {
+                    resolvedPath = candidate
+                    return true
+                }
+            }
+            return false
+        }
+
+        return resolvedPath
+    }
+
+    private func expectedSocketCandidates(includeFallback: Bool) -> [String] {
+        var candidates = [socketPath]
+        candidates.append("/tmp/cmux-debug-\(launchTag).sock")
+
+        if includeFallback {
+            candidates.append(contentsOf: discoverTmpSocketCandidates(limit: 12))
+            candidates.append("/tmp/cmux-debug.sock")
+        }
+
+        var unique: [String] = []
+        var seen = Set<String>()
+        for candidate in candidates where !candidate.isEmpty {
+            if seen.insert(candidate).inserted {
+                unique.append(candidate)
+            }
+        }
+        return unique
+    }
+
+    private func discoverTmpSocketCandidates(limit: Int) -> [String] {
+        let tmpPath = "/tmp"
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: tmpPath) else {
+            return []
+        }
+
+        let matches = entries.filter { $0.hasPrefix("cmux") && $0.hasSuffix(".sock") }
+        let sorted = matches.compactMap { entry -> (path: String, mtime: Date)? in
+            let fullPath = (tmpPath as NSString).appendingPathComponent(entry)
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: fullPath) else {
+                return nil
+            }
+            let mtime = (attrs[.modificationDate] as? Date) ?? .distantPast
+            return (fullPath, mtime)
+        }
+        .sorted { $0.mtime > $1.mtime }
+
+        return Array(sorted.prefix(limit)).map(\.path)
+    }
+
+    private func socketRespondsToPing(at path: String) -> Bool {
+        let originalPath = socketPath
+        socketPath = path
+        defer { socketPath = originalPath }
+        return socketCommand("ping", responseTimeout: 2.0) == "PONG"
     }
 
     private func waitForSocketPong(timeout: TimeInterval) -> Bool {
