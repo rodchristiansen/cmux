@@ -532,14 +532,21 @@ _cmux_precmd() {
     if [[ -n "$_CMUX_GIT_HEAD_PATH" ]]; then
         local head_signature
         head_signature="$(_cmux_git_head_signature "$_CMUX_GIT_HEAD_PATH" 2>/dev/null || true)"
-        if [[ -n "$head_signature" && "$head_signature" != "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
-            _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
-            git_head_changed=1
-            # Treat HEAD file change like a git command — force-replace any
-            # running probe so the sidebar picks up the new branch immediately.
-            _CMUX_GIT_FORCE=1
-            _CMUX_PR_FORCE=1
-            should_git=1
+        if [[ -n "$head_signature" ]]; then
+            if [[ -z "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
+                # The first observed HEAD value establishes the baseline for this
+                # shell session. Don't treat it as a branch change or we'll clear
+                # restore-seeded PR badges before the first background probe runs.
+                _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
+            elif [[ "$head_signature" != "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
+                _CMUX_GIT_HEAD_SIGNATURE="$head_signature"
+                git_head_changed=1
+                # Treat HEAD file change like a git command — force-replace any
+                # running probe so the sidebar picks up the new branch immediately.
+                _CMUX_GIT_FORCE=1
+                _CMUX_PR_FORCE=1
+                should_git=1
+            fi
         fi
     fi
 
