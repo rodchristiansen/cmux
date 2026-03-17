@@ -49,7 +49,7 @@ class AuthManager: ObservableObject {
         if clearAuthRequested {
             clearAuthState()
             Task {
-                await clearTokensForUITest()
+                await clearPersistedAuthForUITest()
             }
             return
         }
@@ -205,12 +205,10 @@ class AuthManager: ObservableObject {
         applyAuthState(.cleared())
     }
 
-    private func clearTokensForUITest() async {
-        do {
-            try await stack.signOut()
-        } catch {
-            print("🔐 Failed to clear Stack Auth tokens: \(error)")
-        }
+    private func clearPersistedAuthForUITest() async {
+        // UI tests only need deterministic local signed-out state at launch.
+        // Clear persisted auth through the shared Convex logout path once,
+        // instead of racing duplicate Stack Auth sign-out calls during init.
         await ConvexClientManager.shared.clearAuth()
     }
 
