@@ -683,15 +683,7 @@ final class WindowTerminalPortal: NSObject {
     private func scheduleExternalGeometrySynchronize() {
         guard !hasExternalGeometrySyncScheduled else { return }
         hasExternalGeometrySyncScheduled = true
-        let isDragEvent = {
-#if DEBUG
-            if Self.isPointerDragActiveForTesting { return true }
-#endif
-            switch NSApp.currentEvent?.type {
-            case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
-            default: return false
-            }
-        }()
+        let isDragEvent = TerminalWindowPortalRegistry.isInteractiveGeometryResizeActive
         let requiresSettledLayout = !(hostView.inLiveResize || window?.inLiveResize == true || isDragEvent)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -1659,10 +1651,22 @@ enum TerminalWindowPortalRegistry {
     private static var portalsByWindowId: [ObjectIdentifier: WindowTerminalPortal] = [:]
     private static var hostedToWindowId: [ObjectIdentifier: ObjectIdentifier] = [:]
     private static var hasPendingExternalGeometrySyncForAllWindows = false
+    private static var interactiveGeometryResizeCount = 0
 #if DEBUG
     private static var blockedBindCount: Int = 0
     private static var blockedBindReasons: [String: Int] = [:]
 #endif
+
+    static var isInteractiveGeometryResizeActive: Bool {
+#if DEBUG
+        if Self.isPointerDragActiveForTesting { return true }
+#endif
+        if Self.interactiveGeometryResizeCount > 0 { return true }
+        switch NSApp.currentEvent?.type {
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
+        default: return false
+        }
+    }
 
     private static func bindBlockReason(
         expectedSurfaceId: UUID?,
@@ -1804,18 +1808,18 @@ enum TerminalWindowPortalRegistry {
         portal.synchronizeHostedViewForAnchor(anchorView)
     }
 
+    static func beginInteractiveGeometryResize() {
+        interactiveGeometryResizeCount += 1
+    }
+
+    static func endInteractiveGeometryResize() {
+        interactiveGeometryResizeCount = max(0, interactiveGeometryResizeCount - 1)
+    }
+
     static func scheduleExternalGeometrySynchronizeForAllWindows() {
         guard !Self.hasPendingExternalGeometrySyncForAllWindows else { return }
         Self.hasPendingExternalGeometrySyncForAllWindows = true
-        let isDragEvent = {
-#if DEBUG
-            if Self.isPointerDragActiveForTesting { return true }
-#endif
-            switch NSApp.currentEvent?.type {
-            case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
-            default: return false
-            }
-        }()
+        let isDragEvent = Self.isInteractiveGeometryResizeActive
         DispatchQueue.main.async {
             let performSync = {
                 Self.hasPendingExternalGeometrySyncForAllWindows = false
