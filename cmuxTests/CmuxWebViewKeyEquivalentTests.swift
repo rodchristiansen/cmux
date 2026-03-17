@@ -13504,6 +13504,117 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
             "Interactive sidebar resizes should not land a second delayed terminal resize on the next queue turn"
         )
     }
+
+    func testWindowScopedExternalGeometrySyncDoesNotRefreshOtherWindows() {
+        let firstWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: firstWindow)
+            firstWindow.orderOut(nil)
+        }
+
+        let secondWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: secondWindow)
+            secondWindow.orderOut(nil)
+        }
+
+        let firstSurface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        let secondSurface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+
+        guard let firstContentView = firstWindow.contentView,
+              let secondContentView = secondWindow.contentView else {
+            XCTFail("Expected content views")
+            return
+        }
+
+        let firstContainer = NSView(frame: NSRect(x: 40, y: 60, width: 260, height: 180))
+        firstContentView.addSubview(firstContainer)
+        let firstAnchor = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 180))
+        firstContainer.addSubview(firstAnchor)
+
+        let secondContainer = NSView(frame: NSRect(x: 40, y: 60, width: 260, height: 180))
+        secondContentView.addSubview(secondContainer)
+        let secondAnchor = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 180))
+        secondContainer.addSubview(secondAnchor)
+
+        TerminalWindowPortalRegistry.bind(
+            hostedView: firstSurface.hostedView,
+            to: firstAnchor,
+            visibleInUI: true,
+            expectedSurfaceId: firstSurface.id,
+            expectedGeneration: firstSurface.portalBindingGeneration()
+        )
+        TerminalWindowPortalRegistry.bind(
+            hostedView: secondSurface.hostedView,
+            to: secondAnchor,
+            visibleInUI: true,
+            expectedSurfaceId: secondSurface.id,
+            expectedGeneration: secondSurface.portalBindingGeneration()
+        )
+        TerminalWindowPortalRegistry.synchronizeForAnchor(firstAnchor)
+        TerminalWindowPortalRegistry.synchronizeForAnchor(secondAnchor)
+        realizeWindowLayout(firstWindow)
+        realizeWindowLayout(secondWindow)
+
+        let firstAnchorCenter = NSPoint(x: firstAnchor.bounds.midX, y: firstAnchor.bounds.midY)
+        let secondAnchorCenter = NSPoint(x: secondAnchor.bounds.midX, y: secondAnchor.bounds.midY)
+        let originalFirstPoint = firstAnchor.convert(firstAnchorCenter, to: nil)
+        let originalSecondPoint = secondAnchor.convert(secondAnchorCenter, to: nil)
+
+        firstContainer.frame.origin.x += 72
+        secondContainer.frame.origin.x += 88
+        firstContentView.layoutSubtreeIfNeeded()
+        secondContentView.layoutSubtreeIfNeeded()
+        firstWindow.displayIfNeeded()
+        secondWindow.displayIfNeeded()
+
+        let shiftedFirstPoint = firstAnchor.convert(firstAnchorCenter, to: nil)
+        let shiftedSecondPoint = secondAnchor.convert(secondAnchorCenter, to: nil)
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedFirstPoint, in: firstWindow),
+            "First window should remain stale until its scheduled external geometry sync runs"
+        )
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedSecondPoint, in: secondWindow),
+            "Second window should remain stale until its scheduled external geometry sync runs"
+        )
+
+        TerminalWindowPortalRegistry.scheduleExternalGeometrySynchronize(for: firstWindow)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedFirstPoint, in: firstWindow),
+            "Window-scoped sync should refresh the requested window"
+        )
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedSecondPoint, in: secondWindow),
+            "Window-scoped sync should not refresh unrelated windows"
+        )
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(originalSecondPoint, in: secondWindow),
+            "Unrelated windows should retain their stale geometry until their own sync runs"
+        )
+    }
 }
 
 @MainActor
@@ -15334,6 +15445,17 @@ final class GhosttyTerminalViewVisibilityPolicyTests: XCTestCase {
                 hostedViewHasSuperview: false,
                 isBoundToCurrentHost: false
             )
+        )
+    }
+
+    func testInteractiveGeometryResizeUsesImmediatePortalSyncDecision() {
+        XCTAssertTrue(
+            GhosttyTerminalView.shouldSynchronizePortalGeometryImmediately(
+                hostInLiveResize: false,
+                windowInLiveResize: false,
+                interactiveGeometryResizeActive: true
+            ),
+            "Interactive resize should use the immediate portal sync path"
         )
     }
 }
