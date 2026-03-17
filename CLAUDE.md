@@ -161,7 +161,12 @@ This makes it visible in the GitHub PR UI (Commits tab, check statuses) that the
 - Only explicit focus-intent commands may mutate in-app focus/selection (`window.focus`, `workspace.select/next/previous/last`, `surface.focus`, `pane.focus/last`, browser focus commands, and v1 focus equivalents).
 - All non-focus commands should preserve current user focus context while still applying data/model changes.
 
-## Testing policy
+## Timing policy
+
+- Do not use sleep-based timing in application/runtime code when an event-, state-, or callback-driven mechanism is available.
+- Deterministic sleeps are acceptable in tests when they are the smallest practical verification tool.
+
+## E2E mac UI tests
 
 **Never run tests locally.** All tests (E2E, UI, python socket tests) run via GitHub Actions or on the VM.
 
