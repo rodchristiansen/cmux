@@ -1021,8 +1021,12 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
 
     func testCmdEqualZoomsInFocusedTerminal() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-socketControlMode", "allowAll"]
         app.launchEnvironment["CMUX_TAG"] = launchTag
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_SOCKET_MODE"] = "allowAll"
+        app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
         app.launch()
         app.activate()
         XCTAssertTrue(
@@ -1034,6 +1038,13 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
             "Expected app to launch in foreground. state=\(app.state.rawValue)"
         )
 
+        guard let resolvedPath = resolveSocketPath(timeout: 12.0) else {
+            XCTFail(
+                "Expected control socket. requested=\(socketPath) tagged=\(taggedDebugSocketPath())"
+            )
+            return
+        }
+        socketPath = resolvedPath
         XCTAssertTrue(waitForSocketPong(timeout: 12.0), "Expected control socket at \(socketPath)")
 
         let surfaceId = try XCTUnwrap(okUUID(from: socketCommand("new_surface --type=terminal")))
@@ -1069,6 +1080,19 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
         }
     }
 
+    private func resolveSocketPath(timeout: TimeInterval) -> String? {
+        let candidates = [socketPath, taggedDebugSocketPath()]
+        var resolvedPath: String?
+        let matched = waitForCondition(timeout: timeout) {
+            for candidate in candidates where FileManager.default.fileExists(atPath: candidate) {
+                resolvedPath = candidate
+                return true
+            }
+            return false
+        }
+        return matched ? resolvedPath : resolvedPath
+    }
+
     private func waitForTerminalFocus(surfaceId: String, timeout: TimeInterval) -> Bool {
         waitForCondition(timeout: timeout) {
             self.socketCommand("is_terminal_focused \(surfaceId)") == "true"
@@ -1102,6 +1126,17 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
         guard let response, response.hasPrefix("OK ") else { return nil }
         let value = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
         return UUID(uuidString: value) != nil ? value : nil
+    }
+
+    private func taggedDebugSocketPath() -> String {
+        let slug = launchTag
+            .lowercased()
+            .replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: "_", with: "-")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return "/tmp/cmux-debug-\(slug).sock"
     }
 
     private func socketCommand(_ command: String) -> String? {
