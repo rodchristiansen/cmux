@@ -65,6 +65,19 @@ private func drainMainQueue() {
     XCTWaiter().wait(for: [expectation], timeout: 1.0)
 }
 
+private let ghosttySizeLogPath = "/tmp/cmux-ghostty-size.log"
+
+private func resetGhosttySizeLog() {
+    try? FileManager.default.removeItem(atPath: ghosttySizeLogPath)
+}
+
+private func ghosttySizeLogLines() -> [String] {
+    guard let contents = try? String(contentsOfFile: ghosttySizeLogPath, encoding: .utf8) else {
+        return []
+    }
+    return contents.split(whereSeparator: \.isNewline).map(String.init)
+}
+
 final class SplitShortcutTransientFocusGuardTests: XCTestCase {
     func testSuppressesWhenFirstResponderFallsBackAndHostedViewIsTiny() {
         XCTAssertTrue(
@@ -13317,6 +13330,182 @@ final class TerminalWindowPortalLifecycleTests: XCTestCase {
         XCTAssertNotNil(
             TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedWindowPoint, in: window),
             "The delayed external sync should move the portal-hosted terminal to the queued layout shift position"
+        )
+    }
+
+    func testScheduledExternalGeometrySyncKeepsDragDrivenResizeResponsive() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: window)
+            window.orderOut(nil)
+        }
+
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let shiftedContainer = NSView(frame: NSRect(x: 40, y: 60, width: 260, height: 180))
+        contentView.addSubview(shiftedContainer)
+        let anchor = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 180))
+        shiftedContainer.addSubview(anchor)
+        let hosted = surface.hostedView
+        TerminalWindowPortalRegistry.bind(
+            hostedView: hosted,
+            to: anchor,
+            visibleInUI: true,
+            expectedSurfaceId: surface.id,
+            expectedGeneration: surface.portalBindingGeneration()
+        )
+        TerminalWindowPortalRegistry.synchronizeForAnchor(anchor)
+        realizeWindowLayout(window)
+
+        let anchorCenter = NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY)
+        let originalWindowPoint = anchor.convert(anchorCenter, to: nil)
+        let originalAnchorFrameInWindow = anchor.convert(anchor.bounds, to: nil)
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(originalWindowPoint, in: window),
+            "Initial hit-testing should resolve the portal-hosted terminal at its original window position"
+        )
+
+        WindowTerminalPortal.isPointerDragActiveForTesting = true
+        TerminalWindowPortalRegistry.isPointerDragActiveForTesting = true
+        defer {
+            WindowTerminalPortal.isPointerDragActiveForTesting = false
+            TerminalWindowPortalRegistry.isPointerDragActiveForTesting = false
+        }
+
+        do {
+            shiftedContainer.frame.origin.x += 72
+            contentView.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            TerminalWindowPortalRegistry.scheduleExternalGeometrySynchronizeForAllWindows()
+        }
+
+        drainMainQueue()
+
+        let shiftedAnchorFrameInWindow = anchor.convert(anchor.bounds, to: nil)
+        let retiredStaleWindowPoint = NSPoint(
+            x: (originalAnchorFrameInWindow.minX + shiftedAnchorFrameInWindow.minX) / 2,
+            y: shiftedAnchorFrameInWindow.midY
+        )
+        let shiftedWindowPoint = NSPoint(
+            x: (originalAnchorFrameInWindow.maxX + shiftedAnchorFrameInWindow.maxX) / 2,
+            y: shiftedAnchorFrameInWindow.midY
+        )
+        XCTAssertGreaterThan(
+            shiftedWindowPoint.x,
+            originalWindowPoint.x + 1,
+            "The drag handler should shift the anchor to the right"
+        )
+        XCTAssertNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(retiredStaleWindowPoint, in: window),
+            "Drag-driven geometry sync should clear the stale portal location on the next main-queue turn"
+        )
+        XCTAssertNotNil(
+            TerminalWindowPortalRegistry.terminalViewAtWindowPoint(shiftedWindowPoint, in: window),
+            "Drag-driven geometry sync should update the portal-hosted terminal without waiting an extra queue turn"
+        )
+    }
+
+    func testDragDrivenSidebarResizeDoesNotScheduleLateSecondTerminalResize() {
+        let previousSizeLogFlag = getenv("CMUX_UI_TEST_SPLIT_CLOSE_RIGHT_VISUAL").map { String(cString: $0) }
+        setenv("CMUX_UI_TEST_SPLIT_CLOSE_RIGHT_VISUAL", "1", 1)
+        resetGhosttySizeLog()
+        defer {
+            resetGhosttySizeLog()
+            if let previousSizeLogFlag {
+                setenv("CMUX_UI_TEST_SPLIT_CLOSE_RIGHT_VISUAL", previousSizeLogFlag, 1)
+            } else {
+                unsetenv("CMUX_UI_TEST_SPLIT_CLOSE_RIGHT_VISUAL")
+            }
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: window)
+            window.orderOut(nil)
+        }
+
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let shiftedContainer = NSView(frame: NSRect(x: 40, y: 60, width: 420, height: 220))
+        contentView.addSubview(shiftedContainer)
+        let anchor = NSView(frame: shiftedContainer.bounds)
+        anchor.autoresizingMask = [.width, .height]
+        shiftedContainer.addSubview(anchor)
+
+        let hosted = surface.hostedView
+        TerminalWindowPortalRegistry.bind(
+            hostedView: hosted,
+            to: anchor,
+            visibleInUI: true,
+            expectedSurfaceId: surface.id,
+            expectedGeneration: surface.portalBindingGeneration()
+        )
+        TerminalWindowPortalRegistry.synchronizeForAnchor(anchor)
+        realizeWindowLayout(window)
+
+        resetGhosttySizeLog()
+
+        WindowTerminalPortal.isPointerDragActiveForTesting = true
+        TerminalWindowPortalRegistry.isPointerDragActiveForTesting = true
+        defer {
+            WindowTerminalPortal.isPointerDragActiveForTesting = false
+            TerminalWindowPortalRegistry.isPointerDragActiveForTesting = false
+        }
+
+        shiftedContainer.frame.origin.x += 72
+        shiftedContainer.frame.size.width -= 72
+        contentView.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        TerminalWindowPortalRegistry.scheduleExternalGeometrySynchronizeForAllWindows()
+
+        drainMainQueue()
+
+        let surfaceToken = String(surface.id.uuidString.prefix(8))
+        let firstPassResizeEvents = ghosttySizeLogLines().filter {
+            $0.contains("updateSize surface=\(surfaceToken)")
+        }
+        XCTAssertFalse(
+            firstPassResizeEvents.isEmpty,
+            "The sidebar drag should resize the hosted terminal at least once"
+        )
+
+        drainMainQueue()
+
+        let secondPassResizeEvents = ghosttySizeLogLines().filter {
+            $0.contains("updateSize surface=\(surfaceToken)")
+        }
+        XCTAssertEqual(
+            secondPassResizeEvents.count,
+            firstPassResizeEvents.count,
+            "Pointer-drag sidebar resizes should not land a second delayed terminal resize on the next queue turn"
         )
     }
 }

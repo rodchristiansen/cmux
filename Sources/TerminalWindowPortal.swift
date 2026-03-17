@@ -567,6 +567,9 @@ private final class SplitDividerOverlayView: NSView {
 
 @MainActor
 final class WindowTerminalPortal: NSObject {
+#if DEBUG
+    static var isPointerDragActiveForTesting = false
+#endif
     private static let tinyHideThreshold: CGFloat = 1
     private static let minimumRevealWidth: CGFloat = 24
     private static let minimumRevealHeight: CGFloat = 18
@@ -680,7 +683,16 @@ final class WindowTerminalPortal: NSObject {
     private func scheduleExternalGeometrySynchronize() {
         guard !hasExternalGeometrySyncScheduled else { return }
         hasExternalGeometrySyncScheduled = true
-        let requiresSettledLayout = !(hostView.inLiveResize || window?.inLiveResize == true)
+        let isDragEvent = {
+#if DEBUG
+            if Self.isPointerDragActiveForTesting { return true }
+#endif
+            switch NSApp.currentEvent?.type {
+            case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
+            default: return false
+            }
+        }()
+        let requiresSettledLayout = !(hostView.inLiveResize || window?.inLiveResize == true || isDragEvent)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let performSync = {
@@ -1641,6 +1653,9 @@ final class WindowTerminalPortal: NSObject {
 
 @MainActor
 enum TerminalWindowPortalRegistry {
+#if DEBUG
+    static var isPointerDragActiveForTesting = false
+#endif
     private static var portalsByWindowId: [ObjectIdentifier: WindowTerminalPortal] = [:]
     private static var hostedToWindowId: [ObjectIdentifier: ObjectIdentifier] = [:]
     private static var hasPendingExternalGeometrySyncForAllWindows = false
@@ -1792,12 +1807,26 @@ enum TerminalWindowPortalRegistry {
     static func scheduleExternalGeometrySynchronizeForAllWindows() {
         guard !Self.hasPendingExternalGeometrySyncForAllWindows else { return }
         Self.hasPendingExternalGeometrySyncForAllWindows = true
+        let isDragEvent = {
+#if DEBUG
+            if Self.isPointerDragActiveForTesting { return true }
+#endif
+            switch NSApp.currentEvent?.type {
+            case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
+            default: return false
+            }
+        }()
         DispatchQueue.main.async {
-            DispatchQueue.main.async {
+            let performSync = {
                 Self.hasPendingExternalGeometrySyncForAllWindows = false
                 for portal in Self.portalsByWindowId.values {
                     portal.synchronizeAllEntriesFromExternalGeometryChange()
                 }
+            }
+            if isDragEvent {
+                performSync()
+            } else {
+                DispatchQueue.main.async(execute: performSync)
             }
         }
     }
