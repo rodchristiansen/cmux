@@ -320,6 +320,21 @@ struct TitlebarLayerBackground: NSViewRepresentable {
     }
 }
 
+func cmuxMainWindowTitlebarOpacity(
+    backgroundOpacity: Double,
+    glassEffectAvailable: Bool = WindowGlassEffect.isAvailable
+) -> CGFloat {
+    if glassEffectAvailable {
+        // macOS 26 window glass plus a translucent custom titlebar makes the top
+        // chrome read as unintentionally transparent. Keep cmux's titlebar strip
+        // fully opaque there so the main window stays visually stable.
+        return 1.0
+    }
+
+    let alpha = GhosttyBackgroundTheme.clampedOpacity(backgroundOpacity)
+    return alpha >= 0.999 ? alpha : 1.0 - pow(1.0 - alpha, 2)
+}
+
 final class SidebarState: ObservableObject {
     @Published var isVisible: Bool
     @Published var persistedWidth: CGFloat
@@ -2175,14 +2190,11 @@ struct ContentView: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .background({
-            // The terminal area has two stacked semi-transparent layers: the Bonsplit
-            // container chrome background plus Ghostty's own Metal-rendered background.
-            // Compute the effective composited opacity so the titlebar matches visually.
-            let alpha = CGFloat(GhosttyApp.shared.defaultBackgroundOpacity)
-            let effective = alpha >= 0.999 ? alpha : 1.0 - pow(1.0 - alpha, 2)
             return TitlebarLayerBackground(
                 backgroundColor: GhosttyApp.shared.defaultBackgroundColor,
-                opacity: effective
+                opacity: cmuxMainWindowTitlebarOpacity(
+                    backgroundOpacity: GhosttyApp.shared.defaultBackgroundOpacity
+                )
             )
         }())
         .overlay(alignment: .bottom) {
