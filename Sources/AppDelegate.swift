@@ -2023,6 +2023,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var jumpUnreadFocusObserver: NSObjectProtocol?
     private var didSetupGotoSplitUITest = false
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
+    private var didSetupSocketSanityUITest = false
     private var didSetupMultiWindowNotificationsUITest = false
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
@@ -2409,6 +2410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #if DEBUG
         setupJumpUnreadUITestIfNeeded()
         setupGotoSplitUITestIfNeeded()
+        setupSocketSanityUITestIfNeeded()
         setupMultiWindowNotificationsUITestIfNeeded()
 
         // UI tests sometimes don't run SwiftUI `.onAppear` soon enough (or at all) on the VM.
@@ -7772,6 +7774,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    private func setupSocketSanityUITestIfNeeded() {
+        guard !didSetupSocketSanityUITest else { return }
+        didSetupSocketSanityUITest = true
+
+        let env = ProcessInfo.processInfo.environment
+        guard env["CMUX_UI_TEST_SOCKET_SANITY"] == "1" else { return }
+
+        guard let path = env["CMUX_UI_TEST_SOCKET_SANITY_PATH"], !path.isEmpty else {
+            restartSocketListenerIfEnabled(source: "uiTest.socketSanity.setup")
+            return
+        }
+
+        try? FileManager.default.removeItem(atPath: path)
+        publishSocketSanityStateIfNeeded(at: path, source: "uiTest.socketSanity.setup")
+    }
+
     private func prepareMultiWindowNotificationSourceTerminalIfNeeded(
         at path: String,
         windowId: UUID,
@@ -7909,10 +7927,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func publishMultiWindowNotificationSocketStateIfNeeded(at path: String) {
         let env = ProcessInfo.processInfo.environment
         guard env["CMUX_UI_TEST_SOCKET_SANITY"] == "1" else { return }
+        publishSocketSanityStateIfNeeded(at: path, source: "uiTest.multiWindowNotifications.setup")
+    }
 
+    private func publishSocketSanityStateIfNeeded(at path: String, source: String) {
         guard let config = socketListenerConfigurationIfEnabled() else {
             writeMultiWindowNotificationTestData([
-                "socketExpectedPath": env["CMUX_SOCKET_PATH"] ?? "",
+                "socketExpectedPath": ProcessInfo.processInfo.environment["CMUX_SOCKET_PATH"] ?? "",
                 "socketMode": "off",
                 "socketReady": "0",
                 "socketPingResponse": "",
@@ -7991,7 +8012,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         timeoutWorkItem = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 20.0, execute: timeout)
 
-        restartSocketListenerIfEnabled(source: "uiTest.multiWindowNotifications.setup")
+        restartSocketListenerIfEnabled(source: source)
         publishCurrentState(isTimedOut: false)
     }
 

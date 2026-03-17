@@ -1010,13 +1010,22 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 final class TerminalFontZoomShortcutUITests: XCTestCase {
     private var launchTag = ""
     private var socketPath = ""
+    private var dataPath = ""
 
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
         launchTag = "ui-tests-terminal-font-zoom-\(UUID().uuidString.prefix(8))"
         socketPath = "/tmp/cmux-ui-test-terminal-font-zoom-\(UUID().uuidString).sock"
+        dataPath = "/tmp/cmux-ui-test-terminal-font-zoom-\(UUID().uuidString).json"
+        try? FileManager.default.removeItem(atPath: dataPath)
         try? FileManager.default.removeItem(atPath: socketPath)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(atPath: dataPath)
+        try? FileManager.default.removeItem(atPath: socketPath)
+        super.tearDown()
     }
 
     func testCmdEqualZoomsInFocusedTerminal() throws {
@@ -1027,19 +1036,40 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
         app.launchEnvironment["CMUX_SOCKET_MODE"] = "allowAll"
         app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY_PATH"] = dataPath
         app.launch()
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch in foreground. state=\(app.state.rawValue)"
         )
 
-        guard let resolvedPath = resolveSocketPath(timeout: 12.0) else {
+        XCTAssertTrue(
+            waitForSocketSetup(timeout: 20.0),
+            "Expected control socket setup data. requested=\(socketPath) tagged=\(taggedDebugSocketPath()) data=\(dataPath)"
+        )
+
+        guard let setup = loadSocketSetupData() else {
+            XCTFail("Missing control socket setup data at \(dataPath)")
+            return
+        }
+
+        if let expectedSocketPath = setup["socketExpectedPath"], !expectedSocketPath.isEmpty {
+            socketPath = expectedSocketPath
+        }
+        if setup["socketReady"] != "1" {
             XCTFail(
-                "Expected control socket. requested=\(socketPath) tagged=\(taggedDebugSocketPath())"
+                "Control socket unavailable in this test environment. expected=\(socketPath) " +
+                    socketDiagnostics(from: setup)
             )
             return
         }
-        socketPath = resolvedPath
+        guard setup["socketPingResponse"] == "PONG" else {
+            XCTFail(
+                "Control socket ping sanity check failed. path=\(socketPath) " +
+                    socketDiagnostics(from: setup)
+            )
+            return
+        }
         XCTAssertTrue(waitForSocketPong(timeout: 12.0), "Expected control socket at \(socketPath)")
 
         let surfaceId = try XCTUnwrap(okUUID(from: socketCommand("new_surface --type=terminal")))
@@ -1073,48 +1103,6 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
         waitForCondition(timeout: timeout) {
             self.socketCommand("ping") == "PONG"
         }
-    }
-
-    private func resolveSocketPath(timeout: TimeInterval) -> String? {
-        let candidates = expectedSocketCandidates()
-        var resolvedPath: String?
-        let matched = waitForCondition(timeout: timeout) {
-            for candidate in candidates where FileManager.default.fileExists(atPath: candidate) {
-                guard self.socketRespondsToPing(at: candidate) else { continue }
-                resolvedPath = candidate
-                return true
-            }
-            return false
-        }
-        return matched ? resolvedPath : resolvedPath
-    }
-
-    private func expectedSocketCandidates() -> [String] {
-        var candidates = [socketPath, taggedDebugSocketPath(), "/tmp/cmux-debug.sock"]
-        candidates.append(contentsOf: discoverTmpSocketCandidates(limit: 12))
-
-        var unique: [String] = []
-        var seen = Set<String>()
-        for candidate in candidates where seen.insert(candidate).inserted {
-            unique.append(candidate)
-        }
-        return unique
-    }
-
-    private func discoverTmpSocketCandidates(limit: Int) -> [String] {
-        let tmpPath = "/tmp"
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: tmpPath) else {
-            return []
-        }
-        return entries
-            .filter { $0.hasPrefix("cmux") && $0.hasSuffix(".sock") }
-            .sorted()
-            .prefix(limit)
-            .map { (tmpPath as NSString).appendingPathComponent($0) }
-    }
-
-    private func socketRespondsToPing(at path: String) -> Bool {
-        ControlSocketClient(path: path, responseTimeout: 1.0).sendLine("ping") == "PONG"
     }
 
     private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
@@ -1161,6 +1149,29 @@ final class TerminalFontZoomShortcutUITests: XCTestCase {
         guard let response, response.hasPrefix("OK ") else { return nil }
         let value = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
         return UUID(uuidString: value) != nil ? value : nil
+    }
+
+    private func waitForSocketSetup(timeout: TimeInterval) -> Bool {
+        waitForCondition(timeout: timeout) {
+            guard let data = self.loadSocketSetupData() else { return false }
+            let socketReady = data["socketReady"] ?? ""
+            return !socketReady.isEmpty && socketReady != "pending"
+        }
+    }
+
+    private func loadSocketSetupData() -> [String: String]? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: dataPath)) else {
+            return nil
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
+    }
+
+    private func socketDiagnostics(from data: [String: String]) -> String {
+        let pingResponse = data["socketPingResponse"].flatMap { $0.isEmpty ? nil : $0 } ?? "<nil>"
+        return "mode=\(data["socketMode"] ?? "") running=\(data["socketIsRunning"] ?? "") " +
+            "acceptLoopAlive=\(data["socketAcceptLoopAlive"] ?? "") pathMatches=\(data["socketPathMatches"] ?? "") " +
+            "pathExists=\(data["socketPathExists"] ?? "") ping=\(pingResponse) " +
+            "signals=\(data["socketFailureSignals"] ?? "")"
     }
 
     private func taggedDebugSocketPath() -> String {
