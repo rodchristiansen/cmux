@@ -1006,3 +1006,213 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 }
+
+final class TerminalFontZoomShortcutUITests: XCTestCase {
+    private var socketPath = ""
+    private var launchTag = ""
+
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+        socketPath = "/tmp/cmux-ui-test-terminal-font-zoom-\(UUID().uuidString).sock"
+        launchTag = "ui-tests-terminal-font-zoom-\(UUID().uuidString.prefix(8))"
+        try? FileManager.default.removeItem(atPath: socketPath)
+    }
+
+    func testCmdEqualZoomsInFocusedTerminal() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_TAG"] = launchTag
+        app.launch()
+        XCTAssertTrue(
+            ensureForegroundAfterLaunch(app, timeout: 12.0),
+            "Expected app to launch in foreground. state=\(app.state.rawValue)"
+        )
+
+        XCTAssertTrue(waitForSocketPong(timeout: 12.0), "Expected control socket at \(socketPath)")
+
+        let surfaceId = try XCTUnwrap(okUUID(from: socketCommand("new_surface --type=terminal")))
+        XCTAssertEqual(socketCommand("focus_surface \(surfaceId)"), "OK")
+        XCTAssertTrue(
+            waitForTerminalFocus(surfaceId: surfaceId, timeout: 6.0),
+            "Expected socket focus command to focus terminal surface \(surfaceId)"
+        )
+
+        let baselineFontSize = try XCTUnwrap(
+            waitForTerminalFontSize(surfaceId: surfaceId, timeout: 6.0),
+            "Expected terminal font size before Cmd+="
+        )
+
+        app.typeKey("=", modifierFlags: [.command])
+
+        let increasedFontSize = try XCTUnwrap(
+            waitForTerminalFontSize(surfaceId: surfaceId, timeout: 6.0) { $0 > baselineFontSize + 0.4 },
+            "Expected Cmd+= to increase terminal font size from \(baselineFontSize). " +
+                "lastResponse=\(socketCommand("read_terminal_font_size \(surfaceId)") ?? "nil")"
+        )
+
+        XCTAssertGreaterThan(
+            increasedFontSize,
+            baselineFontSize,
+            "Expected Cmd+= to increase terminal font size. baseline=\(baselineFontSize) increased=\(increasedFontSize)"
+        )
+    }
+
+    private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        if app.wait(for: .runningForeground, timeout: timeout) {
+            return true
+        }
+        if app.state == .runningBackground {
+            app.activate()
+            return app.wait(for: .runningForeground, timeout: 6.0)
+        }
+        return false
+    }
+
+    private func waitForSocketPong(timeout: TimeInterval) -> Bool {
+        waitForCondition(timeout: timeout) {
+            self.socketCommand("ping") == "PONG"
+        }
+    }
+
+    private func waitForTerminalFocus(surfaceId: String, timeout: TimeInterval) -> Bool {
+        waitForCondition(timeout: timeout) {
+            self.socketCommand("is_terminal_focused \(surfaceId)") == "true"
+        }
+    }
+
+    private func waitForTerminalFontSize(
+        surfaceId: String,
+        timeout: TimeInterval,
+        predicate: ((Double) -> Bool)? = nil
+    ) -> Double? {
+        var lastValue: Double?
+        let matched = waitForCondition(timeout: timeout) {
+            guard let value = self.readTerminalFontSize(surfaceId: surfaceId) else { return false }
+            lastValue = value
+            return predicate?(value) ?? true
+        }
+        return matched ? lastValue : lastValue
+    }
+
+    private func readTerminalFontSize(surfaceId: String) -> Double? {
+        guard let response = socketCommand("read_terminal_font_size \(surfaceId)"),
+              response.hasPrefix("OK ") else {
+            return nil
+        }
+        let payload = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return Double(payload)
+    }
+
+    private func okUUID(from response: String?) -> String? {
+        guard let response, response.hasPrefix("OK ") else { return nil }
+        let value = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return UUID(uuidString: value) != nil ? value : nil
+    }
+
+    private func socketCommand(_ command: String) -> String? {
+        ControlSocketClient(path: socketPath, responseTimeout: 2.0).sendLine(command)
+    }
+
+    private func waitForCondition(timeout: TimeInterval, predicate: @escaping () -> Bool) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in predicate() },
+            object: nil
+        )
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private final class ControlSocketClient {
+        private let path: String
+        private let responseTimeout: TimeInterval
+
+        init(path: String, responseTimeout: TimeInterval) {
+            self.path = path
+            self.responseTimeout = responseTimeout
+        }
+
+        func sendLine(_ line: String) -> String? {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard fd >= 0 else { return nil }
+            defer { close(fd) }
+
+#if os(macOS)
+            var noSigPipe: Int32 = 1
+            _ = withUnsafePointer(to: &noSigPipe) { ptr in
+                setsockopt(
+                    fd,
+                    SOL_SOCKET,
+                    SO_NOSIGPIPE,
+                    ptr,
+                    socklen_t(MemoryLayout<Int32>.size)
+                )
+            }
+#endif
+
+            var address = sockaddr_un()
+            memset(&address, 0, MemoryLayout<sockaddr_un>.size)
+            address.sun_family = sa_family_t(AF_UNIX)
+
+            let maxLen = MemoryLayout.size(ofValue: address.sun_path)
+            let bytes = Array(path.utf8CString)
+            guard bytes.count <= maxLen else { return nil }
+            withUnsafeMutablePointer(to: &address.sun_path) { ptr in
+                let raw = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
+                memset(raw, 0, maxLen)
+                for index in 0..<bytes.count {
+                    raw[index] = bytes[index]
+                }
+            }
+
+            let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
+            let addressLength = socklen_t(pathOffset + bytes.count)
+#if os(macOS)
+            address.sun_len = UInt8(min(Int(addressLength), 255))
+#endif
+
+            let connected = withUnsafePointer(to: &address) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    connect(fd, sa, addressLength)
+                }
+            }
+            guard connected == 0 else { return nil }
+
+            let terminated = line + "\n"
+            let wrote: Bool = terminated.withCString { cString in
+                var remaining = strlen(cString)
+                var pointer = UnsafeRawPointer(cString)
+                while remaining > 0 {
+                    let written = write(fd, pointer, remaining)
+                    if written <= 0 { return false }
+                    remaining -= written
+                    pointer = pointer.advanced(by: written)
+                }
+                return true
+            }
+            guard wrote else { return nil }
+
+            let deadline = Date().addingTimeInterval(responseTimeout)
+            var accum = ""
+            var buf = [UInt8](repeating: 0, count: 4096)
+            while Date() < deadline {
+                var pollDescriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                let ready = poll(&pollDescriptor, 1, 100)
+                if ready < 0 {
+                    return nil
+                }
+                if ready == 0 {
+                    continue
+                }
+                let n = read(fd, &buf, buf.count)
+                if n <= 0 { break }
+                if let chunk = String(bytes: buf[0..<n], encoding: .utf8) {
+                    accum.append(chunk)
+                    if let idx = accum.firstIndex(of: "\n") {
+                        return String(accum[..<idx])
+                    }
+                }
+            }
+            return accum.isEmpty ? nil : accum.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+}
