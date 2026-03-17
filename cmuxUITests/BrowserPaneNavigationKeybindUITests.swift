@@ -1008,17 +1008,20 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 }
 
 final class TerminalFontZoomShortcutUITests: XCTestCase {
+    private var launchTag = ""
     private var socketPath = ""
 
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
+        launchTag = "ui-tests-terminal-font-zoom-\(UUID().uuidString)"
         socketPath = "/tmp/cmux-ui-test-terminal-font-zoom-\(UUID().uuidString).sock"
         try? FileManager.default.removeItem(atPath: socketPath)
     }
 
     func testCmdEqualZoomsInFocusedTerminal() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["CMUX_TAG"] = launchTag
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
         app.launch()
         app.activate()
