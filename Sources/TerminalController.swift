@@ -1845,6 +1845,9 @@ class TerminalController {
         case "is_terminal_focused":
             return isTerminalFocused(args)
 
+        case "read_terminal_font_size":
+            return readTerminalFontSize(args)
+
         case "read_terminal_text":
             return readTerminalText(args)
 
@@ -10632,6 +10635,7 @@ class TerminalController {
           activate_app                    - Bring app + main window to front (test-only)
           send_workspace <workspace_id> <text> - Send text to a workspace's selected terminal (test-only)
           is_terminal_focused <id|idx>    - Return true/false if terminal surface is first responder (test-only)
+          read_terminal_font_size [id|idx] - Read terminal font size in points (test-only)
           read_terminal_text [id|idx]     - Read visible terminal text (base64, test-only)
           render_stats [id|idx]           - Read terminal render stats (draw counters, test-only)
           layout_debug                    - Dump bonsplit layout + selected panel bounds (test-only)
@@ -11297,6 +11301,41 @@ class TerminalController {
 
     private func readTerminalText(_ args: String) -> String {
         readTerminalTextBase64(surfaceArg: args)
+    }
+
+    private func readTerminalFontSize(_ args: String) -> String {
+        guard let tabManager = tabManager else { return "ERROR: TabManager not available" }
+
+        let panelArg = args.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = "ERROR: No tab selected"
+        DispatchQueue.main.sync {
+            guard let tabId = tabManager.selectedTabId,
+                  let tab = tabManager.tabs.first(where: { $0.id == tabId }) else {
+                return
+            }
+
+            let panelId: UUID?
+            if panelArg.isEmpty {
+                panelId = tab.focusedPanelId
+            } else {
+                panelId = resolveSurfaceId(from: panelArg, tab: tab)
+            }
+
+            guard let panelId,
+                  let terminalPanel = tab.terminalPanel(for: panelId) else {
+                result = "ERROR: Terminal surface not found"
+                return
+            }
+
+            guard let surface = terminalPanel.surface.surface,
+                  let points = cmuxCurrentSurfaceFontSizePoints(surface) else {
+                result = "ERROR: Terminal font size unavailable"
+                return
+            }
+
+            result = String(format: "OK %.2f", points)
+        }
+        return result
     }
 
     private struct RenderStatsResponse: Codable {
