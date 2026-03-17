@@ -2231,6 +2231,20 @@ final class ZshShellIntegrationHandoffTests: XCTestCase {
         XCTAssertTrue(output.contains("133;A;redraw=last;cl=line"), output)
     }
 
+    func testShellIntegrationWinchGuardDoesNotPrintSpacerLineOnResize() throws {
+        let output = try runInteractiveZsh(
+            cmuxLoadGhosttyIntegration: false,
+            cmuxLoadShellIntegration: true,
+            command: """
+            print -r -- BEFORE
+            TRAPWINCH
+            print -r -- AFTER
+            """
+        )
+
+        XCTAssertEqual(output, "BEFORE\nAFTER", output)
+    }
+
     private func runInteractiveZsh(cmuxLoadGhosttyIntegration: Bool) throws -> String {
         try runInteractiveZsh(
             cmuxLoadGhosttyIntegration: cmuxLoadGhosttyIntegration,
