@@ -5985,6 +5985,290 @@ final class TabManagerEqualizeSplitsTests: XCTestCase {
 }
 
 @MainActor
+final class WorkspaceSplitCloseFocusTests: XCTestCase {
+    private struct SplitClosePanels {
+        let topLeft: UUID
+        let topRight: UUID?
+        let bottomLeft: UUID?
+        let bottomRight: UUID?
+    }
+
+    private struct FocusCloseScenario {
+        let name: String
+        let build: (Workspace) -> SplitClosePanels?
+        let closePanelId: (SplitClosePanels) -> UUID
+        let expectedFocusedPanelId: (SplitClosePanels) -> UUID
+    }
+
+    private func makeSideBySidePanels(in workspace: Workspace) -> SplitClosePanels? {
+        guard let topLeft = workspace.focusedPanelId,
+              let topRight = workspace.newTerminalSplit(from: topLeft, orientation: .horizontal) else {
+            return nil
+        }
+        return SplitClosePanels(topLeft: topLeft, topRight: topRight.id, bottomLeft: nil, bottomRight: nil)
+    }
+
+    private func makeTopBottomPanels(in workspace: Workspace) -> SplitClosePanels? {
+        guard let topLeft = workspace.focusedPanelId,
+              let bottomLeft = workspace.newTerminalSplit(from: topLeft, orientation: .vertical) else {
+            return nil
+        }
+        return SplitClosePanels(topLeft: topLeft, topRight: nil, bottomLeft: bottomLeft.id, bottomRight: nil)
+    }
+
+    private func makeRightColumnLPanels(in workspace: Workspace) -> SplitClosePanels? {
+        guard let topLeft = workspace.focusedPanelId,
+              let topRight = workspace.newTerminalSplit(from: topLeft, orientation: .horizontal),
+              let bottomRight = workspace.newTerminalSplit(from: topRight.id, orientation: .vertical) else {
+            return nil
+        }
+        return SplitClosePanels(topLeft: topLeft, topRight: topRight.id, bottomLeft: nil, bottomRight: bottomRight.id)
+    }
+
+    private func makeLeftColumnLPanels(in workspace: Workspace) -> SplitClosePanels? {
+        guard let topLeft = workspace.focusedPanelId,
+              let topRight = workspace.newTerminalSplit(from: topLeft, orientation: .horizontal),
+              let bottomLeft = workspace.newTerminalSplit(from: topLeft, orientation: .vertical) else {
+            return nil
+        }
+        return SplitClosePanels(topLeft: topLeft, topRight: topRight.id, bottomLeft: bottomLeft.id, bottomRight: nil)
+    }
+
+    private func makeGridPanels(in workspace: Workspace) -> SplitClosePanels? {
+        guard let topLeft = workspace.focusedPanelId,
+              let topRight = workspace.newTerminalSplit(from: topLeft, orientation: .horizontal),
+              let bottomLeft = workspace.newTerminalSplit(from: topLeft, orientation: .vertical),
+              let bottomRight = workspace.newTerminalSplit(from: topRight.id, orientation: .vertical) else {
+            return nil
+        }
+        return SplitClosePanels(
+            topLeft: topLeft,
+            topRight: topRight.id,
+            bottomLeft: bottomLeft.id,
+            bottomRight: bottomRight.id
+        )
+    }
+
+    private func assertFocusedClose(
+        _ scenario: FocusCloseScenario,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let workspace = Workspace()
+        guard let panels = scenario.build(workspace) else {
+            XCTFail("Expected split setup for \(scenario.name)", file: file, line: line)
+            return
+        }
+
+        let closePanelId = scenario.closePanelId(panels)
+        let expectedFocusedPanelId = scenario.expectedFocusedPanelId(panels)
+
+        workspace.focusPanel(closePanelId)
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            closePanelId,
+            "Expected the close target to be focused for \(scenario.name)",
+            file: file,
+            line: line
+        )
+
+        XCTAssertTrue(
+            workspace.closePanel(closePanelId, force: true),
+            "Expected close to succeed for \(scenario.name)",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            expectedFocusedPanelId,
+            "Expected focus to restore to the intended survivor for \(scenario.name)",
+            file: file,
+            line: line
+        )
+    }
+
+    func testFocusedSplitCloseRestoresExpectedPanelAcrossLayouts() {
+        let scenarios: [FocusCloseScenario] = [
+            FocusCloseScenario(
+                name: "side-by-side close left restores right",
+                build: makeSideBySidePanels,
+                closePanelId: { $0.topLeft },
+                expectedFocusedPanelId: { $0.topRight! }
+            ),
+            FocusCloseScenario(
+                name: "side-by-side close right restores left",
+                build: makeSideBySidePanels,
+                closePanelId: { $0.topRight! },
+                expectedFocusedPanelId: { $0.topLeft }
+            ),
+            FocusCloseScenario(
+                name: "stack close top restores bottom",
+                build: makeTopBottomPanels,
+                closePanelId: { $0.topLeft },
+                expectedFocusedPanelId: { $0.bottomLeft! }
+            ),
+            FocusCloseScenario(
+                name: "stack close bottom restores top",
+                build: makeTopBottomPanels,
+                closePanelId: { $0.bottomLeft! },
+                expectedFocusedPanelId: { $0.topLeft }
+            ),
+            FocusCloseScenario(
+                name: "right-column L close bottom-right restores top-right",
+                build: makeRightColumnLPanels,
+                closePanelId: { $0.bottomRight! },
+                expectedFocusedPanelId: { $0.topRight! }
+            ),
+            FocusCloseScenario(
+                name: "right-column L close top-right restores bottom-right",
+                build: makeRightColumnLPanels,
+                closePanelId: { $0.topRight! },
+                expectedFocusedPanelId: { $0.bottomRight! }
+            ),
+            FocusCloseScenario(
+                name: "left-column L close bottom-left restores top-left",
+                build: makeLeftColumnLPanels,
+                closePanelId: { $0.bottomLeft! },
+                expectedFocusedPanelId: { $0.topLeft }
+            ),
+            FocusCloseScenario(
+                name: "left-column L close top-left restores bottom-left",
+                build: makeLeftColumnLPanels,
+                closePanelId: { $0.topLeft },
+                expectedFocusedPanelId: { $0.bottomLeft! }
+            ),
+            FocusCloseScenario(
+                name: "grid close top-left restores top-right",
+                build: makeGridPanels,
+                closePanelId: { $0.topLeft },
+                expectedFocusedPanelId: { $0.topRight! }
+            ),
+            FocusCloseScenario(
+                name: "grid close top-right restores top-left",
+                build: makeGridPanels,
+                closePanelId: { $0.topRight! },
+                expectedFocusedPanelId: { $0.topLeft }
+            ),
+            FocusCloseScenario(
+                name: "grid close bottom-left restores bottom-right",
+                build: makeGridPanels,
+                closePanelId: { $0.bottomLeft! },
+                expectedFocusedPanelId: { $0.bottomRight! }
+            ),
+            FocusCloseScenario(
+                name: "grid close bottom-right restores bottom-left",
+                build: makeGridPanels,
+                closePanelId: { $0.bottomRight! },
+                expectedFocusedPanelId: { $0.bottomLeft! }
+            ),
+        ]
+
+        for scenario in scenarios {
+            XCTContext.runActivity(named: scenario.name) { _ in
+                assertFocusedClose(scenario)
+            }
+        }
+    }
+
+    func testUnfocusedSplitClosePreservesCurrentFocus() {
+        let scenarios: [(name: String, build: (Workspace) -> SplitClosePanels?, focused: (SplitClosePanels) -> UUID, close: (SplitClosePanels) -> UUID)] = [
+            (
+                name: "side-by-side close left while right stays focused",
+                build: makeSideBySidePanels,
+                focused: { $0.topRight! },
+                close: { $0.topLeft }
+            ),
+            (
+                name: "side-by-side close right while left stays focused",
+                build: makeSideBySidePanels,
+                focused: { $0.topLeft },
+                close: { $0.topRight! }
+            ),
+            (
+                name: "stack close top while bottom stays focused",
+                build: makeTopBottomPanels,
+                focused: { $0.bottomLeft! },
+                close: { $0.topLeft }
+            ),
+            (
+                name: "stack close bottom while top stays focused",
+                build: makeTopBottomPanels,
+                focused: { $0.topLeft },
+                close: { $0.bottomLeft! }
+            ),
+            (
+                name: "grid close top-right while bottom-left stays focused",
+                build: makeGridPanels,
+                focused: { $0.bottomLeft! },
+                close: { $0.topRight! }
+            ),
+            (
+                name: "right-column L close bottom-right while left stays focused",
+                build: makeRightColumnLPanels,
+                focused: { $0.topLeft },
+                close: { $0.bottomRight! }
+            ),
+        ]
+
+        for scenario in scenarios {
+            XCTContext.runActivity(named: scenario.name) { _ in
+                let workspace = Workspace()
+                guard let panels = scenario.build(workspace) else {
+                    XCTFail("Expected split setup for \(scenario.name)")
+                    return
+                }
+
+                let focusedPanelId = scenario.focused(panels)
+                let closedPanelId = scenario.close(panels)
+
+                workspace.focusPanel(focusedPanelId)
+                XCTAssertEqual(workspace.focusedPanelId, focusedPanelId)
+
+                XCTAssertTrue(
+                    workspace.closePanel(closedPanelId, force: true),
+                    "Expected close to succeed for \(scenario.name)"
+                )
+                XCTAssertEqual(
+                    workspace.focusedPanelId,
+                    focusedPanelId,
+                    "Expected focus to remain on the explicitly focused panel for \(scenario.name)"
+                )
+            }
+        }
+    }
+
+    func testClosingRightColumnTopFirstKeepsFocusOnTopLeftPanel() {
+        let workspace = Workspace()
+        guard let topLeftPanelId = workspace.focusedPanelId,
+              let topRightPanel = workspace.newTerminalSplit(from: topLeftPanelId, orientation: .horizontal),
+              let bottomLeftPanel = workspace.newTerminalSplit(from: topLeftPanelId, orientation: .vertical),
+              let bottomRightPanel = workspace.newTerminalSplit(from: topRightPanel.id, orientation: .vertical) else {
+            XCTFail("Expected 2x2 split setup to succeed")
+            return
+        }
+
+        workspace.focusPanel(topRightPanel.id)
+        XCTAssertEqual(workspace.focusedPanelId, topRightPanel.id)
+
+        XCTAssertTrue(workspace.closePanel(topRightPanel.id, force: true), "Expected top-right close to succeed")
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            topLeftPanelId,
+            "Expected the first close to restore focus to the top-left panel"
+        )
+
+        XCTAssertTrue(workspace.closePanel(bottomRightPanel.id, force: true), "Expected bottom-right close to succeed")
+        XCTAssertEqual(workspace.panels.count, 2, "Expected only the left column to remain")
+        XCTAssertNotNil(workspace.panels[bottomLeftPanel.id], "Expected the bottom-left panel to remain after both closes")
+        XCTAssertEqual(
+            workspace.focusedPanelId,
+            topLeftPanelId,
+            "Expected focus to stay on the top-left panel after closing the right column top-first"
+        )
+    }
+}
+
+@MainActor
 final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
     private func makeWindow() -> NSWindow {
         NSWindow(
