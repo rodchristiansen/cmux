@@ -911,6 +911,37 @@ final class BonsplitTests: XCTestCase {
     }
 
     @MainActor
+    func testPaperCanvasClosingMiddlePanePreservesRemainingPaneWidths() {
+        let controller = BonsplitController(
+            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+        )
+        controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1200, height: 800))
+
+        guard let firstPane = controller.focusedPaneId,
+              let secondPane = controller.openPaperCanvasPaneRight(firstPane),
+              let thirdPane = controller.openPaperCanvasPaneRight(secondPane),
+              let layoutBeforeClose = controller.paperCanvasLayout(),
+              let firstFrameBeforeClose = layoutBeforeClose.panes.first(where: { $0.paneId == firstPane })?.frame,
+              let thirdFrameBeforeClose = layoutBeforeClose.panes.first(where: { $0.paneId == thirdPane })?.frame else {
+            return XCTFail("Expected paper pane strip before close")
+        }
+
+        controller.focusPane(secondPane)
+        XCTAssertTrue(controller.closePane(secondPane))
+
+        guard let layoutAfterClose = controller.paperCanvasLayout(),
+              let firstFrameAfterClose = layoutAfterClose.panes.first(where: { $0.paneId == firstPane })?.frame,
+              let thirdFrameAfterClose = layoutAfterClose.panes.first(where: { $0.paneId == thirdPane })?.frame else {
+            return XCTFail("Expected paper pane strip after close")
+        }
+
+        XCTAssertEqual(firstFrameAfterClose.width, firstFrameBeforeClose.width, accuracy: 1.0)
+        XCTAssertEqual(thirdFrameAfterClose.width, thirdFrameBeforeClose.width, accuracy: 1.0)
+        XCTAssertEqual(thirdFrameAfterClose.minX, firstFrameAfterClose.maxX + 16, accuracy: 1.0)
+        XCTAssertEqual(controller.focusedPaneId, firstPane)
+    }
+
+    @MainActor
     func testPaperCanvasEqualizeUsesStripOrderRatherThanLegacySplitTree() {
         let controller = BonsplitController(
             configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
