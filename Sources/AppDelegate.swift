@@ -2343,6 +2343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             payload["targetDisplayPresent"] = screenPresent ? "1" : "0"
             payload["targetDisplayMoveSucceeded"] = movedWindow ? "1" : "0"
         }
+        appendUITestSocketDiagnosticsIfNeeded(&payload, environment: env)
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
@@ -2354,6 +2355,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return [:]
         }
         return object
+    }
+
+    private func appendUITestSocketDiagnosticsIfNeeded(
+        _ payload: inout [String: String],
+        environment env: [String: String]
+    ) {
+        guard env["CMUX_UI_TEST_SOCKET_SANITY"] == "1" else { return }
+
+        guard let config = socketListenerConfigurationIfEnabled() else {
+            payload["socketExpectedPath"] = env["CMUX_SOCKET_PATH"] ?? ""
+            payload["socketMode"] = "off"
+            payload["socketReady"] = "0"
+            payload["socketPingResponse"] = ""
+            payload["socketIsRunning"] = "0"
+            payload["socketAcceptLoopAlive"] = "0"
+            payload["socketPathMatches"] = "0"
+            payload["socketPathExists"] = "0"
+            payload["socketFailureSignals"] = "socket_disabled"
+            return
+        }
+
+        let socketPath = TerminalController.shared.activeSocketPath(preferredPath: config.path)
+        let health = TerminalController.shared.socketListenerHealth(expectedSocketPath: socketPath)
+        let pingResponse = health.isHealthy
+            ? TerminalController.probeSocketCommand("ping", at: socketPath, timeout: 1.0)
+            : nil
+        let isReady = health.isHealthy && pingResponse == "PONG"
+        var failureSignals = health.failureSignals
+        if health.isHealthy && pingResponse != "PONG" {
+            failureSignals.append("ping_timeout")
+        }
+
+        payload["socketExpectedPath"] = socketPath
+        payload["socketMode"] = config.mode.rawValue
+        payload["socketReady"] = isReady ? "1" : "0"
+        payload["socketPingResponse"] = pingResponse ?? ""
+        payload["socketIsRunning"] = health.isRunning ? "1" : "0"
+        payload["socketAcceptLoopAlive"] = health.acceptLoopAlive ? "1" : "0"
+        payload["socketPathMatches"] = health.socketPathMatches ? "1" : "0"
+        payload["socketPathExists"] = health.socketPathExists ? "1" : "0"
+        payload["socketFailureSignals"] = failureSignals.joined(separator: ",")
     }
 
     private func moveUITestWindowToTargetDisplayIfNeeded(attempt: Int = 0) {
@@ -2486,10 +2528,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     socketPath: SocketControlSettings.socketPath(),
                     accessMode: mode
                 )
+                scheduleUITestSocketSanityCheckIfNeeded()
             }
         }
 #endif
     }
+
+#if DEBUG
+    private func scheduleUITestSocketSanityCheckIfNeeded() {
+        let env = ProcessInfo.processInfo.environment
+        guard env["CMUX_UI_TEST_SOCKET_SANITY"] == "1" else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            guard let self else { return }
+            guard let config = self.socketListenerConfigurationIfEnabled() else {
+                self.writeUITestDiagnosticsIfNeeded(stage: "socketSanityDisabled")
+                return
+            }
+
+            let expectedPath = TerminalController.shared.activeSocketPath(preferredPath: config.path)
+            let health = TerminalController.shared.socketListenerHealth(expectedSocketPath: expectedPath)
+            let pingResponse = health.isHealthy
+                ? TerminalController.probeSocketCommand("ping", at: expectedPath, timeout: 1.0)
+                : nil
+            let isReady = health.isHealthy && pingResponse == "PONG"
+            if isReady {
+                self.writeUITestDiagnosticsIfNeeded(stage: "socketSanityReady")
+                return
+            }
+
+            self.writeUITestDiagnosticsIfNeeded(stage: "socketSanityRestart")
+            self.restartSocketListenerIfEnabled(source: "uiTest.socketSanity")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+                self?.writeUITestDiagnosticsIfNeeded(stage: "socketSanityPostRestart")
+            }
+        }
+    }
+#endif
 
     private func prepareStartupSessionSnapshotIfNeeded() {
         guard !didPrepareStartupSessionSnapshot else { return }
