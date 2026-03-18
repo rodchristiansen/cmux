@@ -63393,40 +63393,6 @@
         }
       }
     },
-    "sidebar.pullRequest.statusOpenFailing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "open x"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "オープン x"
-          }
-        }
-      }
-    },
-    "sidebar.pullRequest.statusOpenPassing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "open ✓"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "オープン ✓"
-          }
-        }
-      }
-    },
     "sidebar.workspace.accessibilityHint": {
       "extractionState": "manual",
       "localizations": {

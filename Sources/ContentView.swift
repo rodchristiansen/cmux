@@ -11511,26 +11511,10 @@ private struct TabItemView: View, Equatable {
 
     private func pullRequestStatusLabel(
         _ status: SidebarPullRequestStatus,
-        checks: SidebarPullRequestChecksStatus?
+        checks _: SidebarPullRequestChecksStatus?
     ) -> String {
         switch status {
-        case .open:
-            switch checks {
-            case .pass:
-                return String(
-                    localized: "sidebar.pullRequest.statusOpenPassing",
-                    defaultValue: "open ✓"
-                )
-            case .fail:
-                return String(
-                    localized: "sidebar.pullRequest.statusOpenFailing",
-                    defaultValue: "open x"
-                )
-            case .pending:
-                return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
-            case nil:
-                return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
-            }
+        case .open: return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
         case .merged: return String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
         case .closed: return String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
         }

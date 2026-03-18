@@ -5920,12 +5920,9 @@ final class Workspace: Identifiable, ObservableObject {
         sidebarBranchDirectoryEntriesInDisplayOrder(orderedPanelIds: sidebarOrderedPanelIds())
     }
 
-    func sidebarPullRequestsInDisplayOrder(orderedPanelIds: [UUID]) -> [SidebarPullRequestState] {
-        SidebarBranchOrdering.orderedUniquePullRequests(
-            orderedPanelIds: orderedPanelIds,
-            panelPullRequests: panelPullRequests,
-            fallbackPullRequest: pullRequest
-        )
+    func sidebarPullRequestsInDisplayOrder(orderedPanelIds _: [UUID]) -> [SidebarPullRequestState] {
+        guard let pullRequest else { return [] }
+        return [pullRequest]
     }
 
     func sidebarPullRequestsInDisplayOrder() -> [SidebarPullRequestState] {
