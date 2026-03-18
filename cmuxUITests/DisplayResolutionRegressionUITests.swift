@@ -1,6 +1,5 @@
 import XCTest
 import Foundation
-import AppKit
 
 final class DisplayResolutionRegressionUITests: XCTestCase {
     private let displayHarnessManifestPath = "/tmp/cmux-ui-test-display-harness.json"
@@ -13,7 +12,7 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
     private var displayDonePath = ""
     private var helperBinaryPath = ""
     private var helperLogPath = ""
-    private var appApplication: NSRunningApplication?
+    private var launchedApp: XCUIApplication?
     private var helperProcess: Process?
 
     override func setUp() {
@@ -211,39 +210,18 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
     }
 
     private func launchAppProcess(targetDisplayID: String) throws {
-        let appURL = try builtAppBundleURL()
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.createsNewApplicationInstance = true
-        configuration.arguments = ["-socketControlMode", "allowAll"]
-        configuration.environment = launchEnvironment(targetDisplayID: targetDisplayID)
-
-        let launchExpectation = expectation(description: "launch display regression app")
-        var launchError: Error?
-        var application: NSRunningApplication?
-
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
-            application = app
-            launchError = error
-            launchExpectation.fulfill()
+        let app = XCUIApplication()
+        app.launchArguments += ["-socketControlMode", "allowAll"]
+        for (key, value) in launchEnvironment(targetDisplayID: targetDisplayID) {
+            app.launchEnvironment[key] = value
         }
-
-        wait(for: [launchExpectation], timeout: 12.0)
-
-        if let launchError {
+        app.launch()
+        guard ensureForegroundAfterLaunch(app, timeout: 12.0) else {
             throw NSError(domain: "DisplayResolutionRegressionUITests", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to launch app bundle at \(appURL.path): \(launchError)"
+                NSLocalizedDescriptionKey: "XCUIApplication failed to reach foreground. state=\(app.state.rawValue)"
             ])
         }
-
-        guard let application else {
-            throw NSError(domain: "DisplayResolutionRegressionUITests", code: 3, userInfo: [
-                NSLocalizedDescriptionKey: "NSWorkspace launched no app for bundle \(appURL.path)"
-            ])
-        }
-
-        appApplication = application
+        launchedApp = app
     }
 
     private func launchEnvironment(targetDisplayID: String) -> [String: String] {
@@ -259,57 +237,32 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         ]
     }
 
-    private func builtAppBundleURL() throws -> URL {
-        var candidates: [URL] = []
-        let env = ProcessInfo.processInfo.environment
-
-        if let builtProductsDir = env["BUILT_PRODUCTS_DIR"], !builtProductsDir.isEmpty {
-            candidates.append(URL(fileURLWithPath: builtProductsDir).appendingPathComponent("cmux DEV.app"))
-        }
-
-        let bundleURL = Bundle(for: Self.self).bundleURL
-        let productsURL = bundleURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        candidates.append(productsURL.appendingPathComponent("cmux DEV.app"))
-
-        var seen = Set<String>()
-        for candidate in candidates {
-            let resolved = candidate.resolvingSymlinksInPath()
-            guard seen.insert(resolved.path).inserted else { continue }
-            let infoPlistPath = resolved.appendingPathComponent("Contents/Info.plist").path
-            if FileManager.default.fileExists(atPath: infoPlistPath) {
-                return resolved
-            }
-        }
-
-        throw NSError(domain: "DisplayResolutionRegressionUITests", code: 1, userInfo: [
-            NSLocalizedDescriptionKey: "Built app bundle not found. candidates=\(candidates.map(\.path))"
-        ])
-    }
-
     private func terminateLaunchedAppIfNeeded() {
-        guard let appApplication else { return }
-        defer { self.appApplication = nil }
+        guard let launchedApp else { return }
+        defer { self.launchedApp = nil }
 
-        if appApplication.isTerminated {
+        if launchedApp.state == .notRunning {
             return
         }
 
-        if !appApplication.terminate() {
-            _ = appApplication.forceTerminate()
-        }
-
-        _ = waitForCondition(timeout: 5.0) {
-            appApplication.isTerminated
-        }
+        launchedApp.terminate()
+        _ = launchedApp.wait(for: .notRunning, timeout: 5.0)
     }
 
     private func launchedAppDiagnostics() -> String {
-        guard let appApplication else { return "not-launched" }
-        return "pid=\(appApplication.processIdentifier) terminated=\(appApplication.isTerminated ? "1" : "0")"
+        guard let launchedApp else { return "not-launched" }
+        return "state=\(launchedApp.state.rawValue)"
+    }
+
+    private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        if app.wait(for: .runningForeground, timeout: timeout) {
+            return true
+        }
+        if app.state == .runningBackground {
+            app.activate()
+            return app.wait(for: .runningForeground, timeout: 6.0)
+        }
+        return false
     }
 
     private func waitForTargetDisplayMove(targetDisplayID: String, timeout: TimeInterval) -> Bool {
