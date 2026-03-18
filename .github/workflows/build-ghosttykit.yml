@@ -15,6 +15,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       build_started: ${{ steps.mark-build-start.outputs.value }}
+      passed: ${{ steps.mark-build-pass.outputs.value }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -107,8 +108,12 @@ jobs:
             GhosttyKit.xcframework.tar.gz
           echo "Published release $TAG"
 
+      - name: Mark GhosttyKit build success
+        id: mark-build-pass
+        run: echo "value=true" >> "$GITHUB_OUTPUT"
+
   build-ghosttykit-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.build-ghosttykit-attempt-1.result != 'success' && needs.build-ghosttykit-attempt-1.outputs.build_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.build-ghosttykit-attempt-1.outputs.build_started != 'true' }}
     needs:
       - build-ghosttykit-attempt-1
     continue-on-error: true
@@ -116,6 +121,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       build_started: ${{ steps.mark-build-start.outputs.value }}
+      passed: ${{ steps.mark-build-pass.outputs.value }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -207,6 +213,10 @@ jobs:
             --notes "Pre-built GhosttyKit.xcframework for commit ${{ steps.ghostty-sha.outputs.sha }}" \
             GhosttyKit.xcframework.tar.gz
           echo "Published release $TAG"
+
+      - name: Mark GhosttyKit build success
+        id: mark-build-pass
+        run: echo "value=true" >> "$GITHUB_OUTPUT"
 
   build-ghosttykit:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
@@ -222,15 +232,17 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.build-ghosttykit-attempt-1.result }}"
           ATTEMPT_1_BUILD_STARTED="${{ needs.build-ghosttykit-attempt-1.outputs.build_started }}"
+          ATTEMPT_1_PASSED="${{ needs.build-ghosttykit-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.build-ghosttykit-attempt-2.result }}"
           ATTEMPT_2_BUILD_STARTED="${{ needs.build-ghosttykit-attempt-2.outputs.build_started }}"
+          ATTEMPT_2_PASSED="${{ needs.build-ghosttykit-attempt-2.outputs.passed }}"
 
-          if [ "$ATTEMPT_1_RESULT" = "success" ] || [ "$ATTEMPT_2_RESULT" = "success" ]; then
+          if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
             echo "GhosttyKit build passed."
             exit 0
           fi
 
           echo "GhosttyKit build did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, build_started=${ATTEMPT_1_BUILD_STARTED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, build_started=${ATTEMPT_2_BUILD_STARTED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, build_started=${ATTEMPT_1_BUILD_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, build_started=${ATTEMPT_2_BUILD_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
