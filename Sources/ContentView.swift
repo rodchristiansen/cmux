@@ -11519,18 +11519,15 @@ private struct TabItemView: View, Equatable {
             case .pass:
                 return String(
                     localized: "sidebar.pullRequest.statusOpenPassing",
-                    defaultValue: "open · passing"
+                    defaultValue: "open ✓"
                 )
             case .fail:
                 return String(
                     localized: "sidebar.pullRequest.statusOpenFailing",
-                    defaultValue: "open · failing"
+                    defaultValue: "open x"
                 )
             case .pending:
-                return String(
-                    localized: "sidebar.pullRequest.statusOpenPending",
-                    defaultValue: "open · pending"
-                )
+                return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
             case nil:
                 return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
             }

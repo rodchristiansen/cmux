@@ -63399,13 +63399,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "open · failing"
+            "value": "open x"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "オープン・失敗"
+            "value": "オープン x"
           }
         }
       }
@@ -63416,30 +63416,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "open · passing"
+            "value": "open ✓"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "オープン・成功"
-          }
-        }
-      }
-    },
-    "sidebar.pullRequest.statusOpenPending": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "open · pending"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "オープン・保留中"
+            "value": "オープン ✓"
           }
         }
       }
