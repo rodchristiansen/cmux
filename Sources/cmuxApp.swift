@@ -4966,6 +4966,7 @@ struct SettingsView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .id(SettingsNavigationTarget.browserImport)
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("SettingsBrowserImportSection")
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
