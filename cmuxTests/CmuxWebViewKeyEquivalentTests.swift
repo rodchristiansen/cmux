@@ -1520,6 +1520,18 @@ final class BrowserDevToolsButtonDebugSettingsTests: XCTestCase {
         )
     }
 
+    func testBrowserProfilePopoverDebugWindowOwnsCloseShortcut() {
+        let window = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 120),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.identifier = NSUserInterfaceItemIdentifier("cmux.browserProfilePopoverDebug")
+
+        XCTAssertTrue(cmuxWindowShouldOwnCloseShortcut(window))
+    }
+
     func testCopyPayloadUsesPersistedValues() {
         let defaults = makeIsolatedDefaults()
         defaults.set(BrowserDevToolsIconOption.scope.rawValue, forKey: BrowserDevToolsButtonDebugSettings.iconNameKey)
