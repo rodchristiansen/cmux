@@ -3277,8 +3277,10 @@ struct CMUXCLI {
         let (workspaceOpt, rem0) = parseOption(commandArgs, name: "--workspace")
         let (actionOpt, rem1) = parseOption(rem0, name: "--action")
         let (titleOpt, rem2) = parseOption(rem1, name: "--title")
+        let (iconOpt, rem3) = parseOption(rem2, name: "--icon")
+        let (colorOpt, rem4) = parseOption(rem3, name: "--color")
 
-        var positional = rem2
+        var positional = rem4
         let actionRaw: String
         if let actionOpt {
             actionRaw = actionOpt
@@ -3303,6 +3305,12 @@ struct CMUXCLI {
         if action == "rename", (title?.isEmpty ?? true) {
             throw CLIError(message: "workspace-action rename requires --title <text> (or a trailing title)")
         }
+        if action == "set_icon", (iconOpt?.isEmpty ?? true) {
+            throw CLIError(message: "workspace-action set-icon requires --icon <path-or-emoji>")
+        }
+        if action == "set_color", (colorOpt?.isEmpty ?? true) {
+            throw CLIError(message: "workspace-action set-color requires --color <hex>")
+        }
 
         var params: [String: Any] = ["action": action]
         if let workspaceId {
@@ -3310,6 +3318,12 @@ struct CMUXCLI {
         }
         if let title, !title.isEmpty {
             params["title"] = title
+        }
+        if let iconOpt, !iconOpt.isEmpty {
+            params["icon"] = iconOpt
+        }
+        if let colorOpt, !colorOpt.isEmpty {
+            params["color"] = colorOpt
         }
 
         let payload = try client.sendV2(method: "workspace.action", params: params)
@@ -6086,6 +6100,8 @@ struct CMUXCLI {
             Actions:
               pin | unpin
               rename | clear-name
+              set-color | clear-color
+              set-icon | clear-icon
               move-up | move-down | move-top
               close-others | close-above | close-below
               mark-read | mark-unread
@@ -6094,10 +6110,15 @@ struct CMUXCLI {
               --action <name>              Action name (required if not positional)
               --workspace <id|ref|index>   Target workspace (default: current/$CMUX_WORKSPACE_ID)
               --title <text>               Title for rename (or pass trailing title text)
+              --icon <path|emoji:X>        Icon for set-icon (file path or emoji:🚀)
+              --color <hex>                Color for set-color (e.g. #C0392B)
 
             Example:
               cmux workspace-action --workspace workspace:2 --action pin
               cmux workspace-action --action rename --title "infra"
+              cmux workspace-action --action set-icon --icon emoji:🚀
+              cmux workspace-action --action set-icon --icon /path/to/icon.png
+              cmux workspace-action --action set-color --color "#C0392B"
               cmux workspace-action close-others
             """
         case "tab-action":

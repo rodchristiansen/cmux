@@ -1718,6 +1718,11 @@ class TabManager: ObservableObject {
         tab.setCustomColor(color)
     }
 
+    func setTabIcon(tabId: UUID, iconPath: String?) {
+        guard let tab = tabs.first(where: { $0.id == tabId }) else { return }
+        tab.setCustomIcon(iconPath)
+    }
+
     func togglePin(tabId: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         let tab = tabs[index]
@@ -4536,6 +4541,7 @@ extension TabManager {
             hasher.combine(workspace.currentDirectory)
             hasher.combine(workspace.customTitle ?? "")
             hasher.combine(workspace.customColor ?? "")
+            hasher.combine(workspace.customIconPath ?? "")
             hasher.combine(workspace.isPinned)
             hasher.combine(workspace.panels.count)
             hasher.combine(workspace.statusEntries.count)

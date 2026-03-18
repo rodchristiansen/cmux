@@ -199,6 +199,7 @@ extension Workspace {
             processTitle: processTitle,
             customTitle: customTitle,
             customColor: customColor,
+            customIconPath: customIconPath,
             isPinned: isPinned,
             currentDirectory: currentDirectory,
             focusedPanelId: focusedPanelId,
@@ -238,6 +239,7 @@ extension Workspace {
         applyProcessTitle(snapshot.processTitle)
         setCustomTitle(snapshot.customTitle)
         setCustomColor(snapshot.customColor)
+        setCustomIcon(snapshot.customIconPath)
         isPinned = snapshot.isPinned
 
         // Status entries and agent PIDs are ephemeral runtime state tied to running
@@ -4780,6 +4782,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var customTitle: String?
     @Published var isPinned: Bool = false
     @Published var customColor: String?  // hex string, e.g. "#C0392B"
+    @Published var customIconPath: String?  // absolute path to icon image, or "emoji:<char>"
     @Published var currentDirectory: String
     private(set) var preferredBrowserProfileID: UUID?
 
@@ -5618,6 +5621,15 @@ final class Workspace: Identifiable, ObservableObject {
             customColor = WorkspaceTabColorSettings.normalizedHex(hex)
         } else {
             customColor = nil
+        }
+    }
+
+    func setCustomIcon(_ path: String?) {
+        if let path {
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            customIconPath = trimmed.isEmpty ? nil : trimmed
+        } else {
+            customIconPath = nil
         }
     }
 

@@ -3264,7 +3264,8 @@ class TerminalController {
                     "listening_ports": ws.listeningPorts,
                     "remote": ws.remoteStatusPayload(),
                     "current_directory": v2OrNull(ws.currentDirectory),
-                    "custom_color": v2OrNull(ws.customColor)
+                    "custom_color": v2OrNull(ws.customColor),
+                    "custom_icon": v2OrNull(ws.customIconPath)
                 ]
             }
         }
@@ -3899,6 +3900,7 @@ class TerminalController {
 
         let supportedActions = [
             "pin", "unpin", "rename", "clear_name",
+            "set_color", "clear_color", "set_icon", "clear_icon",
             "move_up", "move_down", "move_top",
             "close_others", "close_above", "close_below",
             "mark_read", "mark_unread"
@@ -3970,6 +3972,34 @@ class TerminalController {
             case "clear_name":
                 tabManager.clearCustomTitle(tabId: workspace.id)
                 finish(["title": workspace.title])
+
+            case "set_color":
+                guard let colorRaw = v2String(params, "color"),
+                      !colorRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    result = .err(code: "invalid_params", message: "Missing or invalid color", data: nil)
+                    return
+                }
+                let color = colorRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                tabManager.setTabColor(tabId: workspace.id, color: color)
+                finish(["custom_color": v2OrNull(workspace.customColor)])
+
+            case "clear_color":
+                tabManager.setTabColor(tabId: workspace.id, color: nil)
+                finish()
+
+            case "set_icon":
+                guard let iconRaw = v2String(params, "icon"),
+                      !iconRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    result = .err(code: "invalid_params", message: "Missing or invalid icon path", data: nil)
+                    return
+                }
+                let icon = iconRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                tabManager.setTabIcon(tabId: workspace.id, iconPath: icon)
+                finish(["custom_icon": v2OrNull(workspace.customIconPath)])
+
+            case "clear_icon":
+                tabManager.setTabIcon(tabId: workspace.id, iconPath: nil)
+                finish()
 
             case "move_up":
                 guard let currentIndex = tabManager.tabs.firstIndex(where: { $0.id == workspace.id }) else {
@@ -14941,6 +14971,7 @@ class TerminalController {
             var lines: [String] = []
             lines.append("tab=\(tab.id.uuidString)")
             lines.append("color=\(tab.customColor ?? "none")")
+            lines.append("icon=\(tab.customIconPath ?? "none")")
             lines.append("cwd=\(tab.currentDirectory)")
 
             if let focused = tab.focusedPanelId,

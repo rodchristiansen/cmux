@@ -30,6 +30,44 @@ private func coloredCircleImage(color: NSColor) -> NSImage {
     return image
 }
 
+/// Circular workspace icon rendered in the sidebar, iMessage-style.
+/// Supports emoji (prefixed with "emoji:") or image file paths.
+private struct WorkspaceIconView: View {
+    let iconPath: String
+    let size: CGFloat
+
+    var body: some View {
+        if iconPath.hasPrefix("emoji:") {
+            let emoji = String(iconPath.dropFirst(6))
+            Text(emoji)
+                .font(.system(size: size * 0.55))
+                .frame(width: size, height: size)
+                .background(
+                    Circle()
+                        .fill(Color.primary.opacity(0.08))
+                )
+                .clipShape(Circle())
+        } else if let nsImage = NSImage(contentsOfFile: iconPath) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+        } else {
+            // Fallback for missing/invalid file: show a placeholder circle
+            Image(systemName: "photo")
+                .font(.system(size: size * 0.4))
+                .foregroundColor(.secondary)
+                .frame(width: size, height: size)
+                .background(
+                    Circle()
+                        .fill(Color.primary.opacity(0.06))
+                )
+                .clipShape(Circle())
+        }
+    }
+}
+
 func sidebarActiveForegroundNSColor(
     opacity: CGFloat,
     appAppearance: NSAppearance? = NSApp?.effectiveAppearance
@@ -10623,6 +10661,11 @@ private struct TabItemView: View, Equatable {
             return pullRequestDisplays(orderedPanelIds: orderedPanelIds)
         }()
 
+        HStack(alignment: .center, spacing: 10) {
+            if let iconPath = tab.customIconPath {
+                WorkspaceIconView(iconPath: iconPath, size: 36)
+            }
+
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 if unreadCount > 0 {
@@ -10850,7 +10893,8 @@ private struct TabItemView: View, Equatable {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-        }
+        } // VStack
+        } // HStack (icon + content)
         .animation(.easeInOut(duration: 0.2), value: tab.logEntries.count)
         .animation(.easeInOut(duration: 0.2), value: tab.progress != nil)
         .animation(.easeInOut(duration: 0.2), value: tab.metadataBlocks.count)
@@ -11069,6 +11113,28 @@ private struct TabItemView: View, Equatable {
                         Image(nsImage: coloredCircleImage(color: tabColorSwatchColor(for: entry.hex)))
                     }
                 }
+            }
+        }
+
+        Menu(String(localized: "contextMenu.workspaceIcon", defaultValue: "Workspace Icon")) {
+            if tab.customIconPath != nil {
+                Button {
+                    applyTabIcon(nil, targetIds: targetIds)
+                } label: {
+                    Label(String(localized: "contextMenu.clearIcon", defaultValue: "Clear Icon"), systemImage: "xmark.circle")
+                }
+            }
+
+            Button {
+                promptIconFromFile(targetIds: targetIds)
+            } label: {
+                Label(String(localized: "contextMenu.setIconFromFile", defaultValue: "Set Icon from File…"), systemImage: "photo")
+            }
+
+            Button {
+                promptEmojiIcon(targetIds: targetIds)
+            } label: {
+                Label(String(localized: "contextMenu.setEmojiIcon", defaultValue: "Set Emoji Icon…"), systemImage: "face.smiling")
             }
         }
 
@@ -11712,6 +11778,48 @@ private struct TabItemView: View, Equatable {
         for targetId in targetIds {
             tabManager.setTabColor(tabId: targetId, color: hex)
         }
+    }
+
+    private func applyTabIcon(_ path: String?, targetIds: [UUID]) {
+        for targetId in targetIds {
+            tabManager.setTabIcon(tabId: targetId, iconPath: path)
+        }
+    }
+
+    private func promptIconFromFile(targetIds: [UUID]) {
+        let panel = NSOpenPanel()
+        panel.title = String(localized: "openPanel.workspaceIcon.title", defaultValue: "Choose Workspace Icon")
+        panel.allowedContentTypes = [.png, .jpeg, .svg, .ico, .heic, .tiff]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else { return }
+        applyTabIcon(url.path, targetIds: targetIds)
+    }
+
+    private func promptEmojiIcon(targetIds: [UUID]) {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "alert.emojiIcon.title", defaultValue: "Emoji Workspace Icon")
+        alert.informativeText = String(localized: "alert.emojiIcon.message", defaultValue: "Enter an emoji to use as the workspace icon.")
+        let input = NSTextField(string: "")
+        input.placeholderString = "🚀"
+        input.frame = NSRect(x: 0, y: 0, width: 240, height: 22)
+        alert.accessoryView = input
+        alert.addButton(withTitle: String(localized: "alert.emojiIcon.apply", defaultValue: "Apply"))
+        alert.addButton(withTitle: String(localized: "alert.emojiIcon.cancel", defaultValue: "Cancel"))
+
+        let alertWindow = alert.window
+        alertWindow.initialFirstResponder = input
+        DispatchQueue.main.async {
+            alertWindow.makeFirstResponder(input)
+            input.selectText(nil)
+        }
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+        let trimmed = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        applyTabIcon("emoji:\(trimmed)", targetIds: targetIds)
     }
 
     private func promptCustomColor(targetIds: [UUID]) {
