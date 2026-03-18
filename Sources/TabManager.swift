@@ -3908,10 +3908,13 @@ class TabManager: ObservableObject {
         let quitWhenDone =
             env["CMUX_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] == "1" ||
             env["CMUX_UI_TEST_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] == "1"
+        let requireForegroundActivation = env["CMUX_UI_TEST_PANE_STRIP_MOTION_SETUP"] == "1"
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            guard await self.waitForPaneStripMotionUITestLaunchReadiness() else {
+            guard await self.waitForPaneStripMotionUITestLaunchReadiness(
+                requireForegroundActivation: requireForegroundActivation
+            ) else {
                 self.writePaneStripMotionTestData([
                     "status": "error",
                     "setupError": "App never reached pane-strip UI test launch readiness",
@@ -3936,16 +3939,19 @@ class TabManager: ObservableObject {
 
     @MainActor
     private func waitForPaneStripMotionUITestLaunchReadiness(
+        requireForegroundActivation: Bool,
         timeoutSeconds: TimeInterval = 5.0
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
-            if NSApp.isActive, window != nil, selectedWorkspace != nil {
+            let hasWindowAndWorkspace = window != nil && selectedWorkspace != nil
+            if hasWindowAndWorkspace && (!requireForegroundActivation || NSApp.isActive) {
                 return true
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
-        return NSApp.isActive && window != nil && selectedWorkspace != nil
+        let hasWindowAndWorkspace = window != nil && selectedWorkspace != nil
+        return hasWindowAndWorkspace && (!requireForegroundActivation || NSApp.isActive)
     }
 
     @MainActor
