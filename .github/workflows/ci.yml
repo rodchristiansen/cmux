@@ -81,7 +81,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -124,7 +124,7 @@ jobs:
       - tests-shard-1-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -194,7 +194,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -216,7 +216,7 @@ jobs:
       - tests-shard-2-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -265,7 +265,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -287,7 +287,7 @@ jobs:
       - tests-shard-3-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -336,7 +336,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -358,7 +358,7 @@ jobs:
       - tests-shard-4-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -407,7 +407,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -429,7 +429,7 @@ jobs:
       - tests-shard-5-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -478,7 +478,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
@@ -500,7 +500,7 @@ jobs:
       - tests-shard-6-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
