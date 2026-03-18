@@ -180,7 +180,19 @@ export default async function AfterSignInPage({ searchParams: searchParamsPromis
   }
 
   const searchParams = await searchParamsPromise;
+  const nativeAppReturnTo = getSingleValue(searchParams?.native_app_return_to);
   const afterAuthReturnTo = getSingleValue(searchParams?.after_auth_return_to);
+
+  if (nativeAppReturnTo && isAllowedNativeAppHref(nativeAppReturnTo)) {
+    const cmuxHref = buildNativeAppHref(
+      nativeAppReturnTo,
+      stackRefreshToken,
+      stackAccessCookie,
+    );
+    if (cmuxHref) {
+      return <OpenCmuxClient href={cmuxHref} />;
+    }
+  }
 
   if (afterAuthReturnTo && isAllowedNativeAppHref(afterAuthReturnTo)) {
     const cmuxHref = buildNativeAppHref(

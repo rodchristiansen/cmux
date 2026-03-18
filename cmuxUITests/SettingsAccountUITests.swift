@@ -61,8 +61,18 @@ final class SettingsAccountUITests: XCTestCase {
         XCTAssertEqual(openedURL.path, "/handler/sign-in")
 
         let queryItems = URLComponents(url: openedURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let afterAuthReturnTo = queryItems.first(where: { $0.name == "after_auth_return_to" })?.value
-        XCTAssertEqual(afterAuthReturnTo, "cmux-dev://auth-callback")
+        let afterAuthReturnTo = try XCTUnwrap(
+            queryItems.first(where: { $0.name == "after_auth_return_to" })?.value
+        )
+        let nestedURL = try XCTUnwrap(URL(string: afterAuthReturnTo))
+        XCTAssertEqual(nestedURL.scheme, "https")
+        XCTAssertEqual(nestedURL.host, "cmux.dev")
+        XCTAssertEqual(nestedURL.path, "/handler/after-sign-in")
+        let nestedQueryItems = URLComponents(url: nestedURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        XCTAssertEqual(
+            nestedQueryItems.first(where: { $0.name == "native_app_return_to" })?.value,
+            "cmux-dev://auth-callback"
+        )
 
         let callbackURL = try XCTUnwrap(
             URL(

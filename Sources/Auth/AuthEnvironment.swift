@@ -71,6 +71,17 @@ enum AuthEnvironment {
     }
 
     static func signInURL() -> URL {
+        var afterSignInComponents = URLComponents(
+            url: signInWebsiteOrigin.appendingPathComponent("handler/after-sign-in", isDirectory: false),
+            resolvingAgainstBaseURL: false
+        )!
+        afterSignInComponents.queryItems = [
+            URLQueryItem(
+                name: "native_app_return_to",
+                value: callbackURL.absoluteString
+            ),
+        ]
+
         var components = URLComponents(
             url: signInWebsiteOrigin.appendingPathComponent("handler/sign-in", isDirectory: false),
             resolvingAgainstBaseURL: false
@@ -78,7 +89,7 @@ enum AuthEnvironment {
         components.queryItems = [
             URLQueryItem(
                 name: "after_auth_return_to",
-                value: callbackURL.absoluteString
+                value: afterSignInComponents.url!.absoluteString
             ),
         ]
         return components.url!

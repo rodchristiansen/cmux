@@ -55,27 +55,45 @@ final class AuthManagerTests: XCTestCase {
         XCTAssertEqual(manager.selectedTeamID, "team_alpha")
     }
 
-    func testSignInURLDefaultsToCmuxDotDevEvenWhenGeneralWebsiteOriginIsLocalhost() {
+    func testSignInURLDefaultsToCmuxDotDevEvenWhenGeneralWebsiteOriginIsLocalhost() throws {
         setenv("CMUX_WWW_ORIGIN", "http://localhost:9779", 1)
         unsetenv("CMUX_AUTH_WWW_ORIGIN")
 
         let signInURL = AuthEnvironment.signInURL()
+        let components = URLComponents(url: signInURL, resolvingAgainstBaseURL: false)
+        let afterAuthReturnTo = try XCTUnwrap(
+            components?.queryItems?.first(where: { $0.name == "after_auth_return_to" })?.value
+        )
+        let nestedURL = try XCTUnwrap(URL(string: afterAuthReturnTo))
 
         XCTAssertEqual(signInURL.scheme, "https")
         XCTAssertEqual(signInURL.host, "cmux.dev")
         XCTAssertEqual(signInURL.path, "/handler/sign-in")
+        XCTAssertEqual(
+            nestedURL.absoluteString,
+            "https://cmux.dev/handler/after-sign-in?native_app_return_to=cmux-dev://auth-callback"
+        )
     }
 
-    func testSignInURLHonorsDedicatedAuthOriginOverride() {
+    func testSignInURLHonorsDedicatedAuthOriginOverride() throws {
         setenv("CMUX_WWW_ORIGIN", "http://localhost:9779", 1)
         setenv("CMUX_AUTH_WWW_ORIGIN", "http://127.0.0.1:4010", 1)
 
         let signInURL = AuthEnvironment.signInURL()
+        let components = URLComponents(url: signInURL, resolvingAgainstBaseURL: false)
+        let afterAuthReturnTo = try XCTUnwrap(
+            components?.queryItems?.first(where: { $0.name == "after_auth_return_to" })?.value
+        )
+        let nestedURL = try XCTUnwrap(URL(string: afterAuthReturnTo))
 
         XCTAssertEqual(signInURL.scheme, "http")
         XCTAssertEqual(signInURL.host, "127.0.0.1")
         XCTAssertEqual(signInURL.port, 4010)
         XCTAssertEqual(signInURL.path, "/handler/sign-in")
+        XCTAssertEqual(
+            nestedURL.absoluteString,
+            "http://127.0.0.1:4010/handler/after-sign-in?native_app_return_to=cmux-dev://auth-callback"
+        )
     }
 }
 
