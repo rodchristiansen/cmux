@@ -10432,6 +10432,7 @@ private struct TabItemView: View, Equatable {
     private var sidebarHideAllDetails = SidebarWorkspaceDetailSettings.defaultHideAllDetails
     @AppStorage(SidebarActiveTabIndicatorSettings.styleKey)
     private var activeTabIndicatorStyleRaw = SidebarActiveTabIndicatorSettings.defaultStyle.rawValue
+    @AppStorage("sidebarAutoDetectFavicon") private var sidebarAutoDetectFavicon = false
 
     var isMultiSelected: Bool {
         selectedTabIds.contains(tab.id)
@@ -10662,7 +10663,7 @@ private struct TabItemView: View, Equatable {
         }()
 
         HStack(alignment: .center, spacing: 10) {
-            if let iconPath = tab.customIconPath {
+            if let iconPath = tab.customIconPath ?? (sidebarAutoDetectFavicon ? tab.detectedFaviconPath : nil) {
                 WorkspaceIconView(iconPath: iconPath, size: 36)
             }
 

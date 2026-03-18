@@ -3612,6 +3612,7 @@ struct SettingsView: View {
     @AppStorage("sidebarShowLog") private var sidebarShowLog = true
     @AppStorage("sidebarShowProgress") private var sidebarShowProgress = true
     @AppStorage("sidebarShowStatusPills") private var sidebarShowMetadata = true
+    @AppStorage("sidebarAutoDetectFavicon") private var sidebarAutoDetectFavicon = false
     @AppStorage("sidebarTintHex") private var sidebarTintHex = SidebarTintDefaults.hex
     @AppStorage("sidebarTintHexLight") private var sidebarTintHexLight: String?
     @AppStorage("sidebarTintHexDark") private var sidebarTintHexDark: String?
@@ -4433,6 +4434,17 @@ struct SettingsView: View {
                                 .controlSize(.small)
                         }
                         .disabled(sidebarHideAllDetails)
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.autoDetectFavicon", defaultValue: "Auto-detect Workspace Icon"),
+                            subtitle: String(localized: "settings.app.autoDetectFavicon.subtitle", defaultValue: "Show favicon.png, favicon.ico, or .cmux-icon.png from the workspace directory as the workspace icon.")
+                        ) {
+                            Toggle("", isOn: $sidebarAutoDetectFavicon)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
                     }
 
                     SettingsSectionHeader(title: String(localized: "settings.section.workspaceColors", defaultValue: "Workspace Colors"))

@@ -218,6 +218,7 @@ extension Workspace {
         let normalizedCurrentDirectory = snapshot.currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         if !normalizedCurrentDirectory.isEmpty {
             currentDirectory = normalizedCurrentDirectory
+            detectFavicon(in: normalizedCurrentDirectory)
         }
 
         let panelSnapshotsById = Dictionary(uniqueKeysWithValues: snapshot.panels.map { ($0.id, $0) })
@@ -4783,6 +4784,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var isPinned: Bool = false
     @Published var customColor: String?  // hex string, e.g. "#C0392B"
     @Published var customIconPath: String?  // absolute path to icon image, or "emoji:<char>"
+    @Published var detectedFaviconPath: String?  // auto-detected favicon from cwd (not persisted)
     @Published var currentDirectory: String
     private(set) var preferredBrowserProfileID: UUID?
 
@@ -5138,6 +5140,8 @@ final class Workspace: Identifiable, ObservableObject {
             }
             bonsplitController.selectTab(initialTabId)
         }
+
+        detectFavicon(in: currentDirectory)
     }
 
     deinit {
@@ -5644,6 +5648,82 @@ final class Workspace: Identifiable, ObservableObject {
         }
     }
 
+    // MARK: - Favicon Detection
+
+    /// File names to look for as workspace icons, checked in order.
+    /// Covers web projects (favicon), cmux-specific (.cmux-icon), app icons,
+    /// and common branding files.
+    private static let faviconFilenames = [
+        ".cmux-icon.png", ".cmux-icon.svg", ".cmux-icon.jpg", ".cmux-icon.ico",
+        "favicon.png", "favicon.ico", "favicon.svg",
+        "icon.png", "icon.svg",
+        "logo.png", "logo.svg",
+    ]
+
+    /// Subdirectories to check (shallow, max 2 levels deep).
+    /// Covers web projects, iOS/macOS apps, and common asset locations.
+    private static let faviconSubdirs = [
+        "",                          // root
+        "public",                    // web: Next.js, Vite, CRA
+        "static",                    // web: Hugo, Gatsby
+        "src",                       // web: various
+        "assets",                    // generic
+        "images",                    // generic
+        "Resources",                 // Xcode / Swift
+    ]
+
+    func detectFavicon(in directory: String) {
+        let dir = directory
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let fm = FileManager.default
+            var found: String? = nil
+
+            // Also check for iOS/macOS AppIcon in asset catalog
+            let appIconCandidates = [
+                "Assets.xcassets/AppIcon.appiconset",
+                "Resources/Assets.xcassets/AppIcon.appiconset",
+            ]
+
+            outer: for subdir in Self.faviconSubdirs {
+                let base = subdir.isEmpty ? dir : (dir as NSString).appendingPathComponent(subdir)
+                for filename in Self.faviconFilenames {
+                    let path = (base as NSString).appendingPathComponent(filename)
+                    if fm.fileExists(atPath: path) {
+                        found = path
+                        break outer
+                    }
+                }
+            }
+
+            // Fallback: check for AppIcon asset catalog (pick largest PNG inside)
+            if found == nil {
+                for candidate in appIconCandidates {
+                    let iconsetPath = (dir as NSString).appendingPathComponent(candidate)
+                    if let contents = try? fm.contentsOfDirectory(atPath: iconsetPath) {
+                        // Pick the largest PNG by filename (typically "AppIcon-1024.png" or similar)
+                        let pngs = contents.filter { $0.hasSuffix(".png") }.sorted().reversed()
+                        if let largest = pngs.first {
+                            found = (iconsetPath as NSString).appendingPathComponent(largest)
+                            break
+                        }
+                    }
+                }
+            }
+
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if self.detectedFaviconPath != found {
+                    self.detectedFaviconPath = found
+                }
+            }
+        }
+    }
+
+    /// The icon to display: explicit custom icon takes priority, then auto-detected favicon.
+    var effectiveIconPath: String? {
+        customIconPath ?? detectedFaviconPath
+    }
+
     // MARK: - Directory Updates
 
     func updatePanelDirectory(panelId: UUID, directory: String) {
@@ -5655,6 +5735,7 @@ final class Workspace: Identifiable, ObservableObject {
         // Update current directory if this is the focused panel
         if panelId == focusedPanelId, currentDirectory != trimmed {
             currentDirectory = trimmed
+            detectFavicon(in: trimmed)
         }
     }
 

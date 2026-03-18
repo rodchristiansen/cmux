@@ -45121,6 +45121,40 @@
         }
       }
     },
+    "settings.app.autoDetectFavicon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto-detect Workspace Icon"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ワークスペースアイコンを自動検出"
+          }
+        }
+      }
+    },
+    "settings.app.autoDetectFavicon.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show favicon.png, favicon.ico, or .cmux-icon.png from the workspace directory as the workspace icon."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ワークスペースディレクトリのfavicon.pngやfavicon.ico、.cmux-icon.pngをワークスペースアイコンとして表示します。"
+          }
+        }
+      }
+    },
     "settings.app.showPorts": {
       "extractionState": "manual",
       "localizations": {
