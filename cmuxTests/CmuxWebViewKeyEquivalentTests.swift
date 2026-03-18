@@ -6956,6 +6956,40 @@ final class WorkspacePanelGitBranchTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.isDirty), [false, true])
     }
 
+    @MainActor
+    func testSidebarPullRequestsTrackFocusedPanelOnly() {
+        let workspace = Workspace()
+        guard let firstPanelId = workspace.focusedPanelId,
+              let paneId = workspace.paneId(forPanelId: firstPanelId),
+              let secondPanel = workspace.newTerminalSurface(inPane: paneId, focus: false) else {
+            XCTFail("Expected focused panel and a second panel")
+            return
+        }
+
+        workspace.updatePanelGitBranch(panelId: firstPanelId, branch: "main", isDirty: false)
+        workspace.updatePanelGitBranch(panelId: secondPanel.id, branch: "feature/sidebar-pr", isDirty: false)
+        workspace.updatePanelPullRequest(
+            panelId: secondPanel.id,
+            number: 1629,
+            label: "PR",
+            url: URL(string: "https://github.com/manaflow-ai/cmux/pull/1629")!,
+            status: .open
+        )
+
+        XCTAssertNil(workspace.pullRequest)
+        XCTAssertTrue(
+            workspace.sidebarPullRequestsInDisplayOrder().isEmpty,
+            "Expected background panel PRs to stay hidden while the focused panel has no PR"
+        )
+
+        workspace.focusPanel(secondPanel.id)
+
+        XCTAssertEqual(
+            workspace.sidebarPullRequestsInDisplayOrder().map(\.number),
+            [1629]
+        )
+    }
+
     func testSidebarOrderingUsesPaneOrderThenTabOrderWithBranchDeduping() {
         let workspace = Workspace()
         guard let leftFirstPanelId = workspace.focusedPanelId,
