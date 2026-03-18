@@ -840,7 +840,7 @@ struct cmuxApp: App {
     }
 
     private var activeTabManager: TabManager {
-        AppDelegate.shared?.synchronizeActiveMainWindowContext(
+        appDelegate.preferredTabManager(
             preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow
         ) ?? tabManager
     }
