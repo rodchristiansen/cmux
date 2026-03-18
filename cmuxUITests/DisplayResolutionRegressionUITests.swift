@@ -26,7 +26,9 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         launchTag = "ui-tests-display-resolution-\(token.prefix(8))"
         socketPath = "/tmp/cmux-ui-test-display-churn-\(token).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-display-churn-\(token).json"
-        launchManifestPath = "/tmp/cmux-ui-test-display-launch-\(token).json"
+        launchManifestPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-ui-test-display-launch-\(token).json")
+            .path
         displayReadyPath = "/tmp/cmux-ui-test-display-ready-\(token)"
         displayIDPath = "/tmp/cmux-ui-test-display-id-\(token)"
         displayStartPath = "/tmp/cmux-ui-test-display-start-\(token)"
