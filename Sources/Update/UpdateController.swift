@@ -8,8 +8,9 @@ enum UpdateSettings {
     static let automaticallyUpdateKey = "SUAutomaticallyUpdate"
     static let scheduledCheckIntervalKey = "SUScheduledCheckInterval"
     static let sendProfileInfoKey = "SUSendProfileInfo"
-    static let migrationKey = "cmux.sparkle.automaticChecksMigration.v1"
-    static let scheduledCheckInterval: TimeInterval = 60 * 60 * 24
+    static let migrationKey = "cmux.sparkle.automaticChecksMigration.v2"
+    static let previousDefaultScheduledCheckInterval: TimeInterval = 60 * 60 * 24
+    static let scheduledCheckInterval: TimeInterval = 60 * 60
 
     static func apply(to defaults: UserDefaults) {
         defaults.register(defaults: [
@@ -26,7 +27,9 @@ enum UpdateSettings {
         defaults.set(true, forKey: automaticChecksKey)
 
         if let interval = defaults.object(forKey: scheduledCheckIntervalKey) as? NSNumber {
-            if interval.doubleValue <= 0 {
+            let currentInterval = interval.doubleValue
+            if currentInterval <= 0 ||
+                abs(currentInterval - previousDefaultScheduledCheckInterval) < 1 {
                 defaults.set(scheduledCheckInterval, forKey: scheduledCheckIntervalKey)
             }
         } else {
@@ -58,7 +61,7 @@ class UpdateController {
     private var didStartUpdater: Bool = false
     private let readyRetryDelay: TimeInterval = 0.25
     private let readyRetryCount: Int = 20
-    private let backgroundProbeInterval: TimeInterval = 30 * 60
+    private let backgroundProbeInterval: TimeInterval = UpdateSettings.scheduledCheckInterval
 
     var viewModel: UpdateViewModel {
         userDriver.viewModel
@@ -141,11 +144,11 @@ class UpdateController {
         }
 
         // Probe immediately on launch so the sidebar can surface a passive update indicator
-        // without waiting for Sparkle's 24h scheduler or opening interactive update UI.
+        // without waiting for Sparkle's scheduled check or opening interactive update UI.
         UpdateLogStore.shared.append("starting launch update probe")
         updater.checkForUpdateInformation()
 
-        // Re-probe every 30 minutes so the banner appears even if the app has been running
+        // Re-probe every hour so the banner appears even if the app has been running
         // for a while when a new version is published.
         backgroundProbeTimer?.invalidate()
         backgroundProbeTimer = Timer.scheduledTimer(withTimeInterval: backgroundProbeInterval, repeats: true) { [weak self] _ in
