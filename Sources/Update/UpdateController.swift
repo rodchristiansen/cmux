@@ -54,9 +54,11 @@ class UpdateController {
     private var noUpdateDismissCancellable: AnyCancellable?
     private var noUpdateDismissWorkItem: DispatchWorkItem?
     private var readyCheckWorkItem: DispatchWorkItem?
+    private var backgroundProbeTimer: Timer?
     private var didStartUpdater: Bool = false
     private let readyRetryDelay: TimeInterval = 0.25
     private let readyRetryCount: Int = 20
+    private let backgroundProbeInterval: TimeInterval = 15 * 60
 
     var viewModel: UpdateViewModel {
         userDriver.viewModel
@@ -88,6 +90,7 @@ class UpdateController {
         noUpdateDismissCancellable?.cancel()
         noUpdateDismissWorkItem?.cancel()
         readyCheckWorkItem?.cancel()
+        backgroundProbeTimer?.invalidate()
     }
 
     /// Start the updater. If startup fails, the error is shown via the custom UI.
@@ -141,6 +144,15 @@ class UpdateController {
         // without waiting for Sparkle's 24h scheduler or opening interactive update UI.
         UpdateLogStore.shared.append("starting launch update probe")
         updater.checkForUpdateInformation()
+
+        // Re-probe every 15 minutes so the banner appears even if the app has been running
+        // for a while when a new version is published.
+        backgroundProbeTimer?.invalidate()
+        backgroundProbeTimer = Timer.scheduledTimer(withTimeInterval: backgroundProbeInterval, repeats: true) { [weak self] _ in
+            guard let self, self.updater.automaticallyChecksForUpdates else { return }
+            UpdateLogStore.shared.append("periodic background update probe")
+            self.updater.checkForUpdateInformation()
+        }
     }
 
     /// Force install the current update by auto-confirming all installable states.
