@@ -15,6 +15,9 @@ outputs:
   test_started:
     description: Whether the shard reached xcodebuild test execution.
     value: ${{ steps.test-start.outputs.value }}
+  completed:
+    description: Whether the shard reached a deterministic pass/fail outcome.
+    value: ${{ steps.run-tests.outputs.completed }}
   passed:
     description: Whether the shard passed after expected-failure handling.
     value: ${{ steps.run-tests.outputs.passed }}
@@ -156,6 +159,8 @@ runs:
           OUTPUT=$(cat /tmp/test-output.txt)
           set -e
         fi
+
+        echo "completed=true" >> "$GITHUB_OUTPUT"
 
         if [ "$EXIT_CODE" -ne 0 ]; then
           SUMMARY=$(echo "$OUTPUT" | grep "Executed.*tests.*with.*failures" | tail -1)

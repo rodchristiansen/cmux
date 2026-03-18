@@ -7,27 +7,43 @@ STEP_BLOCK="$(
   sed -n '/^      - name: Run compatibility unit test slice$/,/^      - name:/p' "$WORKFLOW_FILE" | sed '$d'
 )"
 
-require_pattern() {
-  local pattern="$1"
-  local message="$2"
-  if ! grep -q -- "$pattern" "$WORKFLOW_FILE"; then
+extract_matrix_entry() {
+  local os="$1"
+
+  awk -v os_line="          - os: ${os}" '
+    $0 == os_line { in_entry=1; print; next }
+    in_entry && /^          - os:/ { exit }
+    in_entry { print }
+  ' "$WORKFLOW_FILE"
+}
+
+require_in_block() {
+  local block="$1"
+  local pattern="$2"
+  local message="$3"
+  if ! grep -q -- "$pattern" <<<"$block"; then
     echo "FAIL: $message"
     exit 1
   fi
 }
 
-reject_pattern() {
-  local pattern="$1"
-  local message="$2"
-  if grep -q -- "$pattern" "$WORKFLOW_FILE"; then
-    echo "FAIL: $message"
-    exit 1
-  fi
-}
+MACOS_15_BLOCK="$(extract_matrix_entry "warp-macos-15-arm64-6x")"
+MACOS_26_BLOCK="$(extract_matrix_entry "warp-macos-26-arm64-6x")"
 
-require_pattern "compat_test_filters:" "ci-macos-compat.yml must define explicit compatibility test filters"
-require_pattern "cmuxTests/AppDelegateLaunchServicesRegistrationTests" "macOS 15 compat filters are missing"
-require_pattern "cmuxTests/ZshShellIntegrationHandoffTests" "macOS 26 compat filters are missing"
+if [ -z "$MACOS_15_BLOCK" ]; then
+  echo "FAIL: compat workflow is missing the macOS 15 matrix entry"
+  exit 1
+fi
+
+if [ -z "$MACOS_26_BLOCK" ]; then
+  echo "FAIL: compat workflow is missing the macOS 26 matrix entry"
+  exit 1
+fi
+
+require_in_block "$MACOS_15_BLOCK" "compat_test_filters:" "macOS 15 matrix entry must define explicit compatibility test filters"
+require_in_block "$MACOS_15_BLOCK" "cmuxTests/AppDelegateLaunchServicesRegistrationTests" "macOS 15 compat filters are missing"
+require_in_block "$MACOS_26_BLOCK" "compat_test_filters:" "macOS 26 matrix entry must define explicit compatibility test filters"
+require_in_block "$MACOS_26_BLOCK" "cmuxTests/ZshShellIntegrationHandoffTests" "macOS 26 compat filters are missing"
 
 if [ -z "$STEP_BLOCK" ]; then
   echo "FAIL: compat workflow is missing the compatibility test-slice step"

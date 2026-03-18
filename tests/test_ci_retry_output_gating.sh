@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CI_WORKFLOW_FILE="$ROOT_DIR/.github/workflows/ci.yml"
 BUILD_WORKFLOW_FILE="$ROOT_DIR/.github/workflows/build-ghosttykit.yml"
+VERIFY_SCRIPT="$ROOT_DIR/scripts/verify_retry_result.sh"
 
 extract_job_block() {
   local workflow_file="$1"
@@ -17,10 +18,9 @@ extract_job_block() {
   ' "$workflow_file"
 }
 
-assert_job_if_uses_outputs_only() {
+assert_retry_guard_uses_completed_output() {
   local workflow_file="$1"
   local job_name="$2"
-  local required_output="$3"
   local block
   local if_line
 
@@ -36,13 +36,23 @@ assert_job_if_uses_outputs_only() {
     exit 1
   fi
 
-  if [[ "$if_line" != *"$required_output"* ]]; then
-    echo "FAIL: $job_name retry guard must key off $required_output"
+  if [[ "$if_line" != *"outputs.completed != 'true'"* ]]; then
+    echo "FAIL: $job_name retry guard must key off outputs.completed"
+    exit 1
+  fi
+
+  if [[ "$if_line" != *"outputs.passed != 'true'"* ]]; then
+    echo "FAIL: $job_name retry guard must only retry when the first attempt did not pass"
     exit 1
   fi
 
   if [[ "$if_line" == *".result"* ]]; then
     echo "FAIL: $job_name retry guard must not depend on needs.<job>.result"
+    exit 1
+  fi
+
+  if [[ "$if_line" == *"outputs.test_started"* ]] || [[ "$if_line" == *"outputs.build_started"* ]]; then
+    echo "FAIL: $job_name retry guard must not depend on started-only outputs"
     exit 1
   fi
 }
@@ -66,56 +76,82 @@ assert_job_block_contains() {
   fi
 }
 
+assert_retry_script_exit() {
+  local expected_exit="$1"
+  shift
+
+  local output
+  local status
+  set +e
+  output="$("$VERIFY_SCRIPT" "$@" 2>&1)"
+  status=$?
+  set -e
+
+  if [ "$status" -ne "$expected_exit" ]; then
+    echo "FAIL: verify_retry_result.sh exited $status, expected $expected_exit"
+    printf '%s\n' "$output"
+    exit 1
+  fi
+}
+
+assert_retry_script_exit \
+  0 \
+  "Unit test shard" \
+  "success" "true" "true" \
+  "skipped" "" ""
+
+assert_retry_script_exit \
+  0 \
+  "Unit test shard" \
+  "cancelled" "" "" \
+  "success" "true" "true"
+
+assert_retry_script_exit \
+  1 \
+  "Unit test shard" \
+  "failure" "true" "" \
+  "skipped" "" ""
+
 for shard in 1 2 3 4 5 6; do
-  assert_job_if_uses_outputs_only \
+  assert_retry_guard_uses_completed_output \
     "$CI_WORKFLOW_FILE" \
-    "tests-shard-${shard}-attempt-2" \
-    "outputs.test_started != 'true'"
-  assert_job_block_contains \
-    "$CI_WORKFLOW_FILE" \
-    "tests-shard-${shard}" \
-    'if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then' \
-    "tests-shard-${shard} wrapper must key success off passed outputs"
+    "tests-shard-${shard}-attempt-2"
 done
 
-assert_job_if_uses_outputs_only \
+assert_retry_guard_uses_completed_output \
   "$CI_WORKFLOW_FILE" \
-  "tests-build-and-lag-attempt-2" \
-  "outputs.test_started != 'true'"
-assert_job_block_contains \
-  "$CI_WORKFLOW_FILE" \
-  "tests-build-and-lag" \
-  'if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then' \
-  "tests-build-and-lag wrapper must key success off passed outputs"
+  "tests-build-and-lag-attempt-2"
 
-assert_job_if_uses_outputs_only \
+assert_retry_guard_uses_completed_output \
   "$CI_WORKFLOW_FILE" \
-  "ui-display-resolution-regression-attempt-2" \
-  "outputs.test_started != 'true'"
+  "ui-display-resolution-regression-attempt-2"
+
+assert_retry_guard_uses_completed_output \
+  "$BUILD_WORKFLOW_FILE" \
+  "build-ghosttykit-attempt-2"
+
 assert_job_block_contains \
   "$CI_WORKFLOW_FILE" \
-  "ui-display-resolution-regression" \
-  'if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then' \
-  "ui-display-resolution-regression wrapper must key success off passed outputs"
+  "tests-shard-1-attempt-1" \
+  'completed: ${{ steps.mark-attempt-complete.outputs.value }}' \
+  "tests-shard-1-attempt-1 must expose completion after its post-unit regressions run"
 
-assert_job_if_uses_outputs_only \
-  "$BUILD_WORKFLOW_FILE" \
-  "build-ghosttykit-attempt-2" \
-  "outputs.build_started != 'true'"
 assert_job_block_contains \
-  "$BUILD_WORKFLOW_FILE" \
-  "build-ghosttykit-attempt-1" \
-  'passed: ${{ steps.mark-build-pass.outputs.value }}' \
-  "build-ghosttykit-attempt-1 must expose a passed output"
-assert_job_block_contains \
-  "$BUILD_WORKFLOW_FILE" \
-  "build-ghosttykit-attempt-2" \
-  'passed: ${{ steps.mark-build-pass.outputs.value }}' \
-  "build-ghosttykit-attempt-2 must expose a passed output"
-assert_job_block_contains \
-  "$BUILD_WORKFLOW_FILE" \
-  "build-ghosttykit" \
-  'if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then' \
-  "build-ghosttykit wrapper must key success off passed outputs"
+  "$CI_WORKFLOW_FILE" \
+  "tests-shard-1-attempt-1" \
+  'passed: ${{ steps.mark-attempt-pass.outputs.value }}' \
+  "tests-shard-1-attempt-1 must only pass after its post-unit regressions succeed"
 
-echo "PASS: retry and wrapper guards use explicit outputs, not needs.<job>.result"
+assert_job_block_contains \
+  "$CI_WORKFLOW_FILE" \
+  "tests-shard-1-attempt-2" \
+  'completed: ${{ steps.mark-attempt-complete.outputs.value }}' \
+  "tests-shard-1-attempt-2 must expose completion after its post-unit regressions run"
+
+assert_job_block_contains \
+  "$CI_WORKFLOW_FILE" \
+  "tests-shard-1-attempt-2" \
+  'passed: ${{ steps.mark-attempt-pass.outputs.value }}' \
+  "tests-shard-1-attempt-2 must only pass after its post-unit regressions succeed"
+
+echo "PASS: retry guards key off completed outputs and wrapper semantics stay correct"

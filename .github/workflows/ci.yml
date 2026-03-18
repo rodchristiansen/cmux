@@ -87,7 +87,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
-      passed: ${{ steps.unit-test-shard.outputs.passed }}
+      completed: ${{ steps.mark-attempt-complete.outputs.value }}
+      passed: ${{ steps.mark-attempt-pass.outputs.value }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -120,9 +121,17 @@ jobs:
           fi
 
           CMUX_CLI_BIN="$CLI_BIN" python3 tests/test_cli_version_memory_guard.py
+      - name: Mark unit test shard attempt completed
+        if: ${{ always() && !cancelled() }}
+        id: mark-attempt-complete
+        run: echo "value=true" >> "$GITHUB_OUTPUT"
+      - name: Mark unit test shard attempt passed
+        if: ${{ success() }}
+        id: mark-attempt-pass
+        run: echo "value=true" >> "$GITHUB_OUTPUT"
 
   tests-shard-1-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-1-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-1-attempt-1.outputs.completed != 'true' && needs.tests-shard-1-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-shard-1-attempt-1
     continue-on-error: true
@@ -130,7 +139,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
-      passed: ${{ steps.unit-test-shard.outputs.passed }}
+      completed: ${{ steps.mark-attempt-complete.outputs.value }}
+      passed: ${{ steps.mark-attempt-pass.outputs.value }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -163,6 +173,14 @@ jobs:
           fi
 
           CMUX_CLI_BIN="$CLI_BIN" python3 tests/test_cli_version_memory_guard.py
+      - name: Mark unit test shard attempt completed
+        if: ${{ always() && !cancelled() }}
+        id: mark-attempt-complete
+        run: echo "value=true" >> "$GITHUB_OUTPUT"
+      - name: Mark unit test shard attempt passed
+        if: ${{ success() }}
+        id: mark-attempt-pass
+        run: echo "value=true" >> "$GITHUB_OUTPUT"
 
   tests-shard-1:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
@@ -178,9 +196,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-shard-1-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-shard-1-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-shard-1-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-shard-1-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-shard-1-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-shard-1-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-shard-1-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-shard-1-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -189,8 +209,8 @@ jobs:
           fi
 
           echo "Unit test shard did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   tests-shard-2-attempt-1:
@@ -200,6 +220,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -214,7 +235,7 @@ jobs:
           shard_count: "6"
 
   tests-shard-2-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-2-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-2-attempt-1.outputs.completed != 'true' && needs.tests-shard-2-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-shard-2-attempt-1
     continue-on-error: true
@@ -222,6 +243,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -249,9 +271,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-shard-2-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-shard-2-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-shard-2-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-shard-2-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-shard-2-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-shard-2-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-shard-2-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-shard-2-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -260,8 +284,8 @@ jobs:
           fi
 
           echo "Unit test shard did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   tests-shard-3-attempt-1:
@@ -271,6 +295,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -285,7 +310,7 @@ jobs:
           shard_count: "6"
 
   tests-shard-3-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-3-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-3-attempt-1.outputs.completed != 'true' && needs.tests-shard-3-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-shard-3-attempt-1
     continue-on-error: true
@@ -293,6 +318,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -320,9 +346,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-shard-3-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-shard-3-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-shard-3-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-shard-3-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-shard-3-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-shard-3-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-shard-3-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-shard-3-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -331,8 +359,8 @@ jobs:
           fi
 
           echo "Unit test shard did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   tests-shard-4-attempt-1:
@@ -342,6 +370,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -356,7 +385,7 @@ jobs:
           shard_count: "6"
 
   tests-shard-4-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-4-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-4-attempt-1.outputs.completed != 'true' && needs.tests-shard-4-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-shard-4-attempt-1
     continue-on-error: true
@@ -364,6 +393,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -391,9 +421,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-shard-4-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-shard-4-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-shard-4-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-shard-4-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-shard-4-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-shard-4-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-shard-4-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-shard-4-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -402,8 +434,8 @@ jobs:
           fi
 
           echo "Unit test shard did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   tests-shard-5-attempt-1:
@@ -413,6 +445,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -427,7 +460,7 @@ jobs:
           shard_count: "6"
 
   tests-shard-5-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-5-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-5-attempt-1.outputs.completed != 'true' && needs.tests-shard-5-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-shard-5-attempt-1
     continue-on-error: true
@@ -435,6 +468,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -462,9 +496,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-shard-5-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-shard-5-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-shard-5-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-shard-5-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-shard-5-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-shard-5-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-shard-5-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-shard-5-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -473,8 +509,8 @@ jobs:
           fi
 
           echo "Unit test shard did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   tests-shard-6-attempt-1:
@@ -484,6 +520,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -498,7 +535,7 @@ jobs:
           shard_count: "6"
 
   tests-shard-6-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-6-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-shard-6-attempt-1.outputs.completed != 'true' && needs.tests-shard-6-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-shard-6-attempt-1
     continue-on-error: true
@@ -506,6 +543,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       test_started: ${{ steps.unit-test-shard.outputs.test_started }}
+      completed: ${{ steps.unit-test-shard.outputs.completed }}
       passed: ${{ steps.unit-test-shard.outputs.passed }}
     steps:
       - name: Checkout
@@ -533,9 +571,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-shard-6-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-shard-6-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-shard-6-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-shard-6-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-shard-6-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-shard-6-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-shard-6-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-shard-6-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -544,8 +584,8 @@ jobs:
           fi
 
           echo "Unit test shard did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   tests:
@@ -601,6 +641,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       test_started: ${{ steps.lag-regression.outputs.test_started }}
+      completed: ${{ steps.lag-regression.outputs.completed }}
       passed: ${{ steps.lag-regression.outputs.passed }}
     steps:
       - name: Checkout
@@ -612,7 +653,7 @@ jobs:
         uses: ./.github/actions/run-lag-regression
 
   tests-build-and-lag-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-build-and-lag-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-build-and-lag-attempt-1.outputs.completed != 'true' && needs.tests-build-and-lag-attempt-1.outputs.passed != 'true' }}
     needs:
       - tests-build-and-lag-attempt-1
     continue-on-error: true
@@ -620,6 +661,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       test_started: ${{ steps.lag-regression.outputs.test_started }}
+      completed: ${{ steps.lag-regression.outputs.completed }}
       passed: ${{ steps.lag-regression.outputs.passed }}
     steps:
       - name: Checkout
@@ -644,9 +686,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.tests-build-and-lag-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.tests-build-and-lag-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.tests-build-and-lag-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.tests-build-and-lag-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.tests-build-and-lag-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.tests-build-and-lag-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.tests-build-and-lag-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.tests-build-and-lag-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -655,8 +699,8 @@ jobs:
           fi
 
           echo "Lag regression did not pass." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
 
   ui-display-resolution-regression-attempt-1:
@@ -666,6 +710,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       test_started: ${{ steps.display-regression.outputs.test_started }}
+      completed: ${{ steps.display-regression.outputs.completed }}
       passed: ${{ steps.display-regression.outputs.passed }}
     steps:
       - name: Checkout
@@ -677,7 +722,7 @@ jobs:
         uses: ./.github/actions/run-display-resolution-regression
 
   ui-display-resolution-regression-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.ui-display-resolution-regression-attempt-1.outputs.test_started != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.ui-display-resolution-regression-attempt-1.outputs.completed != 'true' && needs.ui-display-resolution-regression-attempt-1.outputs.passed != 'true' }}
     needs:
       - ui-display-resolution-regression-attempt-1
     continue-on-error: true
@@ -685,6 +730,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       test_started: ${{ steps.display-regression.outputs.test_started }}
+      completed: ${{ steps.display-regression.outputs.completed }}
       passed: ${{ steps.display-regression.outputs.passed }}
     steps:
       - name: Checkout
@@ -709,9 +755,11 @@ jobs:
 
           ATTEMPT_1_RESULT="${{ needs.ui-display-resolution-regression-attempt-1.result }}"
           ATTEMPT_1_TEST_STARTED="${{ needs.ui-display-resolution-regression-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_COMPLETED="${{ needs.ui-display-resolution-regression-attempt-1.outputs.completed }}"
           ATTEMPT_1_PASSED="${{ needs.ui-display-resolution-regression-attempt-1.outputs.passed }}"
           ATTEMPT_2_RESULT="${{ needs.ui-display-resolution-regression-attempt-2.result }}"
           ATTEMPT_2_TEST_STARTED="${{ needs.ui-display-resolution-regression-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_COMPLETED="${{ needs.ui-display-resolution-regression-attempt-2.outputs.completed }}"
           ATTEMPT_2_PASSED="${{ needs.ui-display-resolution-regression-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -720,6 +768,6 @@ jobs:
           fi
 
           echo "Display resolution regression did not pass in either WarpBuild attempt." >&2
-          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, completed=${ATTEMPT_1_COMPLETED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, completed=${ATTEMPT_2_COMPLETED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1

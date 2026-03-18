@@ -4,6 +4,9 @@ outputs:
   test_started:
     description: Whether the lag regression step started.
     value: ${{ steps.run-lag-regression.outputs.test_started }}
+  completed:
+    description: Whether the lag regression reached a deterministic pass/fail outcome.
+    value: ${{ steps.run-lag-regression.outputs.completed }}
   passed:
     description: Whether the lag regression passed.
     value: ${{ steps.mark-passed.outputs.passed }}
@@ -142,6 +145,7 @@ runs:
         done
         [ -S "$SOCK" ] || { echo "Socket not ready at $SOCK" >&2; exit 1; }
 
+        set +e
         CMUX_SOCKET_PATH="$SOCK" \
         CMUX_LAG_MAX_P95_RATIO=1.70 \
         CMUX_LAG_MAX_AVG_RATIO=1.70 \
@@ -152,6 +156,12 @@ runs:
         CMUX_LAG_MAX_CHURN_P95_MS=35 \
         CMUX_LAG_KEY_EVENTS=180 \
         python3 tests/test_workspace_churn_up_arrow_lag.py
+        EXIT_CODE=$?
+        set -e
+        echo "completed=true" >> "$GITHUB_OUTPUT"
+        if [ "$EXIT_CODE" -ne 0 ]; then
+          exit "$EXIT_CODE"
+        fi
 
     - name: Mark lag regression passed
       if: ${{ success() }}

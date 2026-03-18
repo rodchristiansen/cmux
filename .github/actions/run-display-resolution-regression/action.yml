@@ -4,6 +4,9 @@ outputs:
   test_started:
     description: Whether the display regression step started.
     value: ${{ steps.run-display-regression.outputs.test_started }}
+  completed:
+    description: Whether the display regression reached a deterministic pass/fail outcome.
+    value: ${{ steps.run-display-regression.outputs.completed }}
   passed:
     description: Whether the display regression passed.
     value: ${{ steps.mark-passed.outputs.passed }}
@@ -97,12 +100,19 @@ runs:
 
         printf '{"helperBinaryPath":"%s"}\n' "$HELPER_PATH" >"$MANIFEST_PATH"
 
+        set +e
         xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug \
           -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
           -disableAutomaticPackageResolution \
           -destination "platform=macOS" \
           -only-testing:cmuxUITests/DisplayResolutionRegressionUITests \
           test
+        EXIT_CODE=$?
+        set -e
+        echo "completed=true" >> "$GITHUB_OUTPUT"
+        if [ "$EXIT_CODE" -ne 0 ]; then
+          exit "$EXIT_CODE"
+        fi
 
     - name: Mark display regression passed
       if: ${{ success() }}
