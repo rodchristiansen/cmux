@@ -4014,15 +4014,23 @@ class TabManager: ObservableObject {
             "done": "0",
         ], at: path)
 
-        if let window {
-            var frame = window.frame
-            frame.size = CGSize(width: 1440, height: 900)
-            window.setFrame(frame, display: true, animate: false)
+        @MainActor
+        func reassertPaneStripMotionTestWindow() {
+            guard let window else { return }
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
             NSApp.activate(ignoringOtherApps: true)
             window.layoutIfNeeded()
+            window.displayIfNeeded()
             window.contentView?.layoutSubtreeIfNeeded()
+            window.contentView?.displayIfNeeded()
+        }
+
+        if let window {
+            var frame = window.frame
+            frame.size = CGSize(width: 1440, height: 900)
+            window.setFrame(frame, display: true, animate: false)
+            reassertPaneStripMotionTestWindow()
         }
 
         try? await Task.sleep(nanoseconds: 200_000_000)
@@ -4076,6 +4084,14 @@ class TabManager: ObservableObject {
                    sample.sampleCount > 0,
                    !sample.isProbablyBlank {
                     return true
+                }
+                if let terminal = tab.terminalPanel(for: panelId) {
+                    let renderStats = terminal.surface.hostedView.debugRenderStats()
+                    if !renderStats.windowIsKey || !renderStats.appIsActive || !renderStats.windowOcclusionVisible {
+                        reassertPaneStripMotionTestWindow()
+                    }
+                } else {
+                    reassertPaneStripMotionTestWindow()
                 }
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
@@ -4185,7 +4201,9 @@ class TabManager: ObservableObject {
             // Pre-render the right pane before capture starts so this scenario measures reveal
             // motion, not first-paint latency on a newly created terminal under CI.
             primeTerminalContent(rightPanel.id, label: "RIGHT")
+            reassertPaneStripMotionTestWindow()
             tab.moveFocus(direction: .right)
+            reassertPaneStripMotionTestWindow()
             guard await waitForTerminalPanelPainted(rightPanel.id) else {
                 fail(
                     "Right pane did not paint visible content before focus-reveal capture",
@@ -4194,6 +4212,7 @@ class TabManager: ObservableObject {
                 return
             }
             tab.moveFocus(direction: .left)
+            reassertPaneStripMotionTestWindow()
             guard await waitForTerminalPanelPainted(sourcePanelId) else {
                 fail(
                     "Left pane did not repaint visible content after focus reset",
