@@ -276,6 +276,13 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
     }
 
     private func resolveSocketPath(timeout: TimeInterval) -> String? {
+        if let diagnostics = loadDiagnostics(),
+           diagnostics["socketReady"] == "1",
+           let diagnosticsPath = diagnostics["socketExpectedPath"],
+           !diagnosticsPath.isEmpty {
+            return diagnosticsPath
+        }
+
         let primaryCandidates = expectedSocketCandidates(includeFallback: false)
         let fallbackCandidates = expectedSocketCandidates(includeFallback: true)
             .filter { !primaryCandidates.contains($0) }
@@ -283,14 +290,12 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         var resolvedPath: String?
         _ = waitForCondition(timeout: timeout) {
             for candidate in primaryCandidates {
-                guard FileManager.default.fileExists(atPath: candidate) else { continue }
                 if self.socketRespondsToPing(at: candidate) {
                     resolvedPath = candidate
                     return true
                 }
             }
             for candidate in fallbackCandidates {
-                guard FileManager.default.fileExists(atPath: candidate) else { continue }
                 if self.socketRespondsToPing(at: candidate) {
                     resolvedPath = candidate
                     return true
