@@ -18,10 +18,12 @@ jobs:
             timeout: 45
             smoke: true
             skip_zig: false
+            compat_test_shard_index: 0
           - os: warp-macos-26-arm64-6x
             timeout: 45
             smoke: false
             skip_zig: true  # zig 0.15.2 MachO linker can't resolve libSystem on macOS 26
+            compat_test_shard_index: 1
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
@@ -121,6 +123,55 @@ jobs:
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
             -disableAutomaticPackageResolution \
             -destination "platform=macOS" build
+
+      - name: Run compatibility unit test slice
+        env:
+          CMUX_SKIP_ZIG_BUILD: ${{ matrix.skip_zig && '1' || '0' }}
+          COMPAT_TEST_SHARD_INDEX: ${{ matrix.compat_test_shard_index }}
+          COMPAT_TEST_SHARD_COUNT: "24"
+        run: |
+          set -euo pipefail
+          SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
+          TEST_FILTERS=()
+          while IFS= read -r filter; do
+            TEST_FILTERS+=("$filter")
+          done < <(
+            python3 scripts/unit_test_shard_args.py \
+              --shard-index "$COMPAT_TEST_SHARD_INDEX" \
+              --shard-count "$COMPAT_TEST_SHARD_COUNT"
+          )
+
+          if [ "${#TEST_FILTERS[@]}" -eq 0 ]; then
+            echo "No compatibility test classes selected" >&2
+            exit 1
+          fi
+
+          echo "Running ${#TEST_FILTERS[@]} compatibility test classes on ${{ matrix.os }}"
+
+          run_compat_tests() {
+            xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux-unit -configuration Debug \
+              -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
+              -disableAutomaticPackageResolution \
+              -destination "platform=macOS" \
+              "${TEST_FILTERS[@]}" \
+              test 2>&1
+          }
+
+          set +e
+          run_compat_tests | tee /tmp/compat-test-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          OUTPUT=$(cat /tmp/compat-test-output.txt)
+          set -e
+
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            SUMMARY=$(echo "$OUTPUT" | grep "Executed.*tests.*with.*failures" | tail -1)
+            if echo "$SUMMARY" | grep -q "(0 unexpected)"; then
+              echo "Compatibility test slice only hit expected failures, treating as pass"
+            else
+              echo "Compatibility test slice failed unexpectedly"
+              exit 1
+            fi
+          fi
 
       - name: Create virtual display
         if: matrix.smoke

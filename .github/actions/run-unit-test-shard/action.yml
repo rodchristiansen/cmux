@@ -101,7 +101,10 @@ runs:
       run: |
         set -euo pipefail
         SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
-        mapfile -t TEST_FILTERS < <(
+        TEST_FILTERS=()
+        while IFS= read -r filter; do
+          TEST_FILTERS+=("$filter")
+        done < <(
           python3 scripts/unit_test_shard_args.py \
             --shard-index "$SHARD_INDEX" \
             --shard-count "$SHARD_COUNT"
