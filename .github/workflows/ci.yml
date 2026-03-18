@@ -229,14 +229,18 @@ jobs:
 
           CMUX_CLI_BIN="$CLI_BIN" python3 tests/test_cli_version_memory_guard.py
 
-  tests-build-and-lag:
+  tests-build-and-lag-attempt-1:
     # Build the full cmux scheme and run the lag regression on WarpBuild.
     # XCUITests cannot run on WarpBuild (Virtualization.framework limitation:
     # XCUIApplication stuck "Running Background", 62s activation timeout per
     # test). Interactive UI tests run via test-e2e.yml on GitHub-hosted runners.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
     timeout-minutes: 20
+    outputs:
+      test_started: ${{ steps.mark-test-started.outputs.test_started }}
+      passed: ${{ steps.mark-passed.outputs.passed }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -344,6 +348,10 @@ jobs:
           echo "VDISPLAY_PID=$VDISPLAY_PID" >> "$GITHUB_ENV"
           sleep 3
 
+      - name: Mark lag regression test started
+        id: mark-test-started
+        run: echo "test_started=true" >> "$GITHUB_OUTPUT"
+
       - name: Run workspace churn typing-lag regression
         run: |
           set -euo pipefail
@@ -386,12 +394,215 @@ jobs:
           CMUX_LAG_KEY_EVENTS=180 \
           python3 tests/test_workspace_churn_up_arrow_lag.py
 
+      - name: Mark lag regression passed
+        if: ${{ success() }}
+        id: mark-passed
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  tests-build-and-lag-attempt-2:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.tests-build-and-lag-attempt-1.result == 'cancelled' && needs.tests-build-and-lag-attempt-1.outputs.test_started != 'true' }}
+    needs:
+      - tests-build-and-lag-attempt-1
+    continue-on-error: true
+    runs-on: warp-macos-15-arm64-6x
+    timeout-minutes: 20
+    outputs:
+      test_started: ${{ steps.mark-test-started.outputs.test_started }}
+      passed: ${{ steps.mark-passed.outputs.passed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            XCODE_DIR="/Applications/Xcode.app/Contents/Developer"
+          else
+            XCODE_APP="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort | tail -n 1 || true)"
+            if [ -n "$XCODE_APP" ]; then
+              XCODE_DIR="$XCODE_APP/Contents/Developer"
+            else
+              echo "No Xcode.app found under /Applications" >&2
+              exit 1
+            fi
+          fi
+          echo "DEVELOPER_DIR=$XCODE_DIR" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XCODE_DIR"
+          xcodebuild -version
+
+      - name: Cache GhosttyKit.xcframework
+        id: cache-ghosttykit-lag
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: GhosttyKit.xcframework
+          key: ghosttykit-${{ hashFiles('.gitmodules', 'ghostty') }}
+
+      - name: Download pre-built GhosttyKit.xcframework
+        if: steps.cache-ghosttykit-lag.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/download-prebuilt-ghosttykit.sh
+
+      - name: Install zig
+        run: |
+          ZIG_REQUIRED="0.15.2"
+          if command -v zig >/dev/null 2>&1 && zig version 2>/dev/null | grep -q "^${ZIG_REQUIRED}"; then
+            echo "zig ${ZIG_REQUIRED} already installed"
+          else
+            echo "Installing zig ${ZIG_REQUIRED} from tarball"
+            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-aarch64-macos-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
+            tar xf /tmp/zig.tar.xz -C /tmp
+            sudo mkdir -p /usr/local/bin /usr/local/lib
+            sudo cp -f /tmp/zig-aarch64-macos-${ZIG_REQUIRED}/zig /usr/local/bin/zig
+            sudo cp -rf /tmp/zig-aarch64-macos-${ZIG_REQUIRED}/lib /usr/local/lib/zig
+            export PATH="/usr/local/bin:$PATH"
+            zig version
+          fi
+
+      - name: Cache DerivedData
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/GhosttyTabs-*
+          key: deriveddata-build-${{ hashFiles('GhosttyTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-${{ hashFiles('GhosttyTabs.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            deriveddata-build-${{ hashFiles('GhosttyTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-
+            deriveddata-build-
+
+      - name: Cache Swift packages
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .ci-source-packages
+          key: spm-build-${{ hashFiles('GhosttyTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-build-
+
+      - name: Resolve Swift packages
+        run: |
+          set -euo pipefail
+          SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
+          mkdir -p "$SOURCE_PACKAGES_DIR"
+
+          for attempt in 1 2 3; do
+            if xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug \
+              -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
+              -resolvePackageDependencies; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to resolve Swift packages after 3 attempts" >&2
+              exit 1
+            fi
+            echo "Package resolution failed on attempt $attempt, retrying..."
+            sleep $((attempt * 5))
+          done
+
+      - name: Build app
+        run: |
+          set -euo pipefail
+          SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
+          xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
+            -disableAutomaticPackageResolution \
+            -destination "platform=macOS" build
+
+      - name: Create virtual display
+        run: |
+          set -euo pipefail
+          clang -framework Foundation -framework CoreGraphics \
+            -o /tmp/create-virtual-display scripts/create-virtual-display.m
+          /tmp/create-virtual-display &
+          VDISPLAY_PID=$!
+          echo "VDISPLAY_PID=$VDISPLAY_PID" >> "$GITHUB_ENV"
+          sleep 3
+
+      - name: Mark lag regression test started
+        id: mark-test-started
+        run: echo "test_started=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run workspace churn typing-lag regression
+        run: |
+          set -euo pipefail
+
+          APP="$(find "$HOME/Library/Developer/Xcode/DerivedData" -path "*/Build/Products/Debug/cmux DEV.app" -print -quit)"
+          if [ -z "${APP:-}" ] || [ ! -d "$APP" ]; then
+            echo "cmux DEV.app not found in DerivedData" >&2
+            exit 1
+          fi
+
+          TAG="ci-lag"
+          SOCK="/tmp/cmux-debug-${TAG}.sock"
+          BUNDLE_ID="$(
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null \
+              || echo 'com.cmuxterm.app.debug'
+          )"
+
+          pkill -x "cmux DEV" || true
+          rm -f "$SOCK" "/tmp/cmux-${TAG}.sock" || true
+          defaults write "$BUNDLE_ID" socketControlMode -string full >/dev/null 2>&1 || true
+
+          CMUX_TAG="$TAG" CMUX_SOCKET_PATH="$SOCK" CMUX_UI_TEST_MODE=1 "$APP/Contents/MacOS/cmux DEV" >/tmp/cmux-ci-lag.log 2>&1 &
+          APP_PID=$!
+          trap 'kill "$APP_PID" >/dev/null 2>&1 || true' EXIT
+
+          for _ in {1..240}; do
+            [ -S "$SOCK" ] && break
+            sleep 0.25
+          done
+          [ -S "$SOCK" ] || { echo "Socket not ready at $SOCK" >&2; exit 1; }
+
+          CMUX_SOCKET_PATH="$SOCK" \
+          CMUX_LAG_MAX_P95_RATIO=1.70 \
+          CMUX_LAG_MAX_AVG_RATIO=1.70 \
+          CMUX_LAG_MIN_BASELINE_P95_MS_FOR_RATIO=6.0 \
+          CMUX_LAG_MIN_BASELINE_AVG_MS_FOR_RATIO=4.0 \
+          CMUX_LAG_MAX_P95_DELTA_MS=20.0 \
+          CMUX_LAG_MAX_AVG_DELTA_MS=12.0 \
+          CMUX_LAG_MAX_CHURN_P95_MS=35 \
+          CMUX_LAG_KEY_EVENTS=180 \
+          python3 tests/test_workspace_churn_up_arrow_lag.py
+
+      - name: Mark lag regression passed
+        if: ${{ success() }}
+        id: mark-passed
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  tests-build-and-lag:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs:
+      - tests-build-and-lag-attempt-1
+      - tests-build-and-lag-attempt-2
+    runs-on: warp-macos-15-arm64-6x
+    timeout-minutes: 5
+    steps:
+      - name: Verify lag regression result
+        run: |
+          set -euo pipefail
+
+          ATTEMPT_1_RESULT="${{ needs.tests-build-and-lag-attempt-1.result }}"
+          ATTEMPT_1_TEST_STARTED="${{ needs.tests-build-and-lag-attempt-1.outputs.test_started }}"
+          ATTEMPT_1_PASSED="${{ needs.tests-build-and-lag-attempt-1.outputs.passed }}"
+          ATTEMPT_2_RESULT="${{ needs.tests-build-and-lag-attempt-2.result }}"
+          ATTEMPT_2_TEST_STARTED="${{ needs.tests-build-and-lag-attempt-2.outputs.test_started }}"
+          ATTEMPT_2_PASSED="${{ needs.tests-build-and-lag-attempt-2.outputs.passed }}"
+
+          if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
+            echo "Lag regression passed."
+            exit 0
+          fi
+
+          echo "Lag regression did not pass." >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          exit 1
+
   ui-display-resolution-regression-attempt-1:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
     timeout-minutes: 25
     outputs:
+      test_started: ${{ steps.mark-test-started.outputs.test_started }}
       passed: ${{ steps.mark-passed.outputs.passed }}
     steps:
       - name: Checkout
@@ -465,6 +676,10 @@ jobs:
           done
 
       - name: Run display resolution churn UI regression
+        id: mark-test-started
+        run: echo "test_started=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run display resolution churn UI regression
         run: |
           set -euo pipefail
           SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
@@ -494,13 +709,14 @@ jobs:
         run: echo "passed=true" >> "$GITHUB_OUTPUT"
 
   ui-display-resolution-regression-attempt-2:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.ui-display-resolution-regression-attempt-1.outputs.passed != 'true' }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.ui-display-resolution-regression-attempt-1.result == 'cancelled' && needs.ui-display-resolution-regression-attempt-1.outputs.test_started != 'true' }}
     needs:
       - ui-display-resolution-regression-attempt-1
     continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
     timeout-minutes: 25
     outputs:
+      test_started: ${{ steps.mark-test-started.outputs.test_started }}
       passed: ${{ steps.mark-passed.outputs.passed }}
     steps:
       - name: Checkout
@@ -572,6 +788,10 @@ jobs:
             echo "Package resolution failed on attempt $attempt, retrying..."
             sleep $((attempt * 5))
           done
+
+      - name: Mark display regression test started
+        id: mark-test-started
+        run: echo "test_started=true" >> "$GITHUB_OUTPUT"
 
       - name: Run display resolution churn UI regression
         run: |
@@ -614,7 +834,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          ATTEMPT_1_RESULT="${{ needs.ui-display-resolution-regression-attempt-1.result }}"
+          ATTEMPT_1_TEST_STARTED="${{ needs.ui-display-resolution-regression-attempt-1.outputs.test_started }}"
           ATTEMPT_1_PASSED="${{ needs.ui-display-resolution-regression-attempt-1.outputs.passed }}"
+          ATTEMPT_2_RESULT="${{ needs.ui-display-resolution-regression-attempt-2.result }}"
+          ATTEMPT_2_TEST_STARTED="${{ needs.ui-display-resolution-regression-attempt-2.outputs.test_started }}"
           ATTEMPT_2_PASSED="${{ needs.ui-display-resolution-regression-attempt-2.outputs.passed }}"
 
           if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
@@ -623,6 +847,6 @@ jobs:
           fi
 
           echo "Display resolution regression did not pass in either WarpBuild attempt." >&2
-          echo "Attempt 1 result: ${{ needs.ui-display-resolution-regression-attempt-1.result }}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
-          echo "Attempt 2 result: ${{ needs.ui-display-resolution-regression-attempt-2.result }}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          echo "Attempt 1: result=$ATTEMPT_1_RESULT, test_started=${ATTEMPT_1_TEST_STARTED:-<unset>}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2: result=$ATTEMPT_2_RESULT, test_started=${ATTEMPT_2_TEST_STARTED:-<unset>}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
           exit 1
