@@ -11,7 +11,7 @@ HELPER_CALL_SITES=(
   "$ROOT_DIR/.github/actions/run-unit-test-shard/action.yml"
   "$ROOT_DIR/.github/actions/run-display-resolution-regression/action.yml"
   "$ROOT_DIR/.github/actions/run-lag-regression/action.yml"
-  "$ROOT_DIR/.github/workflows/ci-macos-compat.yml"
+  "$ROOT_DIR/.github/actions/run-macos-compat-check/action.yml"
   "$ROOT_DIR/.github/workflows/nightly.yml"
   "$ROOT_DIR/.github/workflows/release.yml"
 )
