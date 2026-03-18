@@ -4674,6 +4674,15 @@ class TabManager: ObservableObject {
                 fail("Failed to create right browser pane for focus reveal")
                 return
             }
+            guard await waitForTerminalPanelPainted(sourcePanelId) else {
+                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                extra["browserVisibility"] = debugJSONString(browserVisibilityDebugInfo(for: rightPanel.id))
+                fail(
+                    "Source terminal did not remain visible after opening right browser pane",
+                    extra: extra
+                )
+                return
+            }
             reassertPaneStripMotionTestWindow()
             tab.moveFocus(direction: .right)
             reassertPaneStripMotionTestWindow()
