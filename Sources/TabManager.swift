@@ -3909,18 +3909,43 @@ class TabManager: ObservableObject {
             env["CMUX_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] == "1" ||
             env["CMUX_UI_TEST_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] == "1"
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                await self.runPaneStripMotionUITest(
-                    path: path,
-                    scenario: scenario,
-                    frameCount: frameCount,
-                    quitWhenDone: quitWhenDone
-                )
+            guard await self.waitForPaneStripMotionUITestLaunchReadiness() else {
+                self.writePaneStripMotionTestData([
+                    "status": "error",
+                    "setupError": "App never reached pane-strip UI test launch readiness",
+                    "done": "1",
+                ], at: path)
+                if quitWhenDone {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        NSApp.terminate(nil)
+                    }
+                }
+                return
             }
+
+            await self.runPaneStripMotionUITest(
+                path: path,
+                scenario: scenario,
+                frameCount: frameCount,
+                quitWhenDone: quitWhenDone
+            )
         }
+    }
+
+    @MainActor
+    private func waitForPaneStripMotionUITestLaunchReadiness(
+        timeoutSeconds: TimeInterval = 5.0
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            if NSApp.isActive, window != nil, selectedWorkspace != nil {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return NSApp.isActive && window != nil && selectedWorkspace != nil
     }
 
     @MainActor

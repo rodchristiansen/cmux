@@ -48,14 +48,16 @@ final class PaneStripUITests: XCTestCase {
     private func runPaneStripScenario(_ scenario: String, frameCount: Int = 24) -> [String: String] {
         let app = XCUIApplication()
         let dataPath = "/tmp/cmux-ui-test-pane-strip-\(scenario)-\(UUID().uuidString).json"
+        let diagnosticsPath = "/tmp/cmux-ui-test-pane-strip-diag-\(scenario)-\(UUID().uuidString).json"
         try? FileManager.default.removeItem(atPath: dataPath)
+        try? FileManager.default.removeItem(atPath: diagnosticsPath)
 
         app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] = diagnosticsPath
         app.launchEnvironment["CMUX_UI_TEST_PANE_STRIP_MOTION_SETUP"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_PANE_STRIP_MOTION_PATH"] = dataPath
         app.launchEnvironment["CMUX_UI_TEST_PANE_STRIP_MOTION_SCENARIO"] = scenario
         app.launchEnvironment["CMUX_UI_TEST_PANE_STRIP_MOTION_FRAME_COUNT"] = String(frameCount)
-        app.launchEnvironment["CMUX_UI_TEST_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] = "1"
         launchAndActivate(app)
         defer {
             if app.state != .notRunning {
@@ -64,7 +66,10 @@ final class PaneStripUITests: XCTestCase {
         }
 
         guard let payload = waitForJSONKey("done", equals: "1", atPath: dataPath, timeout: 20.0) else {
-            XCTFail("Timed out waiting for pane-strip motion output for \(scenario). data=\(loadJSON(atPath: dataPath) ?? [:])")
+            XCTFail(
+                "Timed out waiting for pane-strip motion output for \(scenario). " +
+                "data=\(loadJSON(atPath: dataPath) ?? [:]) diagnostics=\(loadJSON(atPath: diagnosticsPath) ?? [:])"
+            )
             return [:]
         }
 
