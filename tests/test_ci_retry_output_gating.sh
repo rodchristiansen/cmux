@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CI_WORKFLOW_FILE="$ROOT_DIR/.github/workflows/ci.yml"
 BUILD_WORKFLOW_FILE="$ROOT_DIR/.github/workflows/build-ghosttykit.yml"
+COMPAT_WORKFLOW_FILE="$ROOT_DIR/.github/workflows/ci-macos-compat.yml"
 VERIFY_SCRIPT="$ROOT_DIR/scripts/verify_retry_result.sh"
 
 extract_job_block() {
@@ -130,6 +131,14 @@ assert_retry_guard_uses_completed_output \
   "$BUILD_WORKFLOW_FILE" \
   "build-ghosttykit-attempt-2"
 
+assert_retry_guard_uses_completed_output \
+  "$COMPAT_WORKFLOW_FILE" \
+  "compat-tests-macos-15-attempt-2"
+
+assert_retry_guard_uses_completed_output \
+  "$COMPAT_WORKFLOW_FILE" \
+  "compat-tests-macos-26-attempt-2"
+
 assert_job_block_contains \
   "$CI_WORKFLOW_FILE" \
   "tests-shard-1-attempt-1" \
@@ -153,5 +162,11 @@ assert_job_block_contains \
   "tests-shard-1-attempt-2" \
   'passed: ${{ steps.mark-attempt-pass.outputs.value }}' \
   "tests-shard-1-attempt-2 must only pass after its post-unit regressions succeed"
+
+assert_job_block_contains \
+  "$COMPAT_WORKFLOW_FILE" \
+  "compat-tests" \
+  'scripts/verify_retry_result.sh' \
+  "compat-tests wrapper must use the shared retry-result verifier"
 
 echo "PASS: retry guards key off completed outputs and wrapper semantics stay correct"
