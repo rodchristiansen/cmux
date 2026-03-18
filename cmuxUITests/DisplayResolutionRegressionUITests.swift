@@ -4,11 +4,9 @@ import AppKit
 
 final class DisplayResolutionRegressionUITests: XCTestCase {
     private let displayHarnessManifestPath = "/tmp/cmux-ui-test-display-harness.json"
-    private let appLaunchManifestArgument = "-cmuxUITestLaunchManifest"
     private var launchTag = ""
     private var socketPath = ""
     private var diagnosticsPath = ""
-    private var launchManifestPath = ""
     private var displayReadyPath = ""
     private var displayIDPath = ""
     private var displayStartPath = ""
@@ -26,10 +24,6 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         launchTag = "ui-tests-display-resolution-\(token.prefix(8))"
         socketPath = "/tmp/cmux-ui-test-display-churn-\(token).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-display-churn-\(token).json"
-        launchManifestPath = repoRootURL
-            .appendingPathComponent(".cmux-ui-test-artifacts", isDirectory: true)
-            .appendingPathComponent("cmux-ui-test-display-launch-\(token).json")
-            .path
         displayReadyPath = "/tmp/cmux-ui-test-display-ready-\(token)"
         displayIDPath = "/tmp/cmux-ui-test-display-id-\(token)"
         displayStartPath = "/tmp/cmux-ui-test-display-start-\(token)"
@@ -63,7 +57,7 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
             XCTFail(
                 "Expected control socket to respond. requested=\(socketPath) tag=\(launchTag) " +
                 "candidates=\(expectedSocketCandidates(includeFallback: true)) diagnostics=\(loadDiagnostics() ?? [:]) " +
-                "app=\(launchedAppDiagnostics()) manifest=\(readTrimmedFile(atPath: launchManifestPath) ?? "<missing>")"
+                "app=\(launchedAppDiagnostics())"
             )
             return
         }
@@ -71,7 +65,7 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         XCTAssertTrue(waitForSocketPong(timeout: 4.0), "Expected control socket to respond at \(socketPath)")
         XCTAssertTrue(
             waitForTargetDisplayMove(targetDisplayID: targetDisplayID, timeout: 12.0),
-            "Expected app window to move to display \(targetDisplayID). diagnostics=\(loadDiagnostics() ?? [:]) app=\(launchedAppDiagnostics()) manifest=\(readTrimmedFile(atPath: launchManifestPath) ?? "<missing>")"
+            "Expected app window to move to display \(targetDisplayID). diagnostics=\(loadDiagnostics() ?? [:]) app=\(launchedAppDiagnostics())"
         )
 
         guard let baselineStats = waitForRenderStats(timeout: 8.0) else {
@@ -218,12 +212,12 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
 
     private func launchAppProcess(targetDisplayID: String) throws {
         let appURL = try builtAppBundleURL()
-        try writeLaunchManifest(targetDisplayID: targetDisplayID)
 
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.createsNewApplicationInstance = true
-        configuration.arguments = ["-socketControlMode", "allowAll", appLaunchManifestArgument, launchManifestPath]
+        configuration.arguments = ["-socketControlMode", "allowAll"]
+        configuration.environment = launchEnvironment(targetDisplayID: targetDisplayID)
 
         let launchExpectation = expectation(description: "launch display regression app")
         var launchError: Error?
@@ -250,18 +244,6 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         }
 
         appApplication = application
-    }
-
-    private func writeLaunchManifest(targetDisplayID: String) throws {
-        let payload = LaunchManifest(environment: launchEnvironment(targetDisplayID: targetDisplayID))
-        let data = try JSONEncoder().encode(payload)
-        let manifestURL = URL(fileURLWithPath: launchManifestPath)
-        try FileManager.default.createDirectory(
-            at: manifestURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        FileManager.default.createFile(atPath: manifestURL.path, contents: nil)
-        try data.write(to: manifestURL)
     }
 
     private func launchEnvironment(targetDisplayID: String) -> [String: String] {
@@ -548,7 +530,6 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         for path in [
             socketPath,
             diagnosticsPath,
-            launchManifestPath,
             displayReadyPath,
             displayIDPath,
             displayStartPath,
@@ -585,9 +566,5 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         let startPath: String
         let donePath: String
         let logPath: String?
-    }
-
-    private struct LaunchManifest: Encodable {
-        let environment: [String: String]
     }
 }
