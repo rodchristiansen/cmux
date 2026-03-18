@@ -115,6 +115,7 @@ class UpdateController {
             UpdateLogStore.shared.append(
                 "updater started (autoChecks=\(updater.automaticallyChecksForUpdates), interval=\(interval)s, autoDownloads=\(updater.automaticallyDownloadsUpdates))"
             )
+            startLaunchUpdateProbeIfNeeded()
         } catch {
             userDriver.viewModel.state = .error(.init(
                 error: error,
@@ -128,6 +129,18 @@ class UpdateController {
                 }
             ))
         }
+    }
+
+    private func startLaunchUpdateProbeIfNeeded() {
+        guard updater.automaticallyChecksForUpdates else {
+            UpdateLogStore.shared.append("launch update probe skipped (automatic checks disabled)")
+            return
+        }
+
+        // Probe immediately on launch so the sidebar can surface a passive update indicator
+        // without waiting for Sparkle's 24h scheduler or opening interactive update UI.
+        UpdateLogStore.shared.append("starting launch update probe")
+        updater.checkForUpdateInformation()
     }
 
     /// Force install the current update by auto-confirming all installable states.
