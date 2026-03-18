@@ -23,7 +23,10 @@ jobs:
         run: ./tests/test_ci_unit_test_spm_retry.sh
 
       - name: Validate unit-test shard timeout guard
-        run: ./tests/test_ci_unit_shard_timeout.sh
+        run: bash ./tests/test_ci_unit_shard_timeout.sh
+
+      - name: Validate retry output gating
+        run: bash ./tests/test_ci_retry_output_gating.sh
 
       - name: Validate cmux scheme test configuration
         run: ./tests/test_ci_scheme_testaction_debug.sh
