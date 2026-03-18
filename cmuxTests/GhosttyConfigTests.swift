@@ -1793,6 +1793,43 @@ final class SocketControlSettingsTests: XCTestCase {
     }
 }
 
+final class UITestLaunchManifestTests: XCTestCase {
+    func testManifestPathReadsArgumentValue() {
+        XCTAssertEqual(
+            UITestLaunchManifest.manifestPath(
+                from: ["cmux", "-cmuxUITestLaunchManifest", "/tmp/cmux-ui-test-launch.json"]
+            ),
+            "/tmp/cmux-ui-test-launch.json"
+        )
+    }
+
+    func testManifestPathReturnsNilWithoutValue() {
+        XCTAssertNil(
+            UITestLaunchManifest.manifestPath(
+                from: ["cmux", "-cmuxUITestLaunchManifest"]
+            )
+        )
+    }
+
+    func testApplyIfPresentDecodesEnvironmentPayload() {
+        let payload = """
+        {"environment":{"CMUX_TAG":"ui-tests-display","CMUX_SOCKET_PATH":"/tmp/cmux-ui-tests.sock"}}
+        """.data(using: .utf8)!
+        var applied: [String: String] = [:]
+
+        UITestLaunchManifest.applyIfPresent(
+            arguments: ["cmux", UITestLaunchManifest.argumentName, "/tmp/cmux-ui-test-launch.json"],
+            loadData: { _ in payload },
+            applyEnvironment: { key, value in
+                applied[key] = value
+            }
+        )
+
+        XCTAssertEqual(applied["CMUX_TAG"], "ui-tests-display")
+        XCTAssertEqual(applied["CMUX_SOCKET_PATH"], "/tmp/cmux-ui-tests.sock")
+    }
+}
+
 final class PostHogAnalyticsPropertiesTests: XCTestCase {
     func testDailyActivePropertiesIncludeVersionAndBuild() {
         let properties = PostHogAnalytics.dailyActiveProperties(
@@ -2300,6 +2337,20 @@ final class ZshShellIntegrationHandoffTests: XCTestCase {
         XCTAssertTrue(output.contains("133;A;redraw=last;cl=line"), output)
     }
 
+    func testShellIntegrationWinchGuardDoesNotPrintSpacerLineOnResize() throws {
+        let output = try runInteractiveZsh(
+            cmuxLoadGhosttyIntegration: false,
+            cmuxLoadShellIntegration: true,
+            command: """
+            print -r -- BEFORE
+            TRAPWINCH
+            print -r -- AFTER
+            """
+        )
+
+        XCTAssertEqual(output, "BEFORE\nAFTER", output)
+    }
+
     private func runInteractiveZsh(cmuxLoadGhosttyIntegration: Bool) throws -> String {
         try runInteractiveZsh(
             cmuxLoadGhosttyIntegration: cmuxLoadGhosttyIntegration,
@@ -2540,16 +2591,20 @@ final class BrowserInstallDetectorTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(safari.profiles.map(\.displayName), ["Default", "Work", "Travel"])
+        XCTAssertEqual(Set(safari.profiles.map(\.displayName)), Set(["Default", "Work", "Travel"]))
         XCTAssertEqual(
-            safari.profiles.map { $0.rootURL.path(percentEncoded: false) }.sorted(),
+            safari.profiles
+                .map { $0.rootURL.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false) }
+                .sorted(),
             [
-                home.appendingPathComponent("Library/Safari", isDirectory: true).path(percentEncoded: false),
-                home.appendingPathComponent("Library/Safari/Profiles/Work", isDirectory: true).path(percentEncoded: false),
+                home.appendingPathComponent("Library/Safari", isDirectory: true)
+                    .standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false),
+                home.appendingPathComponent("Library/Safari/Profiles/Work", isDirectory: true)
+                    .standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false),
                 home.appendingPathComponent(
                     "Library/Containers/com.apple.Safari/Data/Library/Safari/Profiles/Travel",
                     isDirectory: true
-                ).path(percentEncoded: false),
+                ).standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false),
             ].sorted()
         )
     }
@@ -2560,7 +2615,12 @@ final class BrowserInstallDetectorTests: XCTestCase {
 
     private func createFile(at url: URL, contents: Data) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        _ = FileManager.default.createFile(atPath: url.path, contents: contents)
+        guard FileManager.default.createFile(atPath: url.path, contents: contents) else {
+            throw CocoaError(
+                .fileWriteUnknown,
+                userInfo: [NSFilePathErrorKey: url.path]
+            )
+        }
     }
 }
 

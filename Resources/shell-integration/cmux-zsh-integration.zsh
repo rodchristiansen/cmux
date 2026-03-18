@@ -6,7 +6,7 @@ _cmux_send() {
     if command -v ncat >/dev/null 2>&1; then
         print -r -- "$payload" | ncat -w 1 -U "$CMUX_SOCKET_PATH" --send-only
     elif command -v socat >/dev/null 2>&1; then
-        print -r -- "$payload" | socat -T 1 - "UNIX-CONNECT:$CMUX_SOCKET_PATH"
+        print -r -- "$payload" | socat -T 1 - "UNIX-CONNECT:$CMUX_SOCKET_PATH" >/dev/null 2>&1
     elif command -v nc >/dev/null 2>&1; then
         # Some nc builds don't support unix sockets, but keep as a last-ditch fallback.
         #
@@ -143,9 +143,8 @@ _cmux_install_winch_guard() {
         [[ -n "$CMUX_TAB_ID" ]] || return 0
         [[ -n "$CMUX_PANEL_ID" ]] || return 0
 
-        # Keep a spacer line so prompt redraw during resize cannot clobber the
-        # tail of command output that was rendered immediately above the prompt.
-        builtin print -r -- ""
+        # Ghostty already marks prompt redraws on SIGWINCH. Writing to the PTY
+        # here grows the screen and makes resize look like a fresh prompt.
         return 0
     }
 
