@@ -66,12 +66,25 @@ private func drainMainQueue() {
 }
 
 @MainActor
-private func makeTemporaryBrowserProfile(named prefix: String) throws -> BrowserProfileDefinition {
-    try XCTUnwrap(
-        BrowserProfileStore.shared.createProfile(
-            named: "\(prefix)-\(UUID().uuidString)"
+private final class TemporaryBrowserProfileTracker {
+    private var createdProfileIDs: [UUID] = []
+
+    func createProfile(named prefix: String) throws -> BrowserProfileDefinition {
+        let profile = try XCTUnwrap(
+            BrowserProfileStore.shared.createProfile(
+                named: "\(prefix)-\(UUID().uuidString)"
+            )
         )
-    )
+        createdProfileIDs.append(profile.id)
+        return profile
+    }
+
+    func cleanup() {
+        for profileID in createdProfileIDs.reversed() {
+            _ = BrowserProfileStore.shared.removeProfile(id: profileID)
+        }
+        createdProfileIDs.removeAll()
+    }
 }
 
 final class SplitShortcutTransientFocusGuardTests: XCTestCase {
@@ -6435,6 +6448,8 @@ final class WorkspaceTerminalConfigInheritanceSelectionTests: XCTestCase {
 
 @MainActor
 final class WorkspaceBrowserProfileSelectionTests: XCTestCase {
+    private let temporaryProfileTracker = TemporaryBrowserProfileTracker()
+
     private final class RejectingCreateTabDelegate: BonsplitDelegate {
         func splitTabBar(_ controller: BonsplitController, shouldCreateTab tab: Bonsplit.Tab, inPane pane: PaneID) -> Bool {
             false
@@ -6447,10 +6462,15 @@ final class WorkspaceBrowserProfileSelectionTests: XCTestCase {
         }
     }
 
+    override func tearDown() {
+        temporaryProfileTracker.cleanup()
+        super.tearDown()
+    }
+
     func testNewBrowserSurfacePrefersSelectedBrowserProfileInTargetPane() throws {
         let workspace = Workspace()
-        let profileA = try makeTemporaryBrowserProfile(named: "Alpha")
-        let profileB = try makeTemporaryBrowserProfile(named: "Beta")
+        let profileA = try temporaryProfileTracker.createProfile(named: "Alpha")
+        let profileB = try temporaryProfileTracker.createProfile(named: "Beta")
         let paneId = try XCTUnwrap(workspace.bonsplitController.focusedPaneId)
         let browserA = try XCTUnwrap(
             workspace.newBrowserSurface(
@@ -6494,8 +6514,8 @@ final class WorkspaceBrowserProfileSelectionTests: XCTestCase {
 
     func testNewBrowserSurfaceFailureDoesNotMutatePreferredProfile() throws {
         let workspace = Workspace()
-        let preferredProfile = try makeTemporaryBrowserProfile(named: "Preferred")
-        let unexpectedProfile = try makeTemporaryBrowserProfile(named: "Unexpected")
+        let preferredProfile = try temporaryProfileTracker.createProfile(named: "Preferred")
+        let unexpectedProfile = try temporaryProfileTracker.createProfile(named: "Unexpected")
 
         let paneId = try XCTUnwrap(workspace.bonsplitController.focusedPaneId)
         _ = try XCTUnwrap(
@@ -6525,8 +6545,8 @@ final class WorkspaceBrowserProfileSelectionTests: XCTestCase {
 
     func testNewBrowserSplitFailureDoesNotMutatePreferredProfile() throws {
         let workspace = Workspace()
-        let preferredProfile = try makeTemporaryBrowserProfile(named: "Preferred")
-        let unexpectedProfile = try makeTemporaryBrowserProfile(named: "Unexpected")
+        let preferredProfile = try temporaryProfileTracker.createProfile(named: "Preferred")
+        let unexpectedProfile = try temporaryProfileTracker.createProfile(named: "Unexpected")
 
         let paneId = try XCTUnwrap(workspace.bonsplitController.focusedPaneId)
         let browser = try XCTUnwrap(
@@ -6615,8 +6635,15 @@ final class TabManagerWorkspaceConfigInheritanceSourceTests: XCTestCase {
 
 @MainActor
 final class BrowserPanelProfileIsolationTests: XCTestCase {
+    private let temporaryProfileTracker = TemporaryBrowserProfileTracker()
+
+    override func tearDown() {
+        temporaryProfileTracker.cleanup()
+        super.tearDown()
+    }
+
     func testStaleDidFinishDoesNotRecordVisitIntoSwitchedProfileHistory() throws {
-        let alternateProfile = try makeTemporaryBrowserProfile(named: "Switched")
+        let alternateProfile = try temporaryProfileTracker.createProfile(named: "Switched")
         let defaultStore = BrowserHistoryStore.shared
         let alternateStore = BrowserProfileStore.shared.historyStore(for: alternateProfile.id)
         defaultStore.clearHistory()

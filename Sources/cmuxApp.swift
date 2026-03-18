@@ -1118,6 +1118,7 @@ private let cmuxAuxiliaryWindowIdentifiers: Set<String> = [
     "cmux.settingsAboutTitlebarDebug",
     "cmux.debugWindowControls",
     "cmux.browserImportHintDebug",
+    "cmux.browserProfilePopoverDebug",
     "cmux.sidebarDebug",
     "cmux.menubarDebug",
     "cmux.backgroundDebug",

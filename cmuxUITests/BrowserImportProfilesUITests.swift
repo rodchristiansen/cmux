@@ -181,7 +181,8 @@ final class BrowserImportProfilesUITests: XCTestCase {
 
     private func waitForImportWizard(_ app: XCUIApplication) {
         let wizardOpened = browserImportPollUntil(timeout: 5.0) {
-            app.buttons["Next"].exists || app.windows["Import Browser Data"].exists
+            let nextButton = app.buttons["Next"]
+            return nextButton.exists && nextButton.isHittable
         }
         XCTAssertTrue(wizardOpened, "Expected the import wizard to open")
     }
