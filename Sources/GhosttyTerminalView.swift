@@ -2457,9 +2457,14 @@ final class TerminalSurface: Identifiable, ObservableObject {
         let inWindow: Bool
         let area: CGFloat
     }
+    private struct PortalHostLock {
+        let hostId: ObjectIdentifier
+    }
     private var portalLifecycleState: PortalLifecycleState = .live
     private var portalLifecycleGeneration: UInt64 = 1
     private var activePortalHostLease: PortalHostLease?
+    private var pendingDistinctPortalHostReplacement = false
+    private var lockedPortalHost: PortalHostLock?
     @Published var searchState: SearchState? = nil {
 	        didSet {
 	            if let searchState {
@@ -2562,6 +2567,20 @@ final class TerminalSurface: Identifiable, ObservableObject {
         lease.inWindow && lease.area > portalHostAreaThreshold
     }
 
+    func preparePortalHostReplacementForNextDistinctClaim(reason: String) {
+        pendingDistinctPortalHostReplacement = true
+        if let current = activePortalHostLease,
+           lockedPortalHost?.hostId == current.hostId {
+            lockedPortalHost = nil
+        }
+#if DEBUG
+        dlog(
+            "terminal.portal.host.rearm surface=\(id.uuidString.prefix(5)) " +
+            "reason=\(reason)"
+        )
+#endif
+    }
+
     func claimPortalHost(
         hostId: ObjectIdentifier,
         inWindow: Bool,
@@ -2575,6 +2594,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
         )
 
         if let current = activePortalHostLease {
+            if let lock = lockedPortalHost, lock.hostId != current.hostId {
+                lockedPortalHost = nil
+            }
+
             if current.hostId == hostId {
                 activePortalHostLease = next
                 return true
@@ -2582,9 +2605,32 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
             let currentUsable = Self.portalHostIsUsable(current)
             let nextUsable = Self.portalHostIsUsable(next)
+            let shouldForceDistinctReplacement = pendingDistinctPortalHostReplacement && inWindow
+            if shouldForceDistinctReplacement {
+#if DEBUG
+                dlog(
+                    "terminal.portal.host.claim surface=\(id.uuidString.prefix(5)) " +
+                    "reason=\(reason) host=\(hostId) inWin=\(inWindow ? 1 : 0) " +
+                    "size=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) " +
+                    "replacingHost=\(current.hostId) replacingInWin=\(current.inWindow ? 1 : 0) " +
+                    "replacingArea=\(String(format: "%.1f", current.area)) forced=1"
+                )
+#endif
+                activePortalHostLease = next
+                pendingDistinctPortalHostReplacement = false
+                lockedPortalHost = PortalHostLock(hostId: hostId)
+                return true
+            }
+            let lockBlocksDistinctReplacement =
+                currentUsable &&
+                lockedPortalHost?.hostId == current.hostId
             let shouldReplace =
                 !currentUsable ||
-                (nextUsable && next.area > (current.area * Self.portalHostReplacementAreaGainRatio))
+                (
+                    !lockBlocksDistinctReplacement &&
+                    nextUsable &&
+                    next.area > (current.area * Self.portalHostReplacementAreaGainRatio)
+                )
 
             if shouldReplace {
 #if DEBUG
@@ -2596,6 +2642,9 @@ final class TerminalSurface: Identifiable, ObservableObject {
                     "replacingArea=\(String(format: "%.1f", current.area))"
                 )
 #endif
+                if lockedPortalHost?.hostId == current.hostId {
+                    lockedPortalHost = nil
+                }
                 activePortalHostLease = next
                 return true
             }
@@ -2606,7 +2655,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
                 "reason=\(reason) host=\(hostId) inWin=\(inWindow ? 1 : 0) " +
                 "size=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) " +
                 "ownerHost=\(current.hostId) ownerInWin=\(current.inWindow ? 1 : 0) " +
-                "ownerArea=\(String(format: "%.1f", current.area))"
+                "ownerArea=\(String(format: "%.1f", current.area)) " +
+                "locked=\(lockBlocksDistinctReplacement ? 1 : 0)"
             )
 #endif
             return false
@@ -2626,6 +2676,9 @@ final class TerminalSurface: Identifiable, ObservableObject {
     func releasePortalHostIfOwned(hostId: ObjectIdentifier, reason: String) {
         guard let current = activePortalHostLease, current.hostId == hostId else { return }
         activePortalHostLease = nil
+        if lockedPortalHost?.hostId == hostId {
+            lockedPortalHost = nil
+        }
 #if DEBUG
         dlog(
             "terminal.portal.host.release surface=\(id.uuidString.prefix(5)) " +

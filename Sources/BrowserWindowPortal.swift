@@ -2140,7 +2140,7 @@ final class WindowBrowserPortal: NSObject {
         }
     }
 
-    private func synchronizeAllEntriesFromExternalGeometryChange() {
+    fileprivate func synchronizeAllEntriesFromExternalGeometryChange() {
         guard ensureInstalled() else { return }
         installedContainerView?.layoutSubtreeIfNeeded()
         installedReferenceView?.layoutSubtreeIfNeeded()
@@ -3666,6 +3666,8 @@ enum BrowserWindowPortalRegistry {
 
     private static var portalsByWindowId: [ObjectIdentifier: WindowBrowserPortal] = [:]
     private static var webViewToWindowId: [ObjectIdentifier: ObjectIdentifier] = [:]
+    private static var hasPendingExternalGeometrySyncForAllWindows = false
+    private static var pendingExternalGeometrySyncPassesForAllWindows = 0
 
     private static func installWindowCloseObserverIfNeeded(for window: NSWindow) {
         guard objc_getAssociatedObject(window, &cmuxWindowBrowserPortalCloseObserverKey) == nil else { return }
@@ -3750,6 +3752,44 @@ enum BrowserWindowPortalRegistry {
         guard let window = anchorView.window else { return }
         let portal = portal(for: window)
         portal.synchronizeWebViewForAnchor(anchorView)
+    }
+
+    static func scheduleExternalGeometrySynchronizeForAllWindows(passes: Int = 3) {
+        pendingExternalGeometrySyncPassesForAllWindows = max(
+            pendingExternalGeometrySyncPassesForAllWindows,
+            max(1, passes)
+        )
+        guard !hasPendingExternalGeometrySyncForAllWindows else { return }
+        hasPendingExternalGeometrySyncForAllWindows = true
+        DispatchQueue.main.async {
+            Self.runScheduledExternalGeometrySynchronizeForAllWindows()
+        }
+    }
+
+    private static func runScheduledExternalGeometrySynchronizeForAllWindows() {
+        guard pendingExternalGeometrySyncPassesForAllWindows > 0 else {
+            hasPendingExternalGeometrySyncForAllWindows = false
+            return
+        }
+
+        pendingExternalGeometrySyncPassesForAllWindows -= 1
+        for portal in portalsByWindowId.values {
+            portal.synchronizeAllEntriesFromExternalGeometryChange()
+        }
+
+        if pendingExternalGeometrySyncPassesForAllWindows > 0 {
+            DispatchQueue.main.async {
+                Self.runScheduledExternalGeometrySynchronizeForAllWindows()
+            }
+        } else {
+            hasPendingExternalGeometrySyncForAllWindows = false
+        }
+    }
+
+    static func synchronizeExternalGeometryForAllWindowsNow() {
+        for portal in portalsByWindowId.values {
+            portal.synchronizeAllEntriesFromExternalGeometryChange()
+        }
     }
 
     /// Update visibleInUI/zPriority on an existing portal entry without rebinding.

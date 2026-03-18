@@ -2348,13 +2348,16 @@ final class Workspace: Identifiable, ObservableObject {
         let previousFocusedPanelId = focusedPanelId
         let previousHostedView = focusedTerminalPanel?.hostedView
 
-        guard bonsplitController.openPaperCanvasPaneRight(paneId, withTab: newTab) != nil else {
+        guard let newPaneId = bonsplitController.openPaperCanvasPaneRight(paneId, withTab: newTab) else {
             panels.removeValue(forKey: newPanel.id)
             panelTitles.removeValue(forKey: newPanel.id)
             surfaceIdToPanelId.removeValue(forKey: newTab.id)
             terminalInheritanceFontPointsByPanelId.removeValue(forKey: newPanel.id)
             return nil
         }
+
+        rearmTerminalPortalHostReplacement(inPane: paneId, reason: "workspace.openPaneRight.source")
+        rearmTerminalPortalHostReplacement(inPane: newPaneId, reason: "workspace.openPaneRight.new")
 
         if focus {
             previousHostedView?.suppressReparentFocus()
@@ -3627,6 +3630,36 @@ final class Workspace: Identifiable, ObservableObject {
         return newTerminalSurface(inPane: focusedPaneId, focus: focus)
     }
 
+    private func rearmTerminalPortalHostReplacement(inPane paneId: PaneID, reason: String) {
+        for tab in bonsplitController.tabs(inPane: paneId) {
+            guard let panelId = panelIdFromSurfaceId(tab.id),
+                  let terminalPanel = terminalPanel(for: panelId) else {
+                continue
+            }
+            terminalPanel.preparePortalHostReplacementForNextDistinctClaim(reason: reason)
+        }
+    }
+
+    private func rearmBrowserPortalHostReplacement(inPane paneId: PaneID, reason: String) {
+        for tab in bonsplitController.tabs(inPane: paneId) {
+            guard let panelId = panelIdFromSurfaceId(tab.id),
+                  let browserPanel = browserPanel(for: panelId) else {
+                continue
+            }
+            browserPanel.preparePortalHostReplacementForNextDistinctClaim(
+                inPane: paneId,
+                reason: reason
+            )
+        }
+    }
+
+    private func rearmAllPortalHostReplacements(reason: String) {
+        for paneId in bonsplitController.allPaneIds {
+            rearmTerminalPortalHostReplacement(inPane: paneId, reason: reason)
+            rearmBrowserPortalHostReplacement(inPane: paneId, reason: reason)
+        }
+    }
+
     @discardableResult
     func clearSplitZoom() -> Bool {
         bonsplitController.clearPaneZoom()
@@ -3646,6 +3679,11 @@ final class Workspace: Identifiable, ObservableObject {
             reason: "workspace.toggleSplitZoom"
         )
         scheduleTerminalGeometryReconcile()
+        if let terminalPanel = terminalPanel(for: panelId) {
+            terminalPanel.preparePortalHostReplacementForNextDistinctClaim(
+                reason: "workspace.toggleSplitZoom"
+            )
+        }
         if let browserPanel = browserPanel(for: panelId) {
             browserPanel.preparePortalHostReplacementForNextDistinctClaim(
                 inPane: paneId,
@@ -5078,6 +5116,10 @@ extension Workspace: BonsplitDelegate {
 #endif
         normalizePinnedTabs(in: source)
         normalizePinnedTabs(in: destination)
+        rearmTerminalPortalHostReplacement(inPane: source, reason: "workspace.didMoveTab.source")
+        rearmTerminalPortalHostReplacement(inPane: destination, reason: "workspace.didMoveTab.destination")
+        rearmBrowserPortalHostReplacement(inPane: source, reason: "workspace.didMoveTab.source")
+        rearmBrowserPortalHostReplacement(inPane: destination, reason: "workspace.didMoveTab.destination")
         scheduleTerminalGeometryReconcile()
         if !isDetachingCloseTransaction {
             scheduleFocusReconcile()
@@ -5147,6 +5189,7 @@ extension Workspace: BonsplitDelegate {
             }
         }
 
+        rearmAllPortalHostReplacements(reason: "workspace.didClosePane")
         scheduleTerminalGeometryReconcile()
         if shouldScheduleFocusReconcile {
             scheduleFocusReconcile()
@@ -5202,17 +5245,13 @@ extension Workspace: BonsplitDelegate {
         )
 #endif
         let rearmBrowserPortalHostReplacement: (PaneID, String) -> Void = { paneId, reason in
-            for tab in controller.tabs(inPane: paneId) {
-                guard let panelId = self.panelIdFromSurfaceId(tab.id),
-                      let browserPanel = self.browserPanel(for: panelId) else {
-                    continue
-                }
-                browserPanel.preparePortalHostReplacementForNextDistinctClaim(
-                    inPane: paneId,
-                    reason: reason
-                )
-            }
+            self.rearmBrowserPortalHostReplacement(inPane: paneId, reason: reason)
         }
+        let rearmTerminalPortalHostReplacement: (PaneID, String) -> Void = { paneId, reason in
+            self.rearmTerminalPortalHostReplacement(inPane: paneId, reason: reason)
+        }
+        rearmTerminalPortalHostReplacement(originalPane, "workspace.didSplit.original")
+        rearmTerminalPortalHostReplacement(newPane, "workspace.didSplit.new")
         rearmBrowserPortalHostReplacement(originalPane, "workspace.didSplit.original")
         rearmBrowserPortalHostReplacement(newPane, "workspace.didSplit.new")
 
@@ -5437,6 +5476,8 @@ extension Workspace: BonsplitDelegate {
         CATransaction.flush()
         TerminalWindowPortalRegistry.synchronizeExternalGeometryForAllWindowsNow()
         TerminalWindowPortalRegistry.scheduleExternalGeometrySynchronizeForAllWindows()
+        BrowserWindowPortalRegistry.synchronizeExternalGeometryForAllWindowsNow()
+        BrowserWindowPortalRegistry.scheduleExternalGeometrySynchronizeForAllWindows()
         scheduleTerminalGeometryReconcile()
         if !isDetachingCloseTransaction {
             scheduleFocusReconcile()
