@@ -18,12 +18,28 @@ jobs:
             timeout: 45
             smoke: true
             skip_zig: false
-            compat_test_shard_index: 0
+            compat_test_filters: |
+              -only-testing:cmuxTests/AppDelegateLaunchServicesRegistrationTests
+              -only-testing:cmuxTests/BrowserPaneDropRoutingTests
+              -only-testing:cmuxTests/CJKIMEShortcutBypassTests
+              -only-testing:cmuxTests/NotificationMenuSnapshotBuilderTests
+              -only-testing:cmuxTests/SidebarSelectedWorkspaceColorTests
+              -only-testing:cmuxTests/TerminalDirectoryOpenTargetAvailabilityTests
+              -only-testing:cmuxTests/WorkspaceAutoReorderSettingsTests
+              -only-testing:cmuxTests/WorkspaceTerminalFocusRecoveryTests
           - os: warp-macos-26-arm64-6x
             timeout: 45
             smoke: false
             skip_zig: true  # zig 0.15.2 MachO linker can't resolve libSystem on macOS 26
-            compat_test_shard_index: 1
+            compat_test_filters: |
+              -only-testing:cmuxTests/BrowserPanelAddressBarFocusRequestTests
+              -only-testing:cmuxTests/CmuxCLIPathInstallerTests
+              -only-testing:cmuxTests/GhosttyConfigTests
+              -only-testing:cmuxTests/OmnibarRemoteSuggestionMergeTests
+              -only-testing:cmuxTests/SidebarWidthPolicyTests
+              -only-testing:cmuxTests/TerminalKeyboardCopyModeActionTests
+              -only-testing:cmuxTests/WorkspaceBrowserProfileSelectionTests
+              -only-testing:cmuxTests/ZshShellIntegrationHandoffTests
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
@@ -127,19 +143,18 @@ jobs:
       - name: Run compatibility unit test slice
         env:
           CMUX_SKIP_ZIG_BUILD: ${{ matrix.skip_zig && '1' || '0' }}
-          COMPAT_TEST_SHARD_INDEX: ${{ matrix.compat_test_shard_index }}
-          COMPAT_TEST_SHARD_COUNT: "24"
         run: |
           set -euo pipefail
           SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
           TEST_FILTERS=()
           while IFS= read -r filter; do
+            if [ -z "$filter" ]; then
+              continue
+            fi
             TEST_FILTERS+=("$filter")
-          done < <(
-            python3 scripts/unit_test_shard_args.py \
-              --shard-index "$COMPAT_TEST_SHARD_INDEX" \
-              --shard-count "$COMPAT_TEST_SHARD_COUNT"
-          )
+          done <<'EOF'
+          ${{ matrix.compat_test_filters }}
+          EOF
 
           if [ "${#TEST_FILTERS[@]}" -eq 0 ]; then
             echo "No compatibility test classes selected" >&2
