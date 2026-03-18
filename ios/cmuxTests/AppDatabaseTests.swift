@@ -15,6 +15,23 @@ final class AppDatabaseTests: XCTestCase {
         XCTAssertEqual(row?.isUnread, true)
     }
 
+    func testWorkspaceInboxUnreadCountTracksUnreadSequenceGap() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writeWorkspace(
+            id: "ws_123",
+            title: "orb / cmux",
+            preview: "feature/cache-first",
+            machineID: "machine_123",
+            lastActivityAt: Date(timeIntervalSince1970: 1_710_000_000),
+            latestEventSeq: 9,
+            lastReadEventSeq: 6
+        )
+
+        let row = try XCTUnwrap(db.readWorkspaceInboxRows().first)
+        XCTAssertEqual(row.workspaceID, "ws_123")
+        XCTAssertEqual(row.unreadCount, 3)
+    }
+
     func testImportsLegacyTerminalSnapshot() throws {
         let host = TerminalHost(
             name: "Mac Mini",

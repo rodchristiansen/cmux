@@ -95,4 +95,43 @@ final class UnifiedInboxSyncServiceTests: XCTestCase {
             "conversation_123"
         )
     }
+
+    func testConnectDoesNotDropCachedWorkspaceRowsBeforeFirstLiveSnapshot() throws {
+        let database = try AppDatabase.inMemory()
+        let inboxCache = InboxCacheRepository(database: database)
+        try inboxCache.save([
+            UnifiedInboxItem(
+                kind: .workspace,
+                workspaceID: "workspace_123",
+                machineID: "machine_123",
+                teamID: "team_123",
+                title: "orb / cmux",
+                preview: "cached preview",
+                unreadCount: 2,
+                sortDate: Date(timeIntervalSince1970: 20),
+                accessoryLabel: "Mac Mini",
+                symbolName: "terminal",
+                tmuxSessionName: "cmux-nightly",
+                latestEventSeq: 5,
+                lastReadEventSeq: 3,
+                tailscaleHostname: "cmux-macmini.tail",
+                tailscaleIPs: ["100.64.0.10"]
+            )
+        ])
+
+        let liveRows = CurrentValueSubject<[MobileInboxWorkspaceRow], Never>([])
+        let service = UnifiedInboxSyncService(
+            inboxCacheRepository: inboxCache,
+            publisherFactory: { _ in liveRows.eraseToAnyPublisher() }
+        )
+
+        var emissions: [[UnifiedInboxItem]] = []
+        let cancellable = service.workspaceItemsPublisher.sink { emissions.append($0) }
+
+        service.connect(teamID: "team_123")
+
+        XCTAssertEqual(emissions.first?.first?.workspaceID, "workspace_123")
+        XCTAssertEqual(emissions.last?.first?.workspaceID, "workspace_123")
+        cancellable.cancel()
+    }
 }
