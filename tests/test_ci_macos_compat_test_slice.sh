@@ -3,17 +3,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKFLOW_FILE="$ROOT_DIR/.github/workflows/ci-macos-compat.yml"
+ACTION_FILE="$ROOT_DIR/.github/actions/run-macos-compat-check/action.yml"
 STEP_BLOCK="$(
-  sed -n '/^      - name: Run compatibility unit test slice$/,/^      - name:/p' "$WORKFLOW_FILE" | sed '$d'
+  sed -n '/^    - name: Run compatibility unit test slice$/,/^    - name:/p' "$ACTION_FILE" | sed '$d'
 )"
 
-extract_matrix_entry() {
-  local os="$1"
+extract_job_block() {
+  local job_name="$1"
 
-  awk -v os_line="          - os: ${os}" '
-    $0 == os_line { in_entry=1; print; next }
-    in_entry && /^          - os:/ { exit }
-    in_entry { print }
+  awk -v job_header="  ${job_name}:" '
+    $0 == job_header { in_job=1; print; next }
+    in_job && /^  [^[:space:]]/ { exit }
+    in_job { print }
   ' "$WORKFLOW_FILE"
 }
 
@@ -27,26 +28,28 @@ require_in_block() {
   fi
 }
 
-MACOS_15_BLOCK="$(extract_matrix_entry "warp-macos-15-arm64-6x")"
-MACOS_26_BLOCK="$(extract_matrix_entry "warp-macos-26-arm64-6x")"
+MACOS_15_BLOCK="$(extract_job_block "compat-tests-macos-15-attempt-1")"
+MACOS_26_BLOCK="$(extract_job_block "compat-tests-macos-26-attempt-1")"
 
 if [ -z "$MACOS_15_BLOCK" ]; then
-  echo "FAIL: compat workflow is missing the macOS 15 matrix entry"
+  echo "FAIL: compat workflow is missing the macOS 15 retry lane"
   exit 1
 fi
 
 if [ -z "$MACOS_26_BLOCK" ]; then
-  echo "FAIL: compat workflow is missing the macOS 26 matrix entry"
+  echo "FAIL: compat workflow is missing the macOS 26 retry lane"
   exit 1
 fi
 
-require_in_block "$MACOS_15_BLOCK" "compat_test_filters:" "macOS 15 matrix entry must define explicit compatibility test filters"
+require_in_block "$MACOS_15_BLOCK" "uses: ./.github/actions/run-macos-compat-check" "macOS 15 compat lane must use the shared compat action"
+require_in_block "$MACOS_15_BLOCK" "compat_test_filters: |" "macOS 15 compat lane must define explicit compatibility test filters"
 require_in_block "$MACOS_15_BLOCK" "cmuxTests/AppDelegateLaunchServicesRegistrationTests" "macOS 15 compat filters are missing"
-require_in_block "$MACOS_26_BLOCK" "compat_test_filters:" "macOS 26 matrix entry must define explicit compatibility test filters"
+require_in_block "$MACOS_26_BLOCK" "uses: ./.github/actions/run-macos-compat-check" "macOS 26 compat lane must use the shared compat action"
+require_in_block "$MACOS_26_BLOCK" "compat_test_filters: |" "macOS 26 compat lane must define explicit compatibility test filters"
 require_in_block "$MACOS_26_BLOCK" "cmuxTests/ZshShellIntegrationHandoffTests" "macOS 26 compat filters are missing"
 
 if [ -z "$STEP_BLOCK" ]; then
-  echo "FAIL: compat workflow is missing the compatibility test-slice step"
+  echo "FAIL: compat action is missing the compatibility test-slice step"
   exit 1
 fi
 
