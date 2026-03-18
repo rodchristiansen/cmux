@@ -388,7 +388,7 @@ jobs:
 
   ui-display-resolution-regression:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: macos-15
+    runs-on: warp-macos-15-arm64-6x
     timeout-minutes: 25
     steps:
       - name: Checkout
