@@ -4151,9 +4151,25 @@ class TabManager: ObservableObject {
                 fail("Failed to create right pane for focus reveal")
                 return
             }
-            // Under CI the newly created right pane can remain offscreen until the reveal action.
-            // Prime terminal output now, then require non-blank content during the captured reveal.
+            // Pre-render the right pane before capture starts so this scenario measures reveal
+            // motion, not first-paint latency on a newly created terminal under CI.
             primeTerminalContent(rightPanel.id, label: "RIGHT")
+            tab.moveFocus(direction: .right)
+            guard await waitForTerminalPanelPainted(rightPanel.id) else {
+                fail(
+                    "Right pane did not paint visible content before focus-reveal capture",
+                    extra: terminalVisibilityDebugInfo(for: rightPanel.id)
+                )
+                return
+            }
+            tab.moveFocus(direction: .left)
+            guard await waitForTerminalPanelPainted(sourcePanelId) else {
+                fail(
+                    "Left pane did not repaint visible content after focus reset",
+                    extra: terminalVisibilityDebugInfo(for: sourcePanelId)
+                )
+                return
+            }
 
             result = await capturePaneStripMotionTimeline(
                 frameCount: frameCount,
