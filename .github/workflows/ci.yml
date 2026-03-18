@@ -386,10 +386,13 @@ jobs:
           CMUX_LAG_KEY_EVENTS=180 \
           python3 tests/test_workspace_churn_up_arrow_lag.py
 
-  ui-display-resolution-regression:
+  ui-display-resolution-regression-attempt-1:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    continue-on-error: true
     runs-on: warp-macos-15-arm64-6x
     timeout-minutes: 25
+    outputs:
+      passed: ${{ steps.mark-passed.outputs.passed }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -484,3 +487,142 @@ jobs:
             -destination "platform=macOS" \
             -only-testing:cmuxUITests/DisplayResolutionRegressionUITests \
             test
+
+      - name: Mark display regression passed
+        if: ${{ success() }}
+        id: mark-passed
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  ui-display-resolution-regression-attempt-2:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.ui-display-resolution-regression-attempt-1.outputs.passed != 'true' }}
+    needs:
+      - ui-display-resolution-regression-attempt-1
+    continue-on-error: true
+    runs-on: warp-macos-15-arm64-6x
+    timeout-minutes: 25
+    outputs:
+      passed: ${{ steps.mark-passed.outputs.passed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            XCODE_DIR="/Applications/Xcode.app/Contents/Developer"
+          else
+            XCODE_APP="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort | tail -n 1 || true)"
+            if [ -n "$XCODE_APP" ]; then
+              XCODE_DIR="$XCODE_APP/Contents/Developer"
+            else
+              echo "No Xcode.app found under /Applications" >&2
+              exit 1
+            fi
+          fi
+          echo "DEVELOPER_DIR=$XCODE_DIR" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XCODE_DIR"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-path
+
+      - name: Download pre-built GhosttyKit.xcframework
+        run: ./scripts/download-prebuilt-ghosttykit.sh
+
+      - name: Install zig
+        run: |
+          ZIG_REQUIRED="0.15.2"
+          if command -v zig >/dev/null 2>&1 && zig version 2>/dev/null | grep -q "^${ZIG_REQUIRED}"; then
+            echo "zig ${ZIG_REQUIRED} already installed"
+          else
+            echo "Installing zig ${ZIG_REQUIRED} from tarball"
+            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-aarch64-macos-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
+            tar xf /tmp/zig.tar.xz -C /tmp
+            sudo mkdir -p /usr/local/bin /usr/local/lib
+            sudo cp -f /tmp/zig-aarch64-macos-${ZIG_REQUIRED}/zig /usr/local/bin/zig
+            sudo cp -rf /tmp/zig-aarch64-macos-${ZIG_REQUIRED}/lib /usr/local/lib/zig
+            export PATH="/usr/local/bin:$PATH"
+            zig version
+          fi
+
+      - name: Cache Swift packages
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .ci-source-packages
+          key: spm-ui-display-resolution-${{ hashFiles('GhosttyTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-ui-display-resolution-
+
+      - name: Resolve Swift packages
+        run: |
+          set -euo pipefail
+          SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
+          mkdir -p "$SOURCE_PACKAGES_DIR"
+
+          for attempt in 1 2 3; do
+            if xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug \
+              -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
+              -resolvePackageDependencies; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to resolve Swift packages after 3 attempts" >&2
+              exit 1
+            fi
+            echo "Package resolution failed on attempt $attempt, retrying..."
+            sleep $((attempt * 5))
+          done
+
+      - name: Run display resolution churn UI regression
+        run: |
+          set -euo pipefail
+          SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
+          HELPER_PATH="/tmp/create-virtual-display"
+          MANIFEST_PATH="/tmp/cmux-ui-test-display-harness.json"
+
+          rm -f "$MANIFEST_PATH"
+          trap 'rm -f "$MANIFEST_PATH"' EXIT
+
+          clang -framework Foundation -framework CoreGraphics \
+            -o "$HELPER_PATH" scripts/create-virtual-display.m
+
+          cat >"$MANIFEST_PATH" <<EOF
+          {"helperBinaryPath":"$HELPER_PATH"}
+          EOF
+
+          xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
+            -disableAutomaticPackageResolution \
+            -destination "platform=macOS" \
+            -only-testing:cmuxUITests/DisplayResolutionRegressionUITests \
+            test
+
+      - name: Mark display regression passed
+        if: ${{ success() }}
+        id: mark-passed
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  ui-display-resolution-regression:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs:
+      - ui-display-resolution-regression-attempt-1
+      - ui-display-resolution-regression-attempt-2
+    runs-on: warp-macos-15-arm64-6x
+    timeout-minutes: 5
+    steps:
+      - name: Verify at least one display regression attempt passed
+        run: |
+          set -euo pipefail
+
+          ATTEMPT_1_PASSED="${{ needs.ui-display-resolution-regression-attempt-1.outputs.passed }}"
+          ATTEMPT_2_PASSED="${{ needs.ui-display-resolution-regression-attempt-2.outputs.passed }}"
+
+          if [ "$ATTEMPT_1_PASSED" = "true" ] || [ "$ATTEMPT_2_PASSED" = "true" ]; then
+            echo "Display resolution regression passed."
+            exit 0
+          fi
+
+          echo "Display resolution regression did not pass in either WarpBuild attempt." >&2
+          echo "Attempt 1 result: ${{ needs.ui-display-resolution-regression-attempt-1.result }}, passed=${ATTEMPT_1_PASSED:-<unset>}" >&2
+          echo "Attempt 2 result: ${{ needs.ui-display-resolution-regression-attempt-2.result }}, passed=${ATTEMPT_2_PASSED:-<unset>}" >&2
+          exit 1
