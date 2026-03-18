@@ -1738,8 +1738,14 @@ func startOrFocusTerminalSearch(
         return true
     }
 
+    terminalSurface.requestGhosttySearchActivation(.startSearch)
     if terminalSurface.performBindingAction("start_search") {
-        terminalSurface.requestGhosttySearchActivation(.startSearch)
+        DispatchQueue.main.async {
+            cmuxApplyPendingGhosttyStartSearchFallbackIfNeeded(
+                terminalSurface,
+                searchFocusNotifier: searchFocusNotifier
+            )
+        }
         return true
     }
 

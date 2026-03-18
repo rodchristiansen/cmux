@@ -73,11 +73,21 @@ func cmuxResolveGhosttyStartSearch(
         }
         return .ignore
     case nil:
-        if let needle, !needle.isEmpty {
-            return .createWithNeedle(needle)
-        }
         return .ignore
     }
+}
+
+func cmuxApplyPendingGhosttyStartSearchFallbackIfNeeded(
+    _ terminalSurface: TerminalSurface,
+    searchFocusNotifier: @escaping (TerminalSurface) -> Void = {
+        NotificationCenter.default.post(name: .ghosttySearchFocus, object: $0)
+    }
+) {
+    guard terminalSurface.pendingGhosttySearchActivationRequest == .startSearch else { return }
+    terminalSurface.clearGhosttySearchActivationRequest()
+    guard terminalSurface.searchState == nil else { return }
+    terminalSurface.searchState = TerminalSurface.SearchState()
+    searchFocusNotifier(terminalSurface)
 }
 #endif
 
@@ -3668,6 +3678,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
         pendingGhosttySearchRequest = request
     }
 
+    var pendingGhosttySearchActivationRequest: CmuxPendingGhosttySearchRequest? {
+        pendingGhosttySearchRequest
+    }
+
     func consumeGhosttySearchActivationRequest() -> CmuxPendingGhosttySearchRequest? {
         let request = pendingGhosttySearchRequest
         pendingGhosttySearchRequest = nil
@@ -4590,7 +4604,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                 break
             }
             terminalSurface?.requestGhosttySearchActivation(.startSearch)
-            if !performBindingAction("start_search") {
+            if performBindingAction("start_search") {
+                if let terminalSurface {
+                    DispatchQueue.main.async {
+                        cmuxApplyPendingGhosttyStartSearchFallbackIfNeeded(terminalSurface)
+                    }
+                }
+            } else {
                 terminalSurface?.clearGhosttySearchActivationRequest()
             }
         case .searchNext:

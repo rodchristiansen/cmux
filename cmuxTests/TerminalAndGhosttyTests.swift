@@ -1440,6 +1440,29 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         )
     }
 
+    func testPendingGhosttyStartSearchFallbackCreatesSearchStateWhenCallbackDoesNotArrive() {
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        surface.requestGhosttySearchActivation(.startSearch)
+
+        var focusNotificationCount = 0
+        cmuxApplyPendingGhosttyStartSearchFallbackIfNeeded(surface) { _ in
+            focusNotificationCount += 1
+        }
+
+        XCTAssertNotNil(surface.searchState)
+        XCTAssertNil(surface.consumeGhosttySearchActivationRequest())
+        XCTAssertEqual(
+            focusNotificationCount,
+            1,
+            "Explicit Find requests should still open a search state if Ghostty never calls back"
+        )
+    }
+
     func testGhosttyStartSearchIgnoresEmptyUnsolicitedRequests() {
         XCTAssertEqual(
             cmuxResolveGhosttyStartSearch(
@@ -1454,6 +1477,14 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
                 existingSearchState: false,
                 pendingRequest: nil,
                 needle: ""
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            cmuxResolveGhosttyStartSearch(
+                existingSearchState: false,
+                pendingRequest: nil,
+                needle: "needle"
             ),
             .ignore
         )
