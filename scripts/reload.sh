@@ -30,6 +30,13 @@ load_public_auth_env() {
     CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY="${NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY:-$CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY}"
   fi
 
+  if [[ -z "${CMUX_PUBLIC_AUTH_WWW_ORIGIN:-}" ]]; then
+    local local_auth_port="${CMUX_PORT:-${PORT:-}}"
+    if [[ -n "${local_auth_port:-}" ]]; then
+      CMUX_PUBLIC_AUTH_WWW_ORIGIN="http://127.0.0.1:${local_auth_port}"
+    fi
+  fi
+
   if [[ -f "$HOME/.secrets/cmux.prod.env" ]]; then
     # shellcheck disable=SC1090
     source "$HOME/.secrets/cmux.prod.env"
