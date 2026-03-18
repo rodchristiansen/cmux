@@ -14,6 +14,7 @@ CLI_PATH=""
 LAST_SOCKET_PATH_DIR="$HOME/Library/Application Support/cmux"
 LAST_SOCKET_PATH_FILE="${LAST_SOCKET_PATH_DIR}/last-socket-path"
 CMUX_PUBLIC_WWW_ORIGIN=""
+CMUX_PUBLIC_AUTH_WWW_ORIGIN=""
 CMUX_PUBLIC_API_BASE_URL=""
 CMUX_PUBLIC_STACK_PROJECT_ID=""
 CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY=""
@@ -23,6 +24,7 @@ load_public_auth_env() {
     # shellcheck disable=SC1090
     source "$HOME/.secrets/cmux.env"
     CMUX_PUBLIC_WWW_ORIGIN="${NEXT_PUBLIC_WWW_ORIGIN:-$CMUX_PUBLIC_WWW_ORIGIN}"
+    CMUX_PUBLIC_AUTH_WWW_ORIGIN="${CMUX_AUTH_WWW_ORIGIN:-$CMUX_PUBLIC_AUTH_WWW_ORIGIN}"
     CMUX_PUBLIC_API_BASE_URL="${API_BASE_URL_DEV:-${NEXT_PUBLIC_WWW_ORIGIN:-$CMUX_PUBLIC_API_BASE_URL}}"
     CMUX_PUBLIC_STACK_PROJECT_ID="${NEXT_PUBLIC_STACK_PROJECT_ID:-$CMUX_PUBLIC_STACK_PROJECT_ID}"
     CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY="${NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY:-$CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY}"
@@ -32,6 +34,7 @@ load_public_auth_env() {
     # shellcheck disable=SC1090
     source "$HOME/.secrets/cmux.prod.env"
     CMUX_PUBLIC_WWW_ORIGIN="${CMUX_PUBLIC_WWW_ORIGIN:-https://cmux.dev}"
+    CMUX_PUBLIC_AUTH_WWW_ORIGIN="${CMUX_PUBLIC_AUTH_WWW_ORIGIN:-https://cmux.dev}"
     CMUX_PUBLIC_API_BASE_URL="${CMUX_PUBLIC_API_BASE_URL:-${API_BASE_URL_PROD:-https://api.cmux.sh}}"
     CMUX_PUBLIC_STACK_PROJECT_ID="${CMUX_PUBLIC_STACK_PROJECT_ID:-${STACK_PROJECT_ID_PROD:-}}"
     CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY="${CMUX_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY:-${STACK_PUBLISHABLE_CLIENT_KEY_PROD:-}}"
@@ -408,6 +411,10 @@ if [[ -n "$TAG" && "$APP_NAME" != "$SEARCH_APP_NAME" ]]; then
       if [[ -n "${CMUX_PUBLIC_WWW_ORIGIN:-}" ]]; then
         /usr/libexec/PlistBuddy -c "Set :LSEnvironment:CMUX_WWW_ORIGIN \"${CMUX_PUBLIC_WWW_ORIGIN}\"" "$INFO_PLIST" 2>/dev/null \
           || /usr/libexec/PlistBuddy -c "Add :LSEnvironment:CMUX_WWW_ORIGIN string \"${CMUX_PUBLIC_WWW_ORIGIN}\"" "$INFO_PLIST"
+      fi
+      if [[ -n "${CMUX_PUBLIC_AUTH_WWW_ORIGIN:-}" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :LSEnvironment:CMUX_AUTH_WWW_ORIGIN \"${CMUX_PUBLIC_AUTH_WWW_ORIGIN}\"" "$INFO_PLIST" 2>/dev/null \
+          || /usr/libexec/PlistBuddy -c "Add :LSEnvironment:CMUX_AUTH_WWW_ORIGIN string \"${CMUX_PUBLIC_AUTH_WWW_ORIGIN}\"" "$INFO_PLIST"
       fi
       if [[ -n "${CMUX_PUBLIC_API_BASE_URL:-}" ]]; then
         /usr/libexec/PlistBuddy -c "Set :LSEnvironment:CMUX_API_BASE_URL \"${CMUX_PUBLIC_API_BASE_URL}\"" "$INFO_PLIST" 2>/dev/null \

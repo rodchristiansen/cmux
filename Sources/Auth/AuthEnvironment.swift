@@ -29,6 +29,13 @@ enum AuthEnvironment {
         )
     }
 
+    static var signInWebsiteOrigin: URL {
+        resolvedURL(
+            environmentKey: "CMUX_AUTH_WWW_ORIGIN",
+            fallback: "https://cmux.dev"
+        )
+    }
+
     static var apiBaseURL: URL {
         resolvedURL(
             environmentKey: "CMUX_API_BASE_URL",
@@ -65,7 +72,7 @@ enum AuthEnvironment {
 
     static func signInURL() -> URL {
         var components = URLComponents(
-            url: websiteOrigin.appendingPathComponent("handler/sign-in", isDirectory: false),
+            url: signInWebsiteOrigin.appendingPathComponent("handler/sign-in", isDirectory: false),
             resolvingAgainstBaseURL: false
         )!
         components.queryItems = [

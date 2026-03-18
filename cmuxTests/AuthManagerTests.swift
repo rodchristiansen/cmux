@@ -8,6 +8,12 @@ import XCTest
 
 @MainActor
 final class AuthManagerTests: XCTestCase {
+    override func tearDown() {
+        unsetenv("CMUX_WWW_ORIGIN")
+        unsetenv("CMUX_AUTH_WWW_ORIGIN")
+        super.tearDown()
+    }
+
     func testSignedOutStateDoesNotGateLocalApp() {
         let manager = AuthManager(
             client: StubAuthClient(user: nil, teams: []),
@@ -47,6 +53,29 @@ final class AuthManagerTests: XCTestCase {
         XCTAssertEqual(refreshToken, "refresh-123")
         XCTAssertEqual(accessToken, "access-456")
         XCTAssertEqual(manager.selectedTeamID, "team_alpha")
+    }
+
+    func testSignInURLDefaultsToCmuxDotDevEvenWhenGeneralWebsiteOriginIsLocalhost() {
+        setenv("CMUX_WWW_ORIGIN", "http://localhost:9779", 1)
+        unsetenv("CMUX_AUTH_WWW_ORIGIN")
+
+        let signInURL = AuthEnvironment.signInURL()
+
+        XCTAssertEqual(signInURL.scheme, "https")
+        XCTAssertEqual(signInURL.host, "cmux.dev")
+        XCTAssertEqual(signInURL.path, "/handler/sign-in")
+    }
+
+    func testSignInURLHonorsDedicatedAuthOriginOverride() {
+        setenv("CMUX_WWW_ORIGIN", "http://localhost:9779", 1)
+        setenv("CMUX_AUTH_WWW_ORIGIN", "http://127.0.0.1:4010", 1)
+
+        let signInURL = AuthEnvironment.signInURL()
+
+        XCTAssertEqual(signInURL.scheme, "http")
+        XCTAssertEqual(signInURL.host, "127.0.0.1")
+        XCTAssertEqual(signInURL.port, 4010)
+        XCTAssertEqual(signInURL.path, "/handler/sign-in")
     }
 }
 
