@@ -4299,10 +4299,21 @@ class TabManager: ObservableObject {
             )
         }
 
+        func terminalWindowCaptureSample(for panelId: UUID) -> GhosttySurfaceScrollView.DebugFrameSample? {
+            guard let sample = motionSample(for: panelId) else { return nil }
+            guard let captureWindow = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first else {
+                return nil
+            }
+            return paneStripWindowCaptureSample(
+                window: captureWindow,
+                frameInWindow: sample.hostedFrameInWindow
+            )
+        }
+
         func waitForTerminalPanelPainted(_ panelId: UUID, timeoutSeconds: TimeInterval = 4.0) async -> Bool {
             let deadline = Date().addingTimeInterval(timeoutSeconds)
             while Date() < deadline {
-                if let sample = motionSample(for: panelId)?.surfaceSample,
+                if let sample = terminalWindowCaptureSample(for: panelId),
                    sample.sampleCount > 0,
                    !sample.isProbablyBlank {
                     return true
@@ -4357,6 +4368,23 @@ class TabManager: ObservableObject {
                         "anchorHidden": sample.anchorHidden,
                         "hostedHidden": sample.hostedHidden,
                         "hasSurfaceSample": sample.surfaceSample != nil,
+                    ])
+                } ?? "",
+                "windowCaptureSample": terminalWindowCaptureSample(for: panelId).map { sample in
+                    debugJSONString([
+                        "sampleCount": sample.sampleCount,
+                        "uniqueQuantized": sample.uniqueQuantized,
+                        "lumaStdDev": sample.lumaStdDev,
+                        "modeFraction": sample.modeFraction,
+                        "fingerprint": String(sample.fingerprint),
+                        "iosurfaceWidthPx": sample.iosurfaceWidthPx,
+                        "iosurfaceHeightPx": sample.iosurfaceHeightPx,
+                        "expectedWidthPx": sample.expectedWidthPx,
+                        "expectedHeightPx": sample.expectedHeightPx,
+                        "layerClass": sample.layerClass,
+                        "layerContentsGravity": sample.layerContentsGravity,
+                        "layerContentsKey": sample.layerContentsKey,
+                        "isProbablyBlank": sample.isProbablyBlank,
                     ])
                 } ?? "",
             ]
@@ -4431,7 +4459,12 @@ class TabManager: ObservableObject {
                 frameCount: frameCount,
                 actionFrame: actionFrame,
                 targets: [
-                    .init(label: "T", sample: { @MainActor in motionSample(for: sourcePanelId) }, expectedPanelId: { sourcePanelId }),
+                    .init(
+                        label: "T",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
                 ],
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint
             )
@@ -4485,14 +4518,20 @@ class TabManager: ObservableObject {
                 frameCount: frameCount,
                 actionFrame: actionFrame,
                 targets: [
-                    .init(label: "L", sample: { @MainActor in motionSample(for: sourcePanelId) }, expectedPanelId: { sourcePanelId }),
+                    .init(
+                        label: "L",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
                     .init(
                         label: "R",
                         sample: { @MainActor in motionSample(for: rightPanel.id) },
                         expectedPanelId: { rightPanel.id },
                         bootstrapGraceFrames: newlyVisiblePaneBootstrapGraceFrames,
                         minimumEvaluationFrame: actionFrame,
-                        referenceMode: .firstMeasuredSample
+                        referenceMode: .firstMeasuredSample,
+                        renderSurfaceFromWindowCapture: true
                     ),
                 ],
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
@@ -4525,14 +4564,20 @@ class TabManager: ObservableObject {
                 frameCount: frameCount,
                 actionFrame: actionFrame,
                 targets: [
-                    .init(label: "L", sample: { @MainActor in motionSample(for: sourcePanelId) }, expectedPanelId: { sourcePanelId }),
+                    .init(
+                        label: "L",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
                     .init(
                         label: "R",
                         sample: { @MainActor in motionSample(for: rightPanel.id) },
                         expectedPanelId: { rightPanel.id },
                         bootstrapGraceFrames: newlyVisiblePaneBootstrapGraceFrames,
                         minimumEvaluationFrame: actionFrame,
-                        referenceMode: .firstMeasuredSample
+                        referenceMode: .firstMeasuredSample,
+                        renderSurfaceFromWindowCapture: true
                     ),
                 ],
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
@@ -4559,7 +4604,12 @@ class TabManager: ObservableObject {
                 frameCount: frameCount,
                 actionFrame: actionFrame,
                 targets: [
-                    .init(label: "L", sample: { @MainActor in motionSample(for: sourcePanelId) }, expectedPanelId: { sourcePanelId }),
+                    .init(
+                        label: "L",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
                     .init(
                         label: "R",
                         sample: { @MainActor in
@@ -4572,7 +4622,8 @@ class TabManager: ObservableObject {
                         expectedPanelId: { createdPanelId },
                         bootstrapGraceFrames: newlyVisiblePaneBootstrapGraceFrames,
                         minimumEvaluationFrame: actionFrame,
-                        referenceMode: .firstMeasuredSample
+                        referenceMode: .firstMeasuredSample,
+                        renderSurfaceFromWindowCapture: true
                     ),
                 ],
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
@@ -4647,7 +4698,12 @@ class TabManager: ObservableObject {
                 frameCount: frameCount,
                 actionFrame: actionFrame,
                 targets: [
-                    .init(label: "L", sample: { @MainActor in motionSample(for: sourcePanelId) }, expectedPanelId: { sourcePanelId }),
+                    .init(
+                        label: "L",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
                     .init(
                         label: "B",
                         sample: { @MainActor in browserMotionSample(for: rightPanel.id) },
