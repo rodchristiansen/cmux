@@ -10442,6 +10442,10 @@ private struct TabItemView: View, Equatable {
         draggedTabId == tab.id
     }
 
+    private var hasVisibleIcon: Bool {
+        tab.customIconPath != nil || (sidebarAutoDetectFavicon && tab.detectedFaviconPath != nil)
+    }
+
     private var activeTabIndicatorStyle: SidebarActiveTabIndicatorStyle {
         SidebarActiveTabIndicatorSettings.resolvedStyle(rawValue: activeTabIndicatorStyleRaw)
     }
@@ -10899,7 +10903,8 @@ private struct TabItemView: View, Equatable {
         .animation(.easeInOut(duration: 0.2), value: tab.logEntries.count)
         .animation(.easeInOut(duration: 0.2), value: tab.progress != nil)
         .animation(.easeInOut(duration: 0.2), value: tab.metadataBlocks.count)
-        .padding(.horizontal, 10)
+        .padding(.leading, hasVisibleIcon ? 6 : 10)
+        .padding(.trailing, 10)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
