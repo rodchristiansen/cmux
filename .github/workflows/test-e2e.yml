@@ -188,7 +188,9 @@ jobs:
           SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
           ONLY_TESTING="-only-testing:cmuxUITests/$TEST_FILTER"
           OUTPUT_FILE="$(mktemp -t cmux-e2e-output.XXXXXX)"
+          RESULT_BUNDLE="/tmp/cmux-ui-tests.xcresult"
           trap 'rm -f "$OUTPUT_FILE"' EXIT
+          rm -rf "$RESULT_BUNDLE"
 
           # Start recording right before the test (after build/resolve)
           if [ "$RECORD_VIDEO" = "true" ]; then
@@ -223,6 +225,7 @@ jobs:
             -disableAutomaticPackageResolution \
             -destination "platform=macOS" \
             -maximum-test-execution-time-allowance "$TEST_TIMEOUT" \
+            -resultBundlePath "$RESULT_BUNDLE" \
             $ONLY_TESTING test >"$OUTPUT_FILE" 2>&1
           EXIT_CODE=$?
           set -e
@@ -297,6 +300,14 @@ jobs:
         with:
           name: test-recording
           path: /tmp/test-recording.mp4
+          if-no-files-found: warn
+
+      - name: Upload xcresult artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-test-xcresult
+          path: /tmp/cmux-ui-tests.xcresult
           if-no-files-found: warn
 
       - name: Post results to cmux-dev-artifacts
