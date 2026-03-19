@@ -897,6 +897,120 @@ fileprivate func paneStripWindowCaptureSample(
 }
 
 @MainActor
+fileprivate func paneStripShortcutKeyCode(for key: String) -> UInt16? {
+    switch key {
+    case "a": return 0
+    case "s": return 1
+    case "d": return 2
+    case "f": return 3
+    case "h": return 4
+    case "g": return 5
+    case "z": return 6
+    case "x": return 7
+    case "c": return 8
+    case "v": return 9
+    case "b": return 11
+    case "q": return 12
+    case "w": return 13
+    case "e": return 14
+    case "r": return 15
+    case "y": return 16
+    case "t": return 17
+    case "1": return 18
+    case "2": return 19
+    case "3": return 20
+    case "4": return 21
+    case "6": return 22
+    case "5": return 23
+    case "=": return 24
+    case "9": return 25
+    case "7": return 26
+    case "-": return 27
+    case "8": return 28
+    case "0": return 29
+    case "]": return 30
+    case "o": return 31
+    case "u": return 32
+    case "[": return 33
+    case "i": return 34
+    case "p": return 35
+    case "\r": return 36
+    case "l": return 37
+    case "j": return 38
+    case "'": return 39
+    case "k": return 40
+    case ";": return 41
+    case "\\": return 42
+    case ",": return 43
+    case "/": return 44
+    case "n": return 45
+    case "m": return 46
+    case ".": return 47
+    case "`": return 50
+    case "←": return 123
+    case "→": return 124
+    case "↓": return 125
+    case "↑": return 126
+    default:
+        return nil
+    }
+}
+
+@MainActor
+fileprivate func paneStripShortcutCharactersIgnoringModifiers(for shortcut: StoredShortcut) -> String {
+    switch shortcut.key {
+    case "←", "→", "↓", "↑", "\r":
+        return shortcut.key
+    default:
+        let storedKey = shortcut.key.lowercased()
+        if shortcut.control,
+           storedKey.count == 1,
+           let scalar = storedKey.unicodeScalars.first,
+           scalar.isASCII,
+           scalar.value >= 97,
+           scalar.value <= 122 {
+            let upper = scalar.value - 32
+            let controlValue = upper - 64
+            return String(UnicodeScalar(controlValue)!)
+        }
+        return storedKey
+    }
+}
+
+@MainActor
+fileprivate func paneStripDispatchShortcut(
+    _ shortcut: StoredShortcut,
+    window: NSWindow?
+) -> Bool {
+    guard let keyCode = paneStripShortcutKeyCode(for: shortcut.key) else { return false }
+    guard let targetWindow = window ?? NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first else {
+        return false
+    }
+
+    NSRunningApplication.current.activate(options: [.activateAllWindows])
+    NSApp.activate(ignoringOtherApps: true)
+    targetWindow.makeKeyAndOrderFront(nil)
+
+    let charactersIgnoringModifiers = paneStripShortcutCharactersIgnoringModifiers(for: shortcut)
+    guard let event = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: shortcut.modifierFlags,
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: targetWindow.windowNumber,
+        context: nil,
+        characters: charactersIgnoringModifiers,
+        charactersIgnoringModifiers: charactersIgnoringModifiers,
+        isARepeat: false,
+        keyCode: keyCode
+    ) else {
+        return false
+    }
+
+    return AppDelegate.shared?.debugHandleCustomShortcut(event: event) ?? false
+}
+
+@MainActor
 fileprivate func capturePaneStripMotionFrame(_ st: PaneStripMotionTimelineState) {
     guard st.framesWritten < st.frameCount else { return }
 
@@ -4244,7 +4358,14 @@ class TabManager: ObservableObject {
             reassertPaneStripMotionTestWindow()
         }
 
-        let tab = addWorkspace(select: true, eagerLoadTerminal: true, autoWelcomeIfNeeded: false)
+        let tab: Workspace = {
+            if let existing = selectedWorkspace,
+               existing.panels.count == 1,
+               existing.panels.values.allSatisfy({ $0 is TerminalPanel }) {
+                return existing
+            }
+            return addWorkspace(select: true, eagerLoadTerminal: true, autoWelcomeIfNeeded: false)
+        }()
         reassertPaneStripMotionTestWindow()
 
         guard let sourcePanelId = tab.focusedPanelId else {
@@ -4273,6 +4394,46 @@ class TabManager: ObservableObject {
         func waitUntilTerminalReady(_ panelId: UUID) async -> Bool {
             let readiness = await waitForTerminalPanelReadyForUITest(tab: tab, panelId: panelId)
             return readiness.attached && readiness.hasSurface
+        }
+
+        func dispatchShortcut(_ action: KeyboardShortcutSettings.Action) -> Bool {
+            paneStripDispatchShortcut(KeyboardShortcutSettings.shortcut(for: action), window: window)
+        }
+
+        func waitForNewTerminalPanel(
+            after existingPanelIds: Set<UUID>,
+            timeoutSeconds: TimeInterval = 4.0
+        ) async -> UUID? {
+            let deadline = Date().addingTimeInterval(timeoutSeconds)
+            while Date() < deadline {
+                let created = Set(tab.panels.keys).subtracting(existingPanelIds)
+                if let panelId = created.first(where: { tab.terminalPanel(for: $0) != nil }) {
+                    return panelId
+                }
+                reassertPaneStripMotionTestWindow()
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            return Set(tab.panels.keys)
+                .subtracting(existingPanelIds)
+                .first(where: { tab.terminalPanel(for: $0) != nil })
+        }
+
+        func waitForNewBrowserPanel(
+            after existingPanelIds: Set<UUID>,
+            timeoutSeconds: TimeInterval = 4.0
+        ) async -> UUID? {
+            let deadline = Date().addingTimeInterval(timeoutSeconds)
+            while Date() < deadline {
+                let created = Set(tab.panels.keys).subtracting(existingPanelIds)
+                if let panelId = created.first(where: { tab.browserPanel(for: $0) != nil }) {
+                    return panelId
+                }
+                reassertPaneStripMotionTestWindow()
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            return Set(tab.panels.keys)
+                .subtracting(existingPanelIds)
+                .first(where: { tab.browserPanel(for: $0) != nil })
         }
 
         let browserDataURL = URL(
@@ -4519,25 +4680,33 @@ class TabManager: ObservableObject {
             }
 
         case "focus_reveal_right":
-            guard let rightPanel = tab.openTerminalPaneRight(from: sourcePanelId, focus: false),
-                  await waitUntilTerminalReady(rightPanel.id) else {
+            let existingPanelIds = Set(tab.panels.keys)
+            guard dispatchShortcut(.openPaneRight),
+                  let rightPanelId = await waitForNewTerminalPanel(after: existingPanelIds),
+                  await waitUntilTerminalReady(rightPanelId) else {
                 fail("Failed to create right pane for focus reveal")
                 return
             }
             // Pre-render the right pane before capture starts so this scenario measures reveal
             // motion, not first-paint latency on a newly created terminal under CI.
-            primeTerminalContent(rightPanel.id, label: "RIGHT")
+            primeTerminalContent(rightPanelId, label: "RIGHT")
             reassertPaneStripMotionTestWindow()
-            tab.moveFocus(direction: .right)
+            guard dispatchShortcut(.focusRight) else {
+                fail("Failed to focus right pane before focus-reveal capture")
+                return
+            }
             reassertPaneStripMotionTestWindow()
-            guard await waitForTerminalPanelPainted(rightPanel.id) else {
+            guard await waitForTerminalPanelPainted(rightPanelId) else {
                 fail(
                     "Right pane did not paint visible content before focus-reveal capture",
-                    extra: terminalVisibilityDebugInfo(for: rightPanel.id)
+                    extra: terminalVisibilityDebugInfo(for: rightPanelId)
                 )
                 return
             }
-            tab.moveFocus(direction: .left)
+            guard dispatchShortcut(.focusLeft) else {
+                fail("Failed to focus left pane before focus-reveal capture")
+                return
+            }
             reassertPaneStripMotionTestWindow()
             guard await waitForTerminalPanelPainted(sourcePanelId) else {
                 fail(
@@ -4559,8 +4728,8 @@ class TabManager: ObservableObject {
                     ),
                     .init(
                         label: "R",
-                        sample: { @MainActor in motionSample(for: rightPanel.id) },
-                        expectedPanelId: { rightPanel.id },
+                        sample: { @MainActor in motionSample(for: rightPanelId) },
+                        expectedPanelId: { rightPanelId },
                         bootstrapGraceFrames: newlyVisiblePaneBootstrapGraceFrames,
                         minimumEvaluationFrame: actionFrame,
                         referenceMode: .firstMeasuredSample,
@@ -4570,12 +4739,12 @@ class TabManager: ObservableObject {
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
                 actions: [
                     (frame: actionFrame, action: {
-                        tab.moveFocus(direction: .right)
+                        _ = dispatchShortcut(.focusRight)
                     }),
                 ]
             )
             if result.nonBlankSampleCounts["R", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: rightPanel.id)
+                var extra = terminalVisibilityDebugInfo(for: rightPanelId)
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4584,14 +4753,16 @@ class TabManager: ObservableObject {
             }
 
         case "pan_viewport_right":
-            guard let rightPanel = tab.openTerminalPaneRight(from: sourcePanelId, focus: false),
-                  await waitUntilTerminalReady(rightPanel.id) else {
+            let existingPanelIds = Set(tab.panels.keys)
+            guard dispatchShortcut(.openPaneRight),
+                  let rightPanelId = await waitForNewTerminalPanel(after: existingPanelIds),
+                  await waitUntilTerminalReady(rightPanelId) else {
                 fail("Failed to create right pane for viewport pan")
                 return
             }
             // Under CI the newly created right pane can remain offscreen until the viewport shift.
             // Prime terminal output now, then require non-blank content during the captured pan.
-            primeTerminalContent(rightPanel.id, label: "RIGHT")
+            primeTerminalContent(rightPanelId, label: "RIGHT")
 
             result = await capturePaneStripMotionTimeline(
                 frameCount: frameCount,
@@ -4605,8 +4776,8 @@ class TabManager: ObservableObject {
                     ),
                     .init(
                         label: "R",
-                        sample: { @MainActor in motionSample(for: rightPanel.id) },
-                        expectedPanelId: { rightPanel.id },
+                        sample: { @MainActor in motionSample(for: rightPanelId) },
+                        expectedPanelId: { rightPanelId },
                         bootstrapGraceFrames: newlyVisiblePaneBootstrapGraceFrames,
                         minimumEvaluationFrame: actionFrame,
                         referenceMode: .firstMeasuredSample,
@@ -4621,7 +4792,7 @@ class TabManager: ObservableObject {
                 ]
             )
             if result.nonBlankSampleCounts["R", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: rightPanel.id)
+                var extra = terminalVisibilityDebugInfo(for: rightPanelId)
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4632,6 +4803,7 @@ class TabManager: ObservableObject {
         case "open_pane_right":
             var createdPanelId: UUID?
             var didPrimeCreatedPane = false
+            let existingPanelIds = Set(tab.panels.keys)
 
             result = await capturePaneStripMotionTimeline(
                 frameCount: frameCount,
@@ -4662,7 +4834,10 @@ class TabManager: ObservableObject {
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
                 actions: [
                     (frame: actionFrame, action: {
-                        createdPanelId = tab.openTerminalPaneRight(from: sourcePanelId)?.id
+                        guard dispatchShortcut(.openPaneRight) else { return }
+                        createdPanelId = Set(tab.panels.keys)
+                            .subtracting(existingPanelIds)
+                            .first(where: { tab.terminalPanel(for: $0) != nil })
                         if let createdPanelId {
                             primeTerminalContent(createdPanelId, label: "RIGHT")
                             didPrimeCreatedPane = true
@@ -4670,6 +4845,10 @@ class TabManager: ObservableObject {
                     }),
                 ]
             )
+
+            if createdPanelId == nil {
+                createdPanelId = await waitForNewTerminalPanel(after: existingPanelIds)
+            }
 
             guard let createdPanelId else {
                 fail("Failed to open pane right during motion capture")
@@ -4697,14 +4876,19 @@ class TabManager: ObservableObject {
             }
 
         case "browser_focus_reveal_right":
-            guard let rightPanel = tab.newBrowserSplit(
-                from: sourcePanelId,
-                orientation: .horizontal,
-                url: browserDataURL,
-                focus: false
-            ),
-            await waitForBrowserPanelPortalReady(rightPanel.id) else {
+            let existingPanelIds = Set(tab.panels.keys)
+            guard dispatchShortcut(.splitBrowserRight),
+                  let rightPanelId = await waitForNewBrowserPanel(after: existingPanelIds),
+                  let rightPanel = tab.browserPanel(for: rightPanelId) else {
                 fail("Failed to create right browser pane for focus reveal")
+                return
+            }
+            rightPanel.navigate(to: browserDataURL)
+            guard await waitForBrowserPanelPortalReady(rightPanel.id) else {
+                fail(
+                    "Right browser pane did not become portal-visible before focus-reveal capture",
+                    extra: browserVisibilityDebugInfo(for: rightPanel.id)
+                )
                 return
             }
             guard await waitForTerminalPanelPainted(sourcePanelId) else {
@@ -4717,7 +4901,10 @@ class TabManager: ObservableObject {
                 return
             }
             reassertPaneStripMotionTestWindow()
-            tab.moveFocus(direction: .right)
+            guard dispatchShortcut(.focusRight) else {
+                fail("Failed to focus right browser pane before focus-reveal capture")
+                return
+            }
             reassertPaneStripMotionTestWindow()
             guard await waitForBrowserPanelPortalReady(rightPanel.id) else {
                 fail(
@@ -4726,7 +4913,10 @@ class TabManager: ObservableObject {
                 )
                 return
             }
-            tab.moveFocus(direction: .left)
+            guard dispatchShortcut(.focusLeft) else {
+                fail("Failed to focus left terminal pane before focus-reveal capture")
+                return
+            }
             reassertPaneStripMotionTestWindow()
             guard await waitForTerminalPanelPainted(sourcePanelId) else {
                 fail(
@@ -4760,7 +4950,7 @@ class TabManager: ObservableObject {
                 hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
                 actions: [
                     (frame: actionFrame, action: {
-                        tab.moveFocus(direction: .right)
+                        _ = dispatchShortcut(.focusRight)
                     }),
                 ]
             )
