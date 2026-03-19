@@ -178,11 +178,40 @@ def test_stale_socket_skips_hook_injection(failures: list[str]) -> None:
     expect(claudecode == "__UNSET__", f"stale socket: expected CLAUDECODE unset, got {claudecode!r}", failures)
 
 
+def test_remote_control_passthrough_skips_hook_injection(failures: list[str]) -> None:
+    code, real_argv, cmux_log, stderr, claudecode = run_wrapper(socket_state="live", argv=["remote-control"])
+    expect(code == 0, f"remote-control: wrapper exited {code}: {stderr}", failures)
+    expect(real_argv == ["remote-control"], f"remote-control: expected passthrough args, got {real_argv}", failures)
+    expect(any(" ping" in line for line in cmux_log), f"remote-control: expected cmux ping probe, got {cmux_log}", failures)
+    expect("--settings" not in real_argv, f"remote-control: should not inject --settings, got {real_argv}", failures)
+    expect("--session-id" not in real_argv, f"remote-control: should not inject --session-id, got {real_argv}", failures)
+    expect(claudecode == "__UNSET__", f"remote-control: expected CLAUDECODE unset, got {claudecode!r}", failures)
+
+
+def test_remote_control_passthrough_after_global_option(failures: list[str]) -> None:
+    code, real_argv, cmux_log, stderr, claudecode = run_wrapper(
+        socket_state="live",
+        argv=["--model", "sonnet", "rc"],
+    )
+    expect(code == 0, f"--model rc: wrapper exited {code}: {stderr}", failures)
+    expect(
+        real_argv == ["--model", "sonnet", "rc"],
+        f"--model rc: expected passthrough args, got {real_argv}",
+        failures,
+    )
+    expect(any(" ping" in line for line in cmux_log), f"--model rc: expected cmux ping probe, got {cmux_log}", failures)
+    expect("--settings" not in real_argv, f"--model rc: should not inject --settings, got {real_argv}", failures)
+    expect("--session-id" not in real_argv, f"--model rc: should not inject --session-id, got {real_argv}", failures)
+    expect(claudecode == "__UNSET__", f"--model rc: expected CLAUDECODE unset, got {claudecode!r}", failures)
+
+
 def main() -> int:
     failures: list[str] = []
     test_live_socket_injects_supported_hooks(failures)
     test_missing_socket_skips_hook_injection(failures)
     test_stale_socket_skips_hook_injection(failures)
+    test_remote_control_passthrough_skips_hook_injection(failures)
+    test_remote_control_passthrough_after_global_option(failures)
 
     if failures:
         print("FAIL: claude wrapper regression checks failed")
