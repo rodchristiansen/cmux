@@ -18,6 +18,65 @@ find_real_claude() {
     return 1
 }
 
+# Return 0 for Claude global options that require a separate value.
+claude_option_requires_value() {
+    case "${1:-}" in
+        --add-dir|--agent|--agents|--allowedTools|--allowed-tools|--append-system-prompt|--betas|--debug-file|--disallowedTools|--disallowed-tools|--effort|--fallback-model|--file|--input-format|--json-schema|--max-budget-usd|--mcp-config|--model|--name|--output-format|--permission-mode|--plugin-dir|--session-id|--setting-sources|--settings|--system-prompt|--tools|-n)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Return 0 when the first Claude subcommand should bypass cmux hook/session
+# injection entirely. These commands manage Claude itself rather than launching
+# a normal interactive coding session, and some of them reject --session-id.
+claude_passthrough_subcommand() {
+    case "${1:-}" in
+        api-key|auth|config|doctor|help|install|mcp|plugin|plugins|rc|remote-control|setup-token|update|upgrade)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+claude_invocation_has_passthrough_subcommand() {
+    local arg
+    local pending_value=0
+
+    for arg in "$@"; do
+        if [[ "$pending_value" == "1" ]]; then
+            pending_value=0
+            continue
+        fi
+
+        case "$arg" in
+            --)
+                return 1
+                ;;
+            --*=*)
+                continue
+                ;;
+            -*)
+                if claude_option_requires_value "$arg"; then
+                    pending_value=1
+                fi
+                continue
+                ;;
+            *)
+                claude_passthrough_subcommand "$arg"
+                return $?
+                ;;
+        esac
+    done
+
+    return 1
+}
+
 # Return 0 only when CMUX_SOCKET_PATH points to a live cmux socket.
 cmux_socket_available() {
     local socket="${CMUX_SOCKET_PATH:-}"
@@ -55,14 +114,14 @@ fi
 # Find real claude.
 REAL_CLAUDE="$(find_real_claude)" || { echo "Error: claude not found in PATH" >&2; exit 127; }
 
-# Pass through subcommands that don't support session/hook flags.
-case "${1:-}" in
-    mcp|config|api-key|rc|remote-control) exec "$REAL_CLAUDE" "$@" ;;
-esac
-
 # Unset CLAUDECODE to avoid "nested session" detection — cmux terminals are
 # independent sessions even when the parent shell was launched from Claude Code.
 unset CLAUDECODE
+
+# Pass through subcommands that don't support session/hook flags.
+if claude_invocation_has_passthrough_subcommand "$@"; then
+    exec "$REAL_CLAUDE" "$@"
+fi
 
 # Check if the user already specified a session/resume flag.
 # If so, don't inject our own --session-id (it would conflict).
