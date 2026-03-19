@@ -4253,9 +4253,9 @@ class TabManager: ObservableObject {
             fail("Initial terminal not ready (attached=\(initialTerminalReadiness.attached ? 1 : 0) surface=\(initialTerminalReadiness.hasSurface ? 1 : 0))")
             return
         }
-        guard await primeAndWaitForVisibleTerminalContent(sourcePanelId, label: "SOURCE") else {
+        guard await waitForTerminalPanelPainted(sourcePanelId) else {
             fail(
-                "Initial terminal did not paint visible content",
+                "Initial terminal did not paint visible content before any synthetic input",
                 extra: terminalVisibilityDebugInfo(for: sourcePanelId)
             )
             return
@@ -4329,11 +4329,6 @@ class TabManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
             return false
-        }
-
-        func primeAndWaitForVisibleTerminalContent(_ panelId: UUID, label: String) async -> Bool {
-            primeTerminalContent(panelId, label: label)
-            return await waitForTerminalPanelPainted(panelId)
         }
 
         func terminalVisibilityDebugInfo(for panelId: UUID) -> [String: String] {
