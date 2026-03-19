@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AuthenticationServices
 import WebKit
 import AppKit
 import Bonsplit
@@ -1707,6 +1708,181 @@ final class BrowserPortalAnchorView: NSView {
     }
 }
 
+private struct BrowserPasskeyAuthorizationRequest {
+    let purpose: String
+    let relyingParty: String?
+
+    init?(messageBody: Any) {
+        guard let body = messageBody as? [String: Any],
+              let rawPurpose = body["purpose"] as? String else {
+            return nil
+        }
+
+        let purpose = rawPurpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !purpose.isEmpty else { return nil }
+
+        self.purpose = purpose
+        if let relyingParty = body["relyingParty"] as? String {
+            let trimmed = relyingParty.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.relyingParty = trimmed.isEmpty ? nil : trimmed
+        } else {
+            self.relyingParty = nil
+        }
+    }
+}
+
+private struct BrowserPasskeyAuthorizationReply {
+    let state: String
+    let prompted: Bool
+
+    var authorized: Bool {
+        state == "authorized"
+    }
+
+    var jsValue: [String: Any] {
+        [
+            "state": state,
+            "authorized": authorized,
+            "prompted": prompted,
+        ]
+    }
+}
+
+@MainActor
+private final class BrowserPasskeyAuthorizationCoordinator: NSObject, WKScriptMessageHandlerWithReply {
+    weak var panel: BrowserPanel?
+
+    private let credentialManager = ASAuthorizationWebBrowserPublicKeyCredentialManager()
+    private var authorizationTask: Task<ASAuthorizationWebBrowserPublicKeyCredentialManager.AuthorizationState, Never>?
+
+    init(panel: BrowserPanel) {
+        self.panel = panel
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        guard let request = BrowserPasskeyAuthorizationRequest(messageBody: message.body) else {
+            replyHandler(nil, "Invalid WebAuthn authorization request")
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                replyHandler(nil, "Browser panel unavailable")
+                return
+            }
+
+            let reply = await authorizationReply(for: request)
+            replyHandler(reply.jsValue, nil)
+        }
+    }
+
+    private func authorizationReply(
+        for request: BrowserPasskeyAuthorizationRequest
+    ) async -> BrowserPasskeyAuthorizationReply {
+        switch credentialManager.authorizationStateForPlatformCredentials {
+        case .authorized:
+            return makeReply(
+                state: .authorized,
+                prompted: false,
+                request: request
+            )
+        case .denied:
+            return makeReply(
+                state: .denied,
+                prompted: false,
+                request: request
+            )
+        case .notDetermined:
+            let state = await requestAuthorizationIfNeeded()
+            return makeReply(
+                state: state,
+                prompted: true,
+                request: request
+            )
+        @unknown default:
+            return makeUnknownReply(prompted: false, request: request)
+        }
+    }
+
+    private func requestAuthorizationIfNeeded() async -> ASAuthorizationWebBrowserPublicKeyCredentialManager.AuthorizationState {
+        if let authorizationTask {
+            return await authorizationTask.value
+        }
+
+        let task = Task<ASAuthorizationWebBrowserPublicKeyCredentialManager.AuthorizationState, Never> {
+            await withCheckedContinuation { continuation in
+                credentialManager.requestAuthorizationForPublicKeyCredentials { state in
+                    continuation.resume(returning: state)
+                }
+            }
+        }
+
+        authorizationTask = task
+        let state = await task.value
+        authorizationTask = nil
+        return state
+    }
+
+    private func makeReply(
+        state: ASAuthorizationWebBrowserPublicKeyCredentialManager.AuthorizationState,
+        prompted: Bool,
+        request: BrowserPasskeyAuthorizationRequest
+    ) -> BrowserPasskeyAuthorizationReply {
+        let reply = BrowserPasskeyAuthorizationReply(
+            state: authorizationStateLabel(state),
+            prompted: prompted
+        )
+        log(request: request, reply: reply)
+        return reply
+    }
+
+    private func makeUnknownReply(
+        prompted: Bool,
+        request: BrowserPasskeyAuthorizationRequest
+    ) -> BrowserPasskeyAuthorizationReply {
+        let reply = BrowserPasskeyAuthorizationReply(
+            state: "unknown",
+            prompted: prompted
+        )
+        log(request: request, reply: reply)
+        return reply
+    }
+
+    private func authorizationStateLabel(
+        _ state: ASAuthorizationWebBrowserPublicKeyCredentialManager.AuthorizationState
+    ) -> String {
+        switch state {
+        case .authorized:
+            return "authorized"
+        case .denied:
+            return "denied"
+        case .notDetermined:
+            return "notDetermined"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private func log(
+        request: BrowserPasskeyAuthorizationRequest,
+        reply: BrowserPasskeyAuthorizationReply
+    ) {
+        #if DEBUG
+        let panelID = panel?.id.uuidString.prefix(5) ?? "nil"
+        let relyingParty = request.relyingParty ?? "nil"
+        dlog(
+            "browser.passkey.auth " +
+            "panel=\(panelID) purpose=\(request.purpose) rp=\(relyingParty) " +
+            "state=\(reply.state) prompted=\(reply.prompted ? 1 : 0)"
+        )
+        #endif
+    }
+}
+
 @MainActor
 final class BrowserPanel: Panel, ObservableObject {
     private static let remoteLoopbackProxyAliasHost = "cmux-loopback.localtest.me"
@@ -1719,9 +1895,11 @@ final class BrowserPanel: Panel, ObservableObject {
 
     /// Shared process pool for cookie sharing across all browser panels
     private static let sharedProcessPool = WKProcessPool()
+    private static let passkeyAuthorizationMessageHandlerName = "cmuxPasskeyAuthorization"
 
     /// Popup windows owned by this panel (for lifecycle cleanup)
     private var popupControllers: [BrowserPopupWindowController] = []
+    private lazy var passkeyAuthorizationCoordinator = BrowserPasskeyAuthorizationCoordinator(panel: self)
 
     static let telemetryHookBootstrapScriptSource = """
     (() => {
@@ -1777,6 +1955,131 @@ final class BrowserPanel: Panel, ObservableObject {
 
       return true;
     })()
+    """
+
+    // WKWebView resolves WebAuthn challenges itself on macOS, but browser-style
+    // access to passkeys is gated by AuthenticationServices authorization.
+    // Request that authorization before pages probe or invoke WebAuthn so sites
+    // like GitHub stop reporting partial passkey support.
+    private static let passkeyAuthorizationBootstrapScriptSource = """
+    (() => {
+      if (window.__cmuxPasskeyHooksInstalled) return true;
+      window.__cmuxPasskeyHooksInstalled = true;
+
+      const nativeHandler = () => {
+        try {
+          const handlers = window.webkit && window.webkit.messageHandlers;
+          const handler = handlers && handlers.cmuxPasskeyAuthorization;
+          return handler && typeof handler.postMessage === "function" ? handler : null;
+        } catch (_) {
+          return null;
+        }
+      };
+
+      const canRequestPasskeyAuthorization = () => {
+        try {
+          return !!window.isSecureContext && !!location && typeof location.hostname === "string" && location.hostname.length > 0;
+        } catch (_) {
+          return false;
+        }
+      };
+
+      const relyingPartyForOptions = (options) => {
+        try {
+          const publicKey = options && options.publicKey;
+          if (!publicKey || typeof publicKey !== "object") return null;
+          if (typeof publicKey.rpId === "string" && publicKey.rpId.length > 0) return publicKey.rpId;
+          const rp = publicKey.rp;
+          if (rp && typeof rp.id === "string" && rp.id.length > 0) return rp.id;
+        } catch (_) {}
+        return null;
+      };
+
+      const ensureAuthorization = async (purpose, options) => {
+        if (!canRequestPasskeyAuthorization()) {
+          return { state: "skipped", authorized: false, fallback: true };
+        }
+
+        const handler = nativeHandler();
+        if (!handler) {
+          return { state: "unavailable", authorized: false, fallback: true };
+        }
+
+        try {
+          const reply = await handler.postMessage({
+            purpose,
+            relyingParty: relyingPartyForOptions(options) || location.hostname || null
+          });
+          if (!reply || typeof reply !== "object") {
+            return { state: "unknown", authorized: false, fallback: true };
+          }
+          return reply;
+        } catch (_) {
+          return { state: "error", authorized: false, fallback: true };
+        }
+      };
+
+      const throwNotAllowedError = (message) => {
+        if (typeof DOMException === "function") {
+          throw new DOMException(message, "NotAllowedError");
+        }
+        const error = new Error(message);
+        error.name = "NotAllowedError";
+        throw error;
+      };
+
+      if (typeof PublicKeyCredential !== "undefined") {
+        if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function") {
+          const originalUVPA = PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable.bind(PublicKeyCredential);
+          PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = async function(...args) {
+            const authorization = await ensureAuthorization("availability", null);
+            if (authorization.state === "denied") return false;
+            return await originalUVPA(...args);
+          };
+        }
+
+        if (typeof PublicKeyCredential.isConditionalMediationAvailable === "function") {
+          const originalConditional = PublicKeyCredential.isConditionalMediationAvailable.bind(PublicKeyCredential);
+          PublicKeyCredential.isConditionalMediationAvailable = async function(...args) {
+            const authorization = await ensureAuthorization("conditional", null);
+            if (authorization.state === "denied") return false;
+            return await originalConditional(...args);
+          };
+        }
+      }
+
+      if (navigator.credentials) {
+        if (typeof navigator.credentials.get === "function") {
+          const originalGet = navigator.credentials.get.bind(navigator.credentials);
+          navigator.credentials.get = async function(...args) {
+            const options = args[0];
+            if (options && options.publicKey) {
+              const authorization = await ensureAuthorization("assertion", options);
+              if (authorization.state === "denied") {
+                throwNotAllowedError("Browser access to passkeys was denied.");
+              }
+            }
+            return await originalGet(...args);
+          };
+        }
+
+        if (typeof navigator.credentials.create === "function") {
+          const originalCreate = navigator.credentials.create.bind(navigator.credentials);
+          navigator.credentials.create = async function(...args) {
+            const options = args[0];
+            if (options && options.publicKey) {
+              const authorization = await ensureAuthorization("registration", options);
+              if (authorization.state === "denied") {
+                throwNotAllowedError("Browser access to passkeys was denied.");
+              }
+            }
+            return await originalCreate(...args);
+          };
+        }
+      }
+
+      return true;
+    })();
     """
 
     static let dialogTelemetryHookBootstrapScriptSource = """
@@ -2489,7 +2792,30 @@ final class BrowserPanel: Panel, ObservableObject {
         return webView
     }
 
+    func configurePasskeyAuthorizationBridge(on configuration: WKWebViewConfiguration) {
+        let userContentController = configuration.userContentController
+        if !userContentController.userScripts.contains(where: { $0.source == Self.passkeyAuthorizationBootstrapScriptSource }) {
+            userContentController.addUserScript(
+                WKUserScript(
+                    source: Self.passkeyAuthorizationBootstrapScriptSource,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: false
+                )
+            )
+        }
+        userContentController.removeScriptMessageHandler(
+            forName: Self.passkeyAuthorizationMessageHandlerName,
+            contentWorld: .page
+        )
+        userContentController.addScriptMessageHandler(
+            passkeyAuthorizationCoordinator,
+            contentWorld: .page,
+            name: Self.passkeyAuthorizationMessageHandlerName
+        )
+    }
+
     private func bindWebView(_ webView: CmuxWebView) {
+        configurePasskeyAuthorizationBridge(on: webView.configuration)
         webView.onContextMenuDownloadStateChanged = { [weak self] downloading in
             if downloading {
                 self?.beginDownloadActivity()

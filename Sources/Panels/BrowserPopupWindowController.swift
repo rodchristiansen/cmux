@@ -92,6 +92,8 @@ final class BrowserPopupWindowController: NSObject, NSWindowDelegate {
         self.parentPopupController = parentPopupController
         self.nestingDepth = nestingDepth
 
+        openerPanel?.configurePasskeyAuthorizationBridge(on: configuration)
+
         // Create popup web view with WebKit's supplied configuration (preserves
         // internal browsing-context state for opener linkage / postMessage).
         let webView = CmuxWebView(frame: .zero, configuration: configuration)
@@ -296,6 +298,7 @@ final class BrowserPopupWindowController: NSObject, NSWindowDelegate {
             #endif
             return nil
         }
+        openerPanel?.configurePasskeyAuthorizationBridge(on: configuration)
         let child = BrowserPopupWindowController(
             configuration: configuration,
             windowFeatures: windowFeatures,
