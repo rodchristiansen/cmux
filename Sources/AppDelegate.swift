@@ -2301,6 +2301,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             PostHogAnalytics.shared.trackActive(reason: "didBecomeActive")
         }
 
+        refreshVisiblePortalsAfterAppActivation(reason: "appDelegate.didBecomeActive")
+
         guard let notificationStore else { return }
         notificationStore.handleApplicationDidBecomeActive()
         guard let tabManager else { return }
@@ -4393,12 +4395,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         var refreshedCount = 0
         forEachTerminalPanel { terminalPanel in
             terminalPanel.hostedView.reconcileGeometryNow()
-            terminalPanel.surface.forceRefresh(reason: "appDelegate.refreshAfterGhosttyConfigReload")
+            terminalPanel.hostedView.refreshSurfaceNow(reason: "appDelegate.refreshAfterGhosttyConfigReload")
             refreshedCount += 1
         }
 #if DEBUG
         dlog("reload.config.surfaceRefresh source=\(source) count=\(refreshedCount)")
 #endif
+    }
+
+    private func refreshVisiblePortalsAfterAppActivation(reason: String, in windowFilter: NSWindow? = nil) {
+        BrowserWindowPortalRegistry.synchronizeExternalGeometryForAllWindowsNow()
+        TerminalWindowPortalRegistry.synchronizeExternalGeometryForAllWindowsNow()
+
+        forEachTerminalPanel { terminalPanel in
+            let hostedView = terminalPanel.hostedView
+            guard let window = hostedView.window else { return }
+            guard windowFilter == nil || window === windowFilter else { return }
+            guard !hostedView.isHidden,
+                  hostedView.bounds.width > 1,
+                  hostedView.bounds.height > 1 else { return }
+
+            hostedView.reconcileGeometryNow()
+            hostedView.refreshSurfaceNow(reason: reason)
+        }
     }
 
     private func forEachTerminalPanel(_ body: (TerminalPanel) -> Void) {
@@ -9741,6 +9760,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ) { [weak self] note in
             guard let self, let window = note.object as? NSWindow else { return }
             self.setActiveMainWindow(window)
+            self.refreshVisiblePortalsAfterAppActivation(
+                reason: "appDelegate.windowDidBecomeKey",
+                in: window
+            )
         }
     }
 

@@ -6342,12 +6342,20 @@ final class GhosttySurfaceScrollView: NSView {
         guard let contents = layer.contents else { return false }
 
         let cf = contents as CFTypeRef
-        guard CFGetTypeID(cf) == IOSurfaceGetTypeID() else {
-            return true
+        if CFGetTypeID(cf) == IOSurfaceGetTypeID() {
+            let surfaceRef = (contents as! IOSurfaceRef)
+            return IOSurfaceGetWidth(surfaceRef) > 0 && IOSurfaceGetHeight(surfaceRef) > 0
         }
 
-        let surfaceRef = (contents as! IOSurfaceRef)
-        return IOSurfaceGetWidth(surfaceRef) > 0 && IOSurfaceGetHeight(surfaceRef) > 0
+        if CFGetTypeID(cf) == CGImage.typeID {
+            let cgImage = contents as! CGImage
+            return cgImage.width > 0 && cgImage.height > 0
+        }
+
+        // Unknown placeholder contents can appear during early window activation and
+        // SwiftUI/AppKit reparenting. Treat them as not yet renderable so the stronger
+        // bootstrap refresh path remains available for a blank terminal.
+        return false
     }
 
     @discardableResult
