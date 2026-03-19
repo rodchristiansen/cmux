@@ -2014,6 +2014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var browserOmnibarRepeatDelta: Int = 0
     private var browserAddressBarFocusObserver: NSObjectProtocol?
     private var browserAddressBarBlurObserver: NSObjectProtocol?
+    private var browserWebViewFocusObserver: NSObjectProtocol?
     private let updateController = UpdateController()
     private lazy var titlebarAccessoryController = UpdateTitlebarAccessoryController(viewModel: updateViewModel)
     private let windowDecorationsController = WindowDecorationsController()
@@ -10871,7 +10872,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func installBrowserAddressBarFocusObservers() {
-        guard browserAddressBarFocusObserver == nil, browserAddressBarBlurObserver == nil else { return }
+        guard browserAddressBarFocusObserver == nil,
+              browserAddressBarBlurObserver == nil,
+              browserWebViewFocusObserver == nil else { return }
 
         browserAddressBarFocusObserver = NotificationCenter.default.addObserver(
             forName: .browserDidFocusAddressBar,
@@ -10903,6 +10906,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 dlog("addressBar BLUR panelId=\(panelId.uuidString.prefix(8))")
 #endif
             }
+        }
+
+        browserWebViewFocusObserver = NotificationCenter.default.addObserver(
+            forName: .browserDidBecomeFirstResponderWebView,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            guard let panelId = self.browserAddressBarFocusedPanelId else { return }
+            guard let webView = notification.object as? WKWebView else { return }
+
+            NotificationCenter.default.post(name: .browserDidBlurAddressBar, object: panelId)
+#if DEBUG
+            dlog(
+                "addressBar STALE_CLEAR panelId=\(panelId.uuidString.prefix(8)) " +
+                "reason=webViewFirstResponder web=\(ObjectIdentifier(webView))"
+            )
+#endif
         }
     }
 
