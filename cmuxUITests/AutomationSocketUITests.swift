@@ -2,6 +2,12 @@ import XCTest
 import Foundation
 
 final class AutomationSocketUITests: XCTestCase {
+    private struct CmuxCommandResult {
+        let terminationStatus: Int32
+        let stdout: String
+        let stderr: String
+    }
+
     private var socketPath = ""
     private var diagnosticsPath = ""
     private var ensureTerminalSurfaceFailure = ""
@@ -84,39 +90,44 @@ final class AutomationSocketUITests: XCTestCase {
 
         for iteration in 1...8 {
             XCTAssertEqual(
-                socketCommand("ping", responseTimeout: 1.5),
+                runCmuxCommand(arguments: ["ping"], responseTimeoutSeconds: 1.5).stdout,
                 "PONG",
                 "Expected ping before send_key on iteration \(iteration)"
             )
 
             XCTAssertNotNil(
-                socketV2(
-                    method: "surface.send_key",
-                    params: [
-                        "window_id": target.windowId,
-                        "workspace_id": target.workspaceId,
-                        "surface_id": target.surfaceId,
-                        "key": "enter",
+                runCmuxJSON(
+                    arguments: [
+                        "--window",
+                        target.windowId,
+                        "send-key",
+                        "--workspace",
+                        target.workspaceId,
+                        "--surface",
+                        target.surfaceId,
+                        "enter",
                     ],
-                    responseTimeout: 4.0
-                ),
+                    responseTimeoutSeconds: 4.0
+                )?.payload,
                 "Expected surface.send_key to succeed on iteration \(iteration)"
             )
 
             XCTAssertEqual(
-                socketCommand("ping", responseTimeout: 1.5),
+                runCmuxCommand(arguments: ["ping"], responseTimeoutSeconds: 1.5).stdout,
                 "PONG",
                 "Expected ping after send_key on iteration \(iteration)"
             )
 
-            guard let payload = socketV2(
-                method: "surface.list",
-                params: [
-                    "window_id": target.windowId,
-                    "workspace_id": target.workspaceId,
+            guard let payload = runCmuxJSON(
+                arguments: [
+                    "--window",
+                    target.windowId,
+                    "list-panels",
+                    "--workspace",
+                    target.workspaceId,
                 ],
-                responseTimeout: 4.0
-            ),
+                responseTimeoutSeconds: 4.0
+            )?.payload,
                   let surfaces = payload["surfaces"] as? [[String: Any]] else {
                 XCTFail("Expected surface.list to respond after send_key on iteration \(iteration)")
                 return
@@ -181,135 +192,73 @@ final class AutomationSocketUITests: XCTestCase {
         return socketPath
     }
 
-    private func socketCommand(_ cmd: String, responseTimeout: TimeInterval = 2.0) -> String? {
-        if let response = ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendLine(cmd) {
-            return response
-        }
-        return socketCommandViaNetcat(cmd, responseTimeout: responseTimeout)
-    }
-
-    private func socketV2(
-        method: String,
-        params: [String: Any] = [:],
-        responseTimeout: TimeInterval = 2.0
-    ) -> [String: Any]? {
-        socketV2Envelope(method: method, params: params, responseTimeout: responseTimeout)?.result
-    }
-
-    private func socketV2Envelope(
-        method: String,
-        params: [String: Any] = [:],
-        responseTimeout: TimeInterval = 2.0
-    ) -> (raw: String, response: [String: Any], result: [String: Any])? {
-        let request: [String: Any] = [
-            "id": UUID().uuidString,
-            "method": method,
-            "params": params,
-        ]
-        guard JSONSerialization.isValidJSONObject(request),
-              let requestData = try? JSONSerialization.data(withJSONObject: request, options: []),
-              let requestLine = String(data: requestData, encoding: .utf8),
-              let raw = socketCommand(requestLine, responseTimeout: responseTimeout),
-              !raw.hasPrefix("ERROR:"),
-              let responseData = raw.data(using: .utf8),
-              let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-              (response["ok"] as? Bool) == true else {
-            return nil
-        }
-        let result = (response["result"] as? [String: Any]) ?? [:]
-        return (raw: raw, response: response, result: result)
-    }
-
     private func ensureTerminalSurface(timeout: TimeInterval) -> (windowId: String, workspaceId: String, surfaceId: String)? {
         ensureTerminalSurfaceFailure = ""
-        let initialWindowId = currentWindowId()
+        let windowsResult = runCmuxJSON(arguments: ["list-windows"], responseTimeoutSeconds: 4.0)
+        let initialWindowId = resolvedWindowId(from: windowsResult?.payload)
         var traceParts: [String] = [
-            "window.current=\(socketV2Raw(method: "window.current") ?? "<nil>")",
-            "workspace.list.initial=\(socketV2Raw(method: "workspace.list", params: initialWindowId.map { ["window_id": $0] } ?? [:]) ?? "<nil>")",
-            "surface.list.initial=\(socketV2Raw(method: "surface.list", params: initialWindowId.map { ["window_id": $0] } ?? [:]) ?? "<nil>")",
+            "list-windows=\(describeCommandResult(windowsResult))",
+            "list-workspaces.initial=\(describeCommandResult(workspaceList(windowId: initialWindowId)))",
+            "list-panels.initial=\(describeCommandResult(panelList(windowId: initialWindowId, workspaceId: nil)))",
         ]
+        guard let initialWindowId else {
+            ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
+            return nil
+        }
+
         if let target = terminalSurface(windowId: initialWindowId) {
             ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
-            return (
-                windowId: initialWindowId ?? "",
-                workspaceId: target.workspaceId,
-                surfaceId: target.surfaceId
-            )
+            return (windowId: initialWindowId, workspaceId: target.workspaceId, surfaceId: target.surfaceId)
         }
 
-        var workspaceCreateParams: [String: Any] = [:]
-        if let initialWindowId, !initialWindowId.isEmpty {
-            workspaceCreateParams["window_id"] = initialWindowId
-        }
-
-        let workspaceCreateEnvelope = socketV2Envelope(
-            method: "workspace.create",
-            params: workspaceCreateParams,
-            responseTimeout: 4.0
+        let workspaceCreateResult = runCmuxJSON(
+            arguments: [
+                "--window",
+                initialWindowId,
+                "new-workspace",
+            ],
+            responseTimeoutSeconds: 4.0
         )
-        traceParts.append("workspace.create=\(workspaceCreateEnvelope?.raw ?? "<nil>")")
-        guard let workspacePayload = workspaceCreateEnvelope?.result,
+        traceParts.append("new-workspace=\(describeCommandResult(workspaceCreateResult))")
+        guard let workspacePayload = workspaceCreateResult?.payload,
               let workspaceId = workspacePayload["workspace_id"] as? String else {
             ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
             return nil
         }
-        let windowId = (workspacePayload["window_id"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        var workspaceSelectParams: [String: Any] = [
-            "workspace_id": workspaceId,
-        ]
-        if let windowId, !windowId.isEmpty {
-            workspaceSelectParams["window_id"] = windowId
-        }
-        let workspaceSelectEnvelope = socketV2Envelope(
-            method: "workspace.select",
-            params: workspaceSelectParams,
-            responseTimeout: 4.0
+        let workspaceSelectResult = runCmuxJSON(
+            arguments: [
+                "--window",
+                initialWindowId,
+                "select-workspace",
+                "--workspace",
+                workspaceId,
+            ],
+            responseTimeoutSeconds: 4.0
         )
-        traceParts.append("workspace.select=\(workspaceSelectEnvelope?.raw ?? "<nil>")")
+        traceParts.append("select-workspace=\(describeCommandResult(workspaceSelectResult))")
 
         let ready = waitForCondition(timeout: timeout) {
-            self.terminalSurface(windowId: windowId, workspaceId: workspaceId) != nil
+            self.terminalSurface(windowId: initialWindowId, workspaceId: workspaceId) != nil
         }
         traceParts.append(
-            "workspace.list.created=\(socketV2Raw(method: "workspace.list", params: workspaceSelectParams, responseTimeout: 4.0) ?? "<nil>")"
+            "list-workspaces.created=\(describeCommandResult(self.workspaceList(windowId: initialWindowId)))"
         )
         traceParts.append(
-            "surface.list.created=\(socketV2Raw(method: "surface.list", params: workspaceSelectParams, responseTimeout: 4.0) ?? "<nil>")"
+            "list-panels.created=\(describeCommandResult(self.panelList(windowId: initialWindowId, workspaceId: workspaceId)))"
         )
         ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
         guard ready else { return nil }
-        guard let target = terminalSurface(windowId: windowId, workspaceId: workspaceId) else {
+        guard let target = terminalSurface(windowId: initialWindowId, workspaceId: workspaceId) else {
             return nil
         }
-        return (
-            windowId: windowId ?? initialWindowId ?? "",
-            workspaceId: target.workspaceId,
-            surfaceId: target.surfaceId
-        )
-    }
-
-    private func currentWindowId() -> String? {
-        guard let payload = socketV2(method: "window.current", responseTimeout: 3.0),
-              let windowId = payload["window_id"] as? String,
-              !windowId.isEmpty else {
-            return nil
-        }
-        return windowId
+        return (windowId: initialWindowId, workspaceId: target.workspaceId, surfaceId: target.surfaceId)
     }
 
     private func terminalSurface(
         windowId: String? = nil,
         workspaceId: String? = nil
     ) -> (workspaceId: String, surfaceId: String)? {
-        var params: [String: Any] = [:]
-        if let windowId, !windowId.isEmpty {
-            params["window_id"] = windowId
-        }
-        if let workspaceId {
-            params["workspace_id"] = workspaceId
-        }
-        guard let payload = socketV2(method: "surface.list", params: params, responseTimeout: 3.0),
+        guard let payload = panelList(windowId: windowId, workspaceId: workspaceId)?.payload,
               let resolvedWorkspaceId = payload["workspace_id"] as? String,
               let surfaces = payload["surfaces"] as? [[String: Any]],
               let surface = surfaces.first(where: { surface in
@@ -325,49 +274,249 @@ final class AutomationSocketUITests: XCTestCase {
         return (workspaceId: resolvedWorkspaceId, surfaceId: surfaceId)
     }
 
-    private func socketV2Raw(
-        method: String,
-        params: [String: Any] = [:],
-        responseTimeout: TimeInterval = 2.0
-    ) -> String? {
-        socketV2Envelope(method: method, params: params, responseTimeout: responseTimeout)?.raw
-    }
-
-    private func socketCommandViaNetcat(_ cmd: String, responseTimeout: TimeInterval = 2.0) -> String? {
-        let nc = "/usr/bin/nc"
-        guard FileManager.default.isExecutableFile(atPath: nc) else { return nil }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-        let timeoutSeconds = max(1, Int(ceil(responseTimeout)))
-        let script =
-            "printf '%s\\n' \(shellSingleQuote(cmd)) | " +
-            "\(nc) -U \(shellSingleQuote(socketPath)) -w \(timeoutSeconds) 2>/dev/null"
-        proc.arguments = ["-lc", script]
-
-        let outPipe = Pipe()
-        proc.standardOutput = outPipe
-
-        do {
-            try proc.run()
-        } catch {
+    private func resolvedWindowId(from payload: [String: Any]?) -> String? {
+        guard let windows = payload?["windows"] as? [[String: Any]], !windows.isEmpty else {
             return nil
         }
-
-        proc.waitUntilExit()
-
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let outStr = String(data: outData, encoding: .utf8) else { return nil }
-        if let first = outStr.split(separator: "\n", maxSplits: 1).first {
-            return String(first).trimmingCharacters(in: .whitespacesAndNewlines)
+        let preferred = windows.first(where: { ($0["key"] as? Bool) == true }) ??
+            windows.first(where: { ($0["visible"] as? Bool) == true }) ??
+            windows.first
+        guard let windowId = preferred?["id"] as? String, !windowId.isEmpty else {
+            return nil
         }
-        let trimmed = outStr.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        return windowId
     }
 
-    private func shellSingleQuote(_ value: String) -> String {
-        if value.isEmpty { return "''" }
-        return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    private func workspaceList(windowId: String?) -> (command: CmuxCommandResult, payload: [String: Any]?)? {
+        guard let windowId, !windowId.isEmpty else { return nil }
+        return runCmuxJSON(
+            arguments: [
+                "--window",
+                windowId,
+                "list-workspaces",
+            ],
+            responseTimeoutSeconds: 4.0
+        )
+    }
+
+    private func panelList(
+        windowId: String?,
+        workspaceId: String?
+    ) -> (command: CmuxCommandResult, payload: [String: Any]?)? {
+        guard let windowId, !windowId.isEmpty else { return nil }
+        var arguments = [
+            "--window",
+            windowId,
+            "list-panels",
+        ]
+        if let workspaceId, !workspaceId.isEmpty {
+            arguments.append(contentsOf: ["--workspace", workspaceId])
+        }
+        return runCmuxJSON(arguments: arguments, responseTimeoutSeconds: 4.0)
+    }
+
+    private func runCmuxJSON(
+        arguments: [String],
+        responseTimeoutSeconds: Double = 3.0
+    ) -> (command: CmuxCommandResult, payload: [String: Any]?)? {
+        let command = runCmuxCommand(
+            arguments: ["--json", "--id-format", "uuids"] + arguments,
+            responseTimeoutSeconds: responseTimeoutSeconds
+        )
+        let raw = command.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            return (command: command, payload: nil)
+        }
+        guard let data = raw.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (command: command, payload: nil)
+        }
+        return (command: command, payload: payload)
+    }
+
+    private func runCmuxCommand(
+        arguments: [String],
+        responseTimeoutSeconds: Double = 3.0
+    ) -> CmuxCommandResult {
+        var args = ["--socket", socketPath]
+        args.append(contentsOf: arguments)
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC"] = String(responseTimeoutSeconds)
+
+        let cliPaths = resolveCmuxCLIPaths()
+        if cliPaths.isEmpty {
+            return CmuxCommandResult(
+                terminationStatus: -1,
+                stdout: "",
+                stderr: "Failed to locate bundled cmux CLI"
+            )
+        }
+
+        var lastPermissionFailure: CmuxCommandResult?
+        for cliPath in cliPaths {
+            let result = executeCmuxCommand(
+                executablePath: cliPath,
+                arguments: args,
+                environment: environment
+            )
+            if result.terminationStatus == 0 {
+                return result
+            }
+            if isSocketPermissionFailure(result.stderr) {
+                lastPermissionFailure = result
+                continue
+            }
+            return result
+        }
+
+        return lastPermissionFailure ?? CmuxCommandResult(
+            terminationStatus: -1,
+            stdout: "",
+            stderr: "Bundled cmux CLI command failed without an executable path"
+        )
+    }
+
+    private func describeCommandResult(_ result: (command: CmuxCommandResult, payload: [String: Any]?)?) -> String {
+        guard let result else { return "<nil>" }
+        let stdout = result.command.stdout.isEmpty ? "<empty>" : result.command.stdout
+        let stderr = result.command.stderr.isEmpty ? "<empty>" : result.command.stderr
+        return "status=\(result.command.terminationStatus) stdout=\(stdout) stderr=\(stderr)"
+    }
+
+    private func resolveCmuxCLIPaths() -> [String] {
+        let fileManager = FileManager.default
+        let env = ProcessInfo.processInfo.environment
+        var candidates: [String] = []
+        var productDirectories: [String] = []
+
+        for key in ["CMUX_UI_TEST_CLI_PATH", "CMUXTERM_CLI"] {
+            if let value = env[key], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                candidates.append(value)
+            }
+        }
+
+        if let builtProductsDir = env["BUILT_PRODUCTS_DIR"], !builtProductsDir.isEmpty {
+            productDirectories.append(builtProductsDir)
+        }
+
+        if let hostPath = env["TEST_HOST"], !hostPath.isEmpty {
+            let hostURL = URL(fileURLWithPath: hostPath)
+            let productsDir = hostURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+            productDirectories.append(productsDir)
+        }
+
+        productDirectories.append(contentsOf: inferredBuildProductsDirectories())
+        for productsDir in uniquePaths(productDirectories) {
+            appendCLIPathCandidates(fromProductsDirectory: productsDir, to: &candidates)
+        }
+
+        candidates.append("/tmp/cmux-\(launchTag)/Build/Products/Debug/cmux DEV.app/Contents/Resources/bin/cmux")
+        candidates.append("/tmp/cmux-\(launchTag)/Build/Products/Debug/cmux.app/Contents/Resources/bin/cmux")
+
+        var resolvedPaths: [String] = []
+        for path in uniquePaths(candidates) {
+            guard fileManager.isExecutableFile(atPath: path) else { continue }
+            resolvedPaths.append(URL(fileURLWithPath: path).resolvingSymlinksInPath().path)
+        }
+        return uniquePaths(resolvedPaths)
+    }
+
+    private func inferredBuildProductsDirectories() -> [String] {
+        let bundleURLs = [
+            Bundle.main.bundleURL,
+            Bundle(for: Self.self).bundleURL,
+        ]
+
+        return bundleURLs.compactMap { bundleURL in
+            let standardizedPath = bundleURL.standardizedFileURL.path
+            let components = standardizedPath.split(separator: "/")
+            guard let productsIndex = components.firstIndex(of: "Products"),
+                  productsIndex + 1 < components.count else {
+                return nil
+            }
+            let prefixComponents = components.prefix(productsIndex + 2)
+            return "/" + prefixComponents.joined(separator: "/")
+        }
+    }
+
+    private func appendCLIPathCandidates(fromProductsDirectory productsDir: String, to candidates: inout [String]) {
+        candidates.append("\(productsDir)/cmux DEV.app/Contents/Resources/bin/cmux")
+        candidates.append("\(productsDir)/cmux.app/Contents/Resources/bin/cmux")
+
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: productsDir) else {
+            return
+        }
+
+        for entry in entries.sorted() where entry.hasSuffix(".app") {
+            let cliPath = URL(fileURLWithPath: productsDir)
+                .appendingPathComponent(entry)
+                .appendingPathComponent("Contents/Resources/bin/cmux")
+                .path
+            candidates.append(cliPath)
+        }
+    }
+
+    private func executeCmuxCommand(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String]
+    ) -> CmuxCommandResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        process.environment = environment
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return CmuxCommandResult(
+                terminationStatus: -1,
+                stdout: "",
+                stderr: "Failed to run cmux command: \(error.localizedDescription) (cliPath=\(executablePath))"
+            )
+        }
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawStderr = String(data: stderrData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stderr = rawStderr.isEmpty ? "" : "\(rawStderr) (cliPath=\(executablePath))"
+        return CmuxCommandResult(
+            terminationStatus: process.terminationStatus,
+            stdout: stdout,
+            stderr: stderr
+        )
+    }
+
+    private func isSocketPermissionFailure(_ stderr: String?) -> Bool {
+        guard let stderr, !stderr.isEmpty else { return false }
+        return stderr.localizedCaseInsensitiveContains("failed to connect to socket") &&
+            stderr.localizedCaseInsensitiveContains("operation not permitted")
+    }
+
+    private func uniquePaths(_ paths: [String]) -> [String] {
+        var unique: [String] = []
+        var seen = Set<String>()
+        for path in paths {
+            if seen.insert(path).inserted {
+                unique.append(path)
+            }
+        }
+        return unique
     }
 
     private func resetSocketDefaults() {
@@ -401,120 +550,5 @@ final class AutomationSocketUITests: XCTestCase {
             return nil
         }
         return object
-    }
-
-    private final class ControlSocketClient {
-        private let path: String
-        private let responseTimeout: TimeInterval
-
-        init(path: String, responseTimeout: TimeInterval = 2.0) {
-            self.path = path
-            self.responseTimeout = responseTimeout
-        }
-
-        func sendLine(_ line: String) -> String? {
-            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-            guard fd >= 0 else { return nil }
-            defer { close(fd) }
-
-            var socketTimeout = timeval(
-                tv_sec: Int(responseTimeout.rounded(.down)),
-                tv_usec: Int32(((responseTimeout - floor(responseTimeout)) * 1_000_000).rounded())
-            )
-
-#if os(macOS)
-            var noSigPipe: Int32 = 1
-            _ = withUnsafePointer(to: &noSigPipe) { ptr in
-                setsockopt(
-                    fd,
-                    SOL_SOCKET,
-                    SO_NOSIGPIPE,
-                    ptr,
-                    socklen_t(MemoryLayout<Int32>.size)
-                )
-            }
-#endif
-            _ = withUnsafePointer(to: &socketTimeout) { ptr in
-                setsockopt(
-                    fd,
-                    SOL_SOCKET,
-                    SO_RCVTIMEO,
-                    ptr,
-                    socklen_t(MemoryLayout<timeval>.size)
-                )
-            }
-            _ = withUnsafePointer(to: &socketTimeout) { ptr in
-                setsockopt(
-                    fd,
-                    SOL_SOCKET,
-                    SO_SNDTIMEO,
-                    ptr,
-                    socklen_t(MemoryLayout<timeval>.size)
-                )
-            }
-
-            var addr = sockaddr_un()
-            memset(&addr, 0, MemoryLayout<sockaddr_un>.size)
-            addr.sun_family = sa_family_t(AF_UNIX)
-
-            let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
-            let bytes = Array(path.utf8CString)
-            guard bytes.count <= maxLen else { return nil }
-            withUnsafeMutablePointer(to: &addr.sun_path) { p in
-                let raw = UnsafeMutableRawPointer(p).assumingMemoryBound(to: CChar.self)
-                memset(raw, 0, maxLen)
-                for i in 0..<bytes.count {
-                    raw[i] = bytes[i]
-                }
-            }
-
-            let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
-            let addrLen = socklen_t(pathOffset + bytes.count)
-#if os(macOS)
-            addr.sun_len = UInt8(min(Int(addrLen), 255))
-#endif
-
-            let connected = withUnsafePointer(to: &addr) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    connect(fd, sa, addrLen)
-                }
-            }
-            guard connected == 0 else { return nil }
-
-            let payload = line + "\n"
-            let wrote: Bool = payload.withCString { cstr in
-                var remaining = strlen(cstr)
-                var p = UnsafeRawPointer(cstr)
-                while remaining > 0 {
-                    let n = write(fd, p, remaining)
-                    if n <= 0 { return false }
-                    remaining -= n
-                    p = p.advanced(by: n)
-                }
-                return true
-            }
-            guard wrote else { return nil }
-
-            var buf = [UInt8](repeating: 0, count: 4096)
-            var accum = ""
-            while true {
-                let n = read(fd, &buf, buf.count)
-                if n < 0 {
-                    let code = errno
-                    if code == EAGAIN || code == EWOULDBLOCK {
-                        break
-                    }
-                    return nil
-                }
-                if n <= 0 { break }
-                if let chunk = String(bytes: buf[0..<n], encoding: .utf8) {
-                    accum.append(chunk)
-                    if let idx = accum.firstIndex(of: "\n") {
-                        return String(accum[..<idx])
-                    }
-                }
-            }
-            return accum.isEmpty ? nil : accum.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
     }
 }
