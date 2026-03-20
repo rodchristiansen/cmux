@@ -370,11 +370,15 @@ final class AutomationSocketUITests: XCTestCase {
             return result
         }
 
-        return lastPermissionFailure ?? CmuxCommandResult(
-            terminationStatus: -1,
-            stdout: "",
-            stderr: "Bundled cmux CLI command failed without an executable path"
+        let fallbackResult = executeCmuxCommand(
+            executablePath: "/usr/bin/env",
+            arguments: ["cmux"] + args,
+            environment: environment
         )
+        if fallbackResult.terminationStatus == 0 || lastPermissionFailure == nil {
+            return fallbackResult
+        }
+        return lastPermissionFailure ?? fallbackResult
     }
 
     private func describeCommandResult(_ result: (command: CmuxCommandResult, payload: [String: Any]?)?) -> String {
