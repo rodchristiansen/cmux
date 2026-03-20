@@ -2777,6 +2777,29 @@ final class TerminalSurface: Identifiable, ObservableObject {
         lease.inWindow && lease.area > portalHostAreaThreshold
     }
 
+    @discardableResult
+    func preparePortalHostReplacementIfOwned(hostId: ObjectIdentifier, reason: String) -> Bool {
+        guard let current = activePortalHostLease, current.hostId == hostId else { return false }
+        // SwiftUI can tear down and rebuild the host NSView during split churn. Keep the
+        // existing portal binding alive, but make the old lease non-usable so the next
+        // distinct host in the same pane can claim immediately instead of waiting for a
+        // later layout-follow-up retry.
+        activePortalHostLease = PortalHostLease(
+            hostId: current.hostId,
+            paneId: current.paneId,
+            inWindow: false,
+            area: current.area
+        )
+#if DEBUG
+        dlog(
+            "terminal.portal.host.rearm surface=\(id.uuidString.prefix(5)) " +
+            "reason=\(reason) host=\(hostId) pane=\(current.paneId.uuidString.prefix(5)) " +
+            "area=\(String(format: "%.1f", current.area))"
+        )
+#endif
+        return true
+    }
+
     func claimPortalHost(
         hostId: ObjectIdentifier,
         paneId: PaneID,
@@ -6327,6 +6350,13 @@ final class GhosttySurfaceScrollView: NSView {
         )
     }
 
+    func prepareOwnedPortalHostForTransientReattach(hostId: ObjectIdentifier, reason: String) {
+        surfaceView.terminalSurface?.preparePortalHostReplacementIfOwned(
+            hostId: hostId,
+            reason: reason
+        )
+    }
+
     init(surfaceView: GhosttyNSView) {
         self.surfaceView = surfaceView
         backgroundView = NSView(frame: .zero)
@@ -9193,15 +9223,15 @@ struct GhosttyTerminalView: NSViewRepresentable {
         if let host = nsView as? HostContainerView {
             host.onDidMoveToWindow = nil
             host.onGeometryChanged = nil
-            hostedView?.releaseOwnedPortalHost(
+            hostedView?.prepareOwnedPortalHostForTransientReattach(
                 hostId: ObjectIdentifier(host),
                 reason: "dismantle"
             )
         }
 
         // SwiftUI can transiently dismantle/rebuild NSViewRepresentable instances during split
-        // tree updates. Do not force visible/active false here; that causes avoidable blackouts
-        // when the same hosted view is rebound moments later.
+        // tree updates. Do not drop the portal lease or force visible/active false here; that
+        // causes avoidable blackouts when the same hosted view is rebound moments later.
         hostedView?.setFocusHandler(nil)
         hostedView?.setTriggerFlashHandler(nil)
         hostedView?.setDropZoneOverlay(zone: nil)
