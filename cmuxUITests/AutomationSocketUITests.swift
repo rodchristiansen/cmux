@@ -452,6 +452,7 @@ final class AutomationSocketUITests: XCTestCase {
     private func appendCLIPathCandidates(fromProductsDirectory productsDir: String, to candidates: inout [String]) {
         candidates.append("\(productsDir)/cmux DEV.app/Contents/Resources/bin/cmux")
         candidates.append("\(productsDir)/cmux.app/Contents/Resources/bin/cmux")
+        candidates.append("\(productsDir)/cmux")
 
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: productsDir) else {
             return
@@ -461,6 +462,12 @@ final class AutomationSocketUITests: XCTestCase {
             let cliPath = URL(fileURLWithPath: productsDir)
                 .appendingPathComponent(entry)
                 .appendingPathComponent("Contents/Resources/bin/cmux")
+                .path
+            candidates.append(cliPath)
+        }
+        for entry in entries.sorted() where entry == "cmux" {
+            let cliPath = URL(fileURLWithPath: productsDir)
+                .appendingPathComponent(entry)
                 .path
             candidates.append(cliPath)
         }
