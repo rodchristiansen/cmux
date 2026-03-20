@@ -4,6 +4,7 @@ import Foundation
 final class AutomationSocketUITests: XCTestCase {
     private var socketPath = ""
     private var diagnosticsPath = ""
+    private var ensureTerminalSurfaceFailure = ""
     private let defaultsDomain = "com.cmuxterm.app.debug"
     private let modeKey = "socketControlMode"
     private let legacyKey = "socketControlEnabled"
@@ -14,6 +15,7 @@ final class AutomationSocketUITests: XCTestCase {
         continueAfterFailure = false
         socketPath = "/tmp/cmux-debug-\(UUID().uuidString).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-diagnostics-\(UUID().uuidString).json"
+        ensureTerminalSurfaceFailure = ""
         resetSocketDefaults()
         removeSocketFile()
         try? FileManager.default.removeItem(atPath: diagnosticsPath)
@@ -74,7 +76,8 @@ final class AutomationSocketUITests: XCTestCase {
         guard let target = ensureTerminalSurface(timeout: 10.0) else {
             XCTFail(
                 "Expected a terminal surface before repeated send-key socket test. " +
-                "socket=\(socketPath) diagnostics=\(loadDiagnostics() ?? [:])"
+                "socket=\(socketPath) diagnostics=\(loadDiagnostics() ?? [:]) " +
+                "trace=\(ensureTerminalSurfaceFailure)"
             )
             return
         }
@@ -190,6 +193,14 @@ final class AutomationSocketUITests: XCTestCase {
         params: [String: Any] = [:],
         responseTimeout: TimeInterval = 2.0
     ) -> [String: Any]? {
+        socketV2Envelope(method: method, params: params, responseTimeout: responseTimeout)?.result
+    }
+
+    private func socketV2Envelope(
+        method: String,
+        params: [String: Any] = [:],
+        responseTimeout: TimeInterval = 2.0
+    ) -> (raw: String, response: [String: Any], result: [String: Any])? {
         let request: [String: Any] = [
             "id": UUID().uuidString,
             "method": method,
@@ -205,12 +216,20 @@ final class AutomationSocketUITests: XCTestCase {
               (response["ok"] as? Bool) == true else {
             return nil
         }
-        return (response["result"] as? [String: Any]) ?? [:]
+        let result = (response["result"] as? [String: Any]) ?? [:]
+        return (raw: raw, response: response, result: result)
     }
 
     private func ensureTerminalSurface(timeout: TimeInterval) -> (windowId: String, workspaceId: String, surfaceId: String)? {
+        ensureTerminalSurfaceFailure = ""
         let initialWindowId = currentWindowId()
+        var traceParts: [String] = [
+            "window.current=\(socketV2Raw(method: "window.current") ?? "<nil>")",
+            "workspace.list.initial=\(socketV2Raw(method: "workspace.list", params: initialWindowId.map { ["window_id": $0] } ?? [:]) ?? "<nil>")",
+            "surface.list.initial=\(socketV2Raw(method: "surface.list", params: initialWindowId.map { ["window_id": $0] } ?? [:]) ?? "<nil>")",
+        ]
         if let target = terminalSurface(windowId: initialWindowId) {
+            ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
             return (
                 windowId: initialWindowId ?? "",
                 workspaceId: target.workspaceId,
@@ -223,12 +242,15 @@ final class AutomationSocketUITests: XCTestCase {
             workspaceCreateParams["window_id"] = initialWindowId
         }
 
-        guard let workspacePayload = socketV2(
+        let workspaceCreateEnvelope = socketV2Envelope(
             method: "workspace.create",
             params: workspaceCreateParams,
             responseTimeout: 4.0
-        ),
+        )
+        traceParts.append("workspace.create=\(workspaceCreateEnvelope?.raw ?? "<nil>")")
+        guard let workspacePayload = workspaceCreateEnvelope?.result,
               let workspaceId = workspacePayload["workspace_id"] as? String else {
+            ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
             return nil
         }
         let windowId = (workspacePayload["window_id"] as? String)?
@@ -239,11 +261,23 @@ final class AutomationSocketUITests: XCTestCase {
         if let windowId, !windowId.isEmpty {
             workspaceSelectParams["window_id"] = windowId
         }
-        _ = socketV2(method: "workspace.select", params: workspaceSelectParams, responseTimeout: 4.0)
+        let workspaceSelectEnvelope = socketV2Envelope(
+            method: "workspace.select",
+            params: workspaceSelectParams,
+            responseTimeout: 4.0
+        )
+        traceParts.append("workspace.select=\(workspaceSelectEnvelope?.raw ?? "<nil>")")
 
         let ready = waitForCondition(timeout: timeout) {
             self.terminalSurface(windowId: windowId, workspaceId: workspaceId) != nil
         }
+        traceParts.append(
+            "workspace.list.created=\(socketV2Raw(method: "workspace.list", params: workspaceSelectParams, responseTimeout: 4.0) ?? "<nil>")"
+        )
+        traceParts.append(
+            "surface.list.created=\(socketV2Raw(method: "surface.list", params: workspaceSelectParams, responseTimeout: 4.0) ?? "<nil>")"
+        )
+        ensureTerminalSurfaceFailure = traceParts.joined(separator: " | ")
         guard ready else { return nil }
         guard let target = terminalSurface(windowId: windowId, workspaceId: workspaceId) else {
             return nil
@@ -289,6 +323,14 @@ final class AutomationSocketUITests: XCTestCase {
             return nil
         }
         return (workspaceId: resolvedWorkspaceId, surfaceId: surfaceId)
+    }
+
+    private func socketV2Raw(
+        method: String,
+        params: [String: Any] = [:],
+        responseTimeout: TimeInterval = 2.0
+    ) -> String? {
+        socketV2Envelope(method: method, params: params, responseTimeout: responseTimeout)?.raw
     }
 
     private func socketCommandViaNetcat(_ cmd: String, responseTimeout: TimeInterval = 2.0) -> String? {
