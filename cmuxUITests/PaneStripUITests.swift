@@ -34,6 +34,11 @@ final class PaneStripUITests: XCTestCase {
         assertPassingPaneStripPayload(payload, scenario: "initial_terminal_renders_after_input")
     }
 
+    func testInitialTerminalRecoversAfterLateActivation() {
+        let payload = runPaneStripScenario("initial_terminal_recovers_after_late_activation")
+        assertPassingPaneStripPayload(payload, scenario: "initial_terminal_recovers_after_late_activation")
+    }
+
     func testFocusRevealRightKeepsTerminalsVisibleAndAligned() {
         let payload = runPaneStripScenario("focus_reveal_right")
         assertPassingPaneStripPayload(payload, scenario: "focus_reveal_right")

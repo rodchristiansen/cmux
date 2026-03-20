@@ -4224,11 +4224,18 @@ class TabManager: ObservableObject {
             env["CMUX_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] == "1" ||
             env["CMUX_UI_TEST_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] == "1"
         let requireForegroundActivation = env["CMUX_UI_TEST_PANE_STRIP_MOTION_SETUP"] == "1"
+        let launchMode = (
+            env["CMUX_PANE_STRIP_LAUNCH_MODE"] ??
+            env["CMUX_UI_TEST_PANE_STRIP_LAUNCH_MODE"] ??
+            "direct"
+        )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard await self.waitForPaneStripMotionUITestLaunchReadiness(
-                requireForegroundActivation: requireForegroundActivation
+                requireForegroundActivation: requireForegroundActivation,
+                launchMode: launchMode
             ) else {
                 self.writePaneStripMotionTestData([
                     "status": "error",
@@ -4247,6 +4254,7 @@ class TabManager: ObservableObject {
                 path: path,
                 scenario: scenario,
                 frameCount: frameCount,
+                launchMode: launchMode,
                 quitWhenDone: quitWhenDone
             )
         }
@@ -4255,12 +4263,14 @@ class TabManager: ObservableObject {
     @MainActor
     private func waitForPaneStripMotionUITestLaunchReadiness(
         requireForegroundActivation: Bool,
+        launchMode: String,
         timeoutSeconds: TimeInterval = 5.0
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
+        let shouldAutoActivate = requireForegroundActivation || launchMode != "background_then_activate"
         while Date() < deadline {
             let hasWindowAndWorkspace = window != nil && selectedWorkspace != nil
-            if let window, hasWindowAndWorkspace {
+            if let window, hasWindowAndWorkspace, shouldAutoActivate {
                 NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 NSApp.activate(ignoringOtherApps: true)
                 window.orderFrontRegardless()
@@ -4282,6 +4292,7 @@ class TabManager: ObservableObject {
         path: String,
         scenario: String,
         frameCount: Int,
+        launchMode: String,
         quitWhenDone: Bool
     ) async {
         let crop = CGRect(x: 0.04, y: 0.01, width: 0.92, height: 0.08)
@@ -4291,6 +4302,8 @@ class TabManager: ObservableObject {
                 return 0
             case "initial_terminal_renders_after_input":
                 return 1
+            case "initial_terminal_recovers_after_late_activation":
+                return 4
             default:
                 return 4
             }
@@ -4333,29 +4346,35 @@ class TabManager: ObservableObject {
         writePaneStripMotionTestData([
             "status": "running",
             "scenario": scenario,
+            "launchMode": launchMode,
             "timelineFrameCount": String(frameCount),
             "done": "0",
         ], at: path)
 
         @MainActor
-        func reassertPaneStripMotionTestWindow() {
+        func reassertPaneStripMotionTestWindow(forceActivate: Bool = true) {
             guard let window else { return }
-            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-            window.makeMain()
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
-            NSApp.activate(ignoringOtherApps: true)
+            if forceActivate {
+                NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                window.makeMain()
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
+                NSApp.activate(ignoringOtherApps: true)
+            }
             window.layoutIfNeeded()
             window.displayIfNeeded()
             window.contentView?.layoutSubtreeIfNeeded()
             window.contentView?.displayIfNeeded()
         }
 
+        let shouldDelayInitialActivation = launchMode == "background_then_activate"
+        let requiresPrePaintedInitialTerminal = scenario != "initial_terminal_recovers_after_late_activation"
+
         if let window {
             var frame = window.frame
             frame.size = CGSize(width: 1440, height: 900)
             window.setFrame(frame, display: true, animate: false)
-            reassertPaneStripMotionTestWindow()
+            reassertPaneStripMotionTestWindow(forceActivate: !shouldDelayInitialActivation)
         }
 
         let tab: Workspace = {
@@ -4366,7 +4385,7 @@ class TabManager: ObservableObject {
             }
             return addWorkspace(select: true, eagerLoadTerminal: true, autoWelcomeIfNeeded: false)
         }()
-        reassertPaneStripMotionTestWindow()
+        reassertPaneStripMotionTestWindow(forceActivate: !shouldDelayInitialActivation)
 
         guard let sourcePanelId = tab.focusedPanelId else {
             fail("Missing initial focused panel")
@@ -4383,7 +4402,7 @@ class TabManager: ObservableObject {
             fail("Initial terminal not ready (attached=\(initialTerminalReadiness.attached ? 1 : 0) surface=\(initialTerminalReadiness.hasSurface ? 1 : 0))")
             return
         }
-        guard await waitForTerminalPanelPainted(sourcePanelId) else {
+        if requiresPrePaintedInitialTerminal, !(await waitForTerminalPanelPainted(sourcePanelId)) {
             fail(
                 "Initial terminal did not paint visible content before any synthetic input",
                 extra: terminalVisibilityDebugInfo(for: sourcePanelId)
@@ -4647,6 +4666,43 @@ class TabManager: ObservableObject {
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
                 fail("Initial terminal never produced visible content during capture", extra: extra)
+                return
+            }
+
+        case "initial_terminal_recovers_after_late_activation":
+            let shouldHideOnFirstFrame = !shouldDelayInitialActivation
+            result = await capturePaneStripMotionTimeline(
+                frameCount: frameCount,
+                actionFrame: actionFrame,
+                targets: [
+                    .init(
+                        label: "T",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        bootstrapGraceFrames: newlyVisiblePaneBootstrapGraceFrames,
+                        minimumEvaluationFrame: actionFrame,
+                        referenceMode: .firstMeasuredSample,
+                        renderSurfaceFromWindowCapture: true
+                    ),
+                ],
+                hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
+                actions: [
+                    (frame: 0, action: {
+                        guard shouldHideOnFirstFrame else { return }
+                        NSApp.hide(nil)
+                    }),
+                    (frame: actionFrame, action: {
+                        reassertPaneStripMotionTestWindow()
+                    }),
+                ]
+            )
+
+            if result.nonBlankSampleCounts["T", default: 0] == 0 {
+                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                extra["sampleCounts"] = debugJSONString(result.sampleCounts)
+                extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
+                extra["timelineTrace"] = result.trace.joined(separator: "|")
+                fail("Initial terminal never recovered visible content after late activation", extra: extra)
                 return
             }
 

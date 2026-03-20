@@ -124,6 +124,7 @@ def activate_app_bundle(bundle: Path) -> None:
 def run_scenario(binary: Path, scenario: str, frame_count: int) -> tuple[bool, str]:
     persisted_output = output_path_for(scenario)
     bundle = resolve_cmux_bundle_for_binary(binary)
+    launch_mode = os.environ.get("CMUX_PANE_STRIP_LAUNCH_MODE", "direct")
     kill_existing_binary_processes(binary)
     with tempfile.TemporaryDirectory(prefix="cmux-pane-strip-motion-") as temp_dir:
         data_path = Path(temp_dir) / f"{scenario}.json"
@@ -133,6 +134,7 @@ def run_scenario(binary: Path, scenario: str, frame_count: int) -> tuple[bool, s
         env["CMUX_PANE_STRIP_MOTION_SCENARIO"] = scenario
         env["CMUX_PANE_STRIP_MOTION_FRAME_COUNT"] = str(frame_count)
         env["CMUX_PANE_STRIP_MOTION_QUIT_WHEN_DONE"] = "1"
+        env["CMUX_PANE_STRIP_LAUNCH_MODE"] = launch_mode
         env["CMUX_CLI_SENTRY_DISABLED"] = "1"
         env["CMUX_CLAUDE_HOOK_SENTRY_DISABLED"] = "1"
 
@@ -146,7 +148,8 @@ def run_scenario(binary: Path, scenario: str, frame_count: int) -> tuple[bool, s
         )
 
         deadline = time.time() + 35.0
-        next_activation_at = 0.0
+        activation_delay = 1.5 if launch_mode == "background_then_activate" else 0.0
+        next_activation_at = time.time() + activation_delay
         payload: dict[str, str] | None = None
         try:
             while time.time() < deadline:
@@ -235,7 +238,7 @@ def main() -> int:
     frame_count = int(os.environ.get("CMUX_PANE_STRIP_MOTION_FRAMES", "36"))
     scenarios = os.environ.get(
         "CMUX_PANE_STRIP_MOTION_SCENARIOS",
-        "initial_terminal_visible,initial_terminal_renders_after_input,focus_reveal_right,pan_viewport_right,open_pane_right,browser_focus_reveal_right",
+        "initial_terminal_visible,initial_terminal_renders_after_input,initial_terminal_recovers_after_late_activation,focus_reveal_right,pan_viewport_right,open_pane_right,browser_focus_reveal_right",
     ).split(",")
     scenarios = [s.strip() for s in scenarios if s.strip()]
 
