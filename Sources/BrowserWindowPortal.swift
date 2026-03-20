@@ -2121,6 +2121,42 @@ final class WindowBrowserPortal: NSObject {
                 self.scheduleExternalGeometrySynchronize()
             }
         })
+        geometryObservers.append(center.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleActivationRecoverySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleActivationRecoverySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleActivationRecoverySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSApplication.didUnhideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleActivationRecoverySynchronize()
+            }
+        })
     }
 
     private func removeGeometryObservers() {
@@ -2137,6 +2173,28 @@ final class WindowBrowserPortal: NSObject {
             guard let self else { return }
             self.hasExternalGeometrySyncScheduled = false
             self.synchronizeAllEntriesFromExternalGeometryChange()
+        }
+    }
+
+    private func scheduleActivationRecoverySynchronize() {
+        scheduleExternalGeometrySynchronize()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshVisibleWebViewsForActivationRecovery()
+        }
+    }
+
+    private func refreshVisibleWebViewsForActivationRecovery() {
+        for entry in entriesByWebViewId.values {
+            guard let webView = entry.webView,
+                  let containerView = entry.containerView,
+                  entry.visibleInUI,
+                  !containerView.isHidden,
+                  webView.superview === containerView else { continue }
+            refreshHostedWebViewPresentation(
+                webView,
+                in: containerView,
+                reason: "activationRecovery"
+            )
         }
     }
 

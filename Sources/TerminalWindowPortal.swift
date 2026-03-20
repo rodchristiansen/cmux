@@ -685,6 +685,42 @@ final class WindowTerminalPortal: NSObject {
                 self?.scheduleExternalGeometrySynchronize()
             }
         })
+        geometryObservers.append(center.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleExternalGeometrySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleExternalGeometrySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleExternalGeometrySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSApplication.didUnhideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleExternalGeometrySynchronize()
+            }
+        })
     }
 
     private func removeGeometryObservers() {

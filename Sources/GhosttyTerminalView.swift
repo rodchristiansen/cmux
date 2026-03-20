@@ -6488,6 +6488,23 @@ final class GhosttySurfaceScrollView: NSView {
         }
     }
 
+    private func replayVisiblePresentationIfNeeded(reason: String, applyResponder: Bool = false) {
+        synchronizeGhosttyVisibility(reason: reason)
+        guard let window, window.isVisible else { return }
+        guard surfaceView.isVisibleInUI,
+              !isHiddenOrHasHiddenAncestor,
+              !surfaceView.isHiddenOrHasHiddenAncestor,
+              bounds.width > 1,
+              bounds.height > 1 else {
+            return
+        }
+        if applyResponder {
+            applyFirstResponderIfNeeded()
+        }
+        reconcileGeometryNow()
+        refreshSurfaceNow(reason: reason)
+    }
+
     @discardableResult
     private func setFrameIfNeeded(_ view: NSView, to frame: CGRect) -> Bool {
         guard !Self.rectApproximatelyEqual(view.frame, frame) else { return false }
@@ -6625,9 +6642,7 @@ final class GhosttySurfaceScrollView: NSView {
 #if DEBUG
             dlog("find.window.didBecomeKey surface=\(self.surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") searchActive=\(searchActive) focusTarget=\(self.searchFocusTarget) firstResponder=\(String(describing: self.window?.firstResponder))")
 #endif
-            self.synchronizeGhosttyVisibility(reason: "window.didBecomeKey")
-            self.applyFirstResponderIfNeeded()
-            self.refreshSurfaceNow(reason: "window.didBecomeKey")
+            self.replayVisiblePresentationIfNeeded(reason: "window.didBecomeKey", applyResponder: true)
         })
         windowObservers.append(NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
@@ -6658,10 +6673,22 @@ final class GhosttySurfaceScrollView: NSView {
         ) { [weak self] _ in
             self?.synchronizeGhosttyVisibility(reason: "window.didChangeOcclusionState")
         })
+        windowObservers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.replayVisiblePresentationIfNeeded(reason: "app.didBecomeActive", applyResponder: true)
+        })
+        windowObservers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didUnhideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.replayVisiblePresentationIfNeeded(reason: "app.didUnhide", applyResponder: true)
+        })
         if window.isKeyWindow {
-            synchronizeGhosttyVisibility(reason: "viewDidMoveToWindow.keyWindow")
-            applyFirstResponderIfNeeded()
-            refreshSurfaceNow(reason: "viewDidMoveToWindow")
+            replayVisiblePresentationIfNeeded(reason: "viewDidMoveToWindow.keyWindow", applyResponder: true)
         } else {
             synchronizeGhosttyVisibility(reason: "viewDidMoveToWindow")
         }
