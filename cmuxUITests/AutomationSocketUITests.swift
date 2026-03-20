@@ -3,6 +3,7 @@ import Foundation
 
 final class AutomationSocketUITests: XCTestCase {
     private var socketPath = ""
+    private var diagnosticsPath = ""
     private let defaultsDomain = "com.cmuxterm.app.debug"
     private let modeKey = "socketControlMode"
     private let legacyKey = "socketControlEnabled"
@@ -12,8 +13,10 @@ final class AutomationSocketUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         socketPath = "/tmp/cmux-debug-\(UUID().uuidString).sock"
+        diagnosticsPath = "/tmp/cmux-ui-test-diagnostics-\(UUID().uuidString).json"
         resetSocketDefaults()
         removeSocketFile()
+        try? FileManager.default.removeItem(atPath: diagnosticsPath)
     }
 
     func testSocketToggleDisablesAndEnables() {
@@ -25,7 +28,7 @@ final class AutomationSocketUITests: XCTestCase {
         )
 
         guard let resolvedPath = resolveSocketPath(timeout: 5.0) else {
-            XCTFail("Expected control socket to exist")
+            XCTFail("Expected control socket to exist. diagnostics=\(loadDiagnostics() ?? [:])")
             return
         }
         socketPath = resolvedPath
@@ -60,13 +63,19 @@ final class AutomationSocketUITests: XCTestCase {
         )
 
         guard let resolvedPath = resolveSocketPath(timeout: 5.0) else {
-            XCTFail("Expected control socket to exist for repeated send-key socket test")
+            XCTFail(
+                "Expected control socket to exist for repeated send-key socket test. " +
+                "diagnostics=\(loadDiagnostics() ?? [:])"
+            )
             return
         }
         socketPath = resolvedPath
 
         guard let target = ensureTerminalSurface(timeout: 10.0) else {
-            XCTFail("Expected a terminal surface before repeated send-key socket test")
+            XCTFail(
+                "Expected a terminal surface before repeated send-key socket test. " +
+                "socket=\(socketPath) diagnostics=\(loadDiagnostics() ?? [:])"
+            )
             return
         }
 
@@ -117,7 +126,9 @@ final class AutomationSocketUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-\(modeKey)", mode]
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_ALLOW_SOCKET_OVERRIDE"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] = diagnosticsPath
         // Debug launches require a tag outside reload.sh; provide one in UITests so CI
         // does not fail with "Application ... does not have a process ID".
         app.launchEnvironment["CMUX_TAG"] = launchTag
@@ -157,40 +168,10 @@ final class AutomationSocketUITests: XCTestCase {
     }
 
     private func resolveSocketPath(timeout: TimeInterval) -> String? {
-        var resolvedPath: String?
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                if FileManager.default.fileExists(atPath: self.socketPath) {
-                    resolvedPath = self.socketPath
-                    return true
-                }
-                if let found = self.findSocketInTmp() {
-                    resolvedPath = found
-                    return true
-                }
-                return false
-            },
-            object: NSObject()
-        )
-        if XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed {
-            return resolvedPath
-        }
-        return resolvedPath
-    }
-
-    private func findSocketInTmp() -> String? {
-        let tmpPath = "/tmp"
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: tmpPath) else {
+        guard waitForSocket(exists: true, timeout: timeout) else {
             return nil
         }
-        let matches = entries.filter { $0.hasPrefix("cmux") && $0.hasSuffix(".sock") }
-        if let debug = matches.first(where: { $0.contains("debug") }) {
-            return (tmpPath as NSString).appendingPathComponent(debug)
-        }
-        if let first = matches.first {
-            return (tmpPath as NSString).appendingPathComponent(first)
-        }
-        return nil
+        return socketPath
     }
 
     private func socketCommand(_ cmd: String, responseTimeout: TimeInterval = 2.0) -> String? {
@@ -316,6 +297,14 @@ final class AutomationSocketUITests: XCTestCase {
 
     private func removeSocketFile() {
         try? FileManager.default.removeItem(atPath: socketPath)
+    }
+
+    private func loadDiagnostics() -> [String: String]? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: diagnosticsPath)),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return nil
+        }
+        return object
     }
 
     private final class ControlSocketClient {
