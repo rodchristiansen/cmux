@@ -3771,9 +3771,13 @@ enum TelemetrySettings {
 }
 
 struct SettingsView: View {
+    private static let availableTerminalFontFamilies = monospaceFontFamilies()
+
     private let contentTopInset: CGFloat = 8
     private let pickerColumnWidth: CGFloat = 196
     private let notificationSoundControlWidth: CGFloat = 280
+    private let terminalFontControlWidth: CGFloat = 286
+    private let terminalFontSizeRange: ClosedRange<Double> = 6...72
 
     @AppStorage(LanguageSettings.languageKey) private var appLanguage = LanguageSettings.defaultLanguage.rawValue
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
@@ -3865,6 +3869,8 @@ struct SettingsView: View {
     @State private var telemetryValueAtLaunch = TelemetrySettings.enabledForCurrentLaunch
     @State private var showLanguageRestartAlert = false
     @State private var isResettingSettings = false
+    @State private var terminalFontFamily = GhosttyConfig.defaultFontFamily
+    @State private var terminalFontSize = Double(GhosttyConfig.defaultFontSize)
     @State private var workspaceTabDefaultEntries = WorkspaceTabColorSettings.defaultPaletteWithOverrides()
     @State private var workspaceTabCustomColors = WorkspaceTabColorSettings.customColors()
 
@@ -4065,6 +4071,43 @@ struct SettingsView: View {
 
     private var browserInsecureHTTPAllowlistHasUnsavedChanges: Bool {
         browserInsecureHTTPAllowlistDraft != browserInsecureHTTPAllowlist
+    }
+
+    private var terminalFontFamilyOptions: [String] {
+        let normalizedCurrentFamily = terminalFontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCurrentFamily.isEmpty,
+              !Self.availableTerminalFontFamilies.contains(normalizedCurrentFamily) else {
+            return Self.availableTerminalFontFamilies
+        }
+        return [normalizedCurrentFamily] + Self.availableTerminalFontFamilies
+    }
+
+    private var terminalFontFamilySelection: Binding<String> {
+        Binding(
+            get: { terminalFontFamily },
+            set: { newValue in
+                applyTerminalFontSettings(
+                    fontFamily: newValue,
+                    fontSize: terminalFontSize
+                )
+            }
+        )
+    }
+
+    private var terminalFontSizeSelection: Binding<Double> {
+        Binding(
+            get: { terminalFontSize },
+            set: { newValue in
+                applyTerminalFontSettings(
+                    fontFamily: terminalFontFamily,
+                    fontSize: newValue
+                )
+            }
+        )
+    }
+
+    private var terminalFontSizeLabel: String {
+        Self.formattedTerminalFontSize(terminalFontSize)
     }
 
     private var hasCustomNotificationSoundFilePath: Bool {
@@ -4856,6 +4899,47 @@ struct SettingsView: View {
                         }
                     }
 
+                    SettingsSectionHeader(title: String(localized: "settings.section.terminalFont", defaultValue: "Terminal Font"))
+                    SettingsCard {
+                        SettingsCardRow(
+                            String(localized: "settings.terminalFont.font", defaultValue: "Font"),
+                            subtitle: String(localized: "settings.terminalFont.font.subtitle", defaultValue: "Choose the font used in the terminal."),
+                            controlWidth: terminalFontControlWidth
+                        ) {
+                            HStack(spacing: 8) {
+                                Picker("", selection: terminalFontFamilySelection) {
+                                    ForEach(terminalFontFamilyOptions, id: \.self) { family in
+                                        Text(family).tag(family)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(width: pickerColumnWidth)
+                                .accessibilityLabel(
+                                    String(localized: "settings.terminalFont.font.family", defaultValue: "Font Family")
+                                )
+
+                                HStack(spacing: 6) {
+                                    Text(terminalFontSizeLabel)
+                                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 34, alignment: .trailing)
+
+                                    Stepper(
+                                        "",
+                                        value: terminalFontSizeSelection,
+                                        in: terminalFontSizeRange,
+                                        step: 0.5
+                                    )
+                                    .labelsHidden()
+                                    .accessibilityLabel(
+                                        String(localized: "settings.terminalFont.font.size", defaultValue: "Font Size")
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     SettingsSectionHeader(title: String(localized: "settings.section.sidebarAppearance", defaultValue: "Sidebar Appearance"))
                     SettingsCard {
                         SettingsCardRow(
@@ -5425,6 +5509,7 @@ struct SettingsView: View {
             browserHistoryEntryCount = BrowserHistoryStore.shared.entries.count
             browserInsecureHTTPAllowlistDraft = browserInsecureHTTPAllowlist
             refreshDetectedImportBrowsers()
+            syncTerminalFontSettingsFromGhosttyConfig()
             reloadWorkspaceTabColorSettings()
             refreshNotificationCustomSoundStatus()
         }
@@ -5442,6 +5527,9 @@ struct SettingsView: View {
         }
         .onReceive(BrowserHistoryStore.shared.$entries) { entries in
             browserHistoryEntryCount = entries.count
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyConfigDidReload)) { _ in
+            syncTerminalFontSettingsFromGhosttyConfig()
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             reloadWorkspaceTabColorSettings()
@@ -5635,12 +5723,87 @@ struct SettingsView: View {
         workspaceTabCustomColors = WorkspaceTabColorSettings.customColors()
     }
 
+    private func syncTerminalFontSettingsFromGhosttyConfig() {
+        let settings = GhosttyConfig.currentTerminalFontSettings(useCache: false)
+        let normalizedFamily = settings.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedFamily.isEmpty, terminalFontFamily != normalizedFamily {
+            terminalFontFamily = normalizedFamily
+        }
+
+        let normalizedSize = Double(settings.fontSize)
+        if abs(terminalFontSize - normalizedSize) > 0.001 {
+            terminalFontSize = normalizedSize
+        }
+    }
+
+    private func applyTerminalFontSettings(fontFamily: String, fontSize: Double) {
+        let normalizedFamily = fontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFamily.isEmpty else {
+            syncTerminalFontSettingsFromGhosttyConfig()
+            return
+        }
+
+        let clampedSize = min(max(fontSize, terminalFontSizeRange.lowerBound), terminalFontSizeRange.upperBound)
+        let didChangeFamily = normalizedFamily != terminalFontFamily
+        let didChangeSize = abs(clampedSize - terminalFontSize) > 0.001
+        guard didChangeFamily || didChangeSize else { return }
+
+        do {
+            try GhosttyConfig.saveTerminalFontSettings(
+                .init(fontFamily: normalizedFamily, fontSize: CGFloat(clampedSize))
+            )
+            terminalFontFamily = normalizedFamily
+            terminalFontSize = clampedSize
+            GhosttyConfig.invalidateLoadCache()
+            SettingsWindowController.shared.preserveFocusAfterPreferenceMutation()
+            GhosttyApp.shared.reloadConfiguration(source: "settings.terminal_font")
+        } catch {
+            NSLog("settings.terminal_font save failed: %@", error.localizedDescription)
+            syncTerminalFontSettingsFromGhosttyConfig()
+        }
+    }
+
     private func saveBrowserInsecureHTTPAllowlist() {
         browserInsecureHTTPAllowlist = browserInsecureHTTPAllowlistDraft
     }
 
     private func refreshDetectedImportBrowsers() {
         detectedImportBrowsers = InstalledBrowserDetector.detectInstalledBrowsers()
+    }
+
+    private static func monospaceFontFamilies(fontManager: NSFontManager = .shared) -> [String] {
+        let fixedPitchMask = UInt32(NSFontTraitMask.fixedPitchFontMask.rawValue)
+
+        return fontManager.availableFontFamilies
+            .filter { family in
+                guard let members = fontManager.availableMembers(ofFontFamily: family) else {
+                    return false
+                }
+
+                return members.contains { member in
+                    guard member.count > 3 else { return false }
+                    let traitsValue = (member[3] as? UInt32)
+                        ?? (member[3] as? NSNumber)?.uint32Value
+                        ?? 0
+                    return (traitsValue & fixedPitchMask) != 0
+                }
+            }
+            .sorted { lhs, rhs in
+                lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+    }
+
+    private static func formattedTerminalFontSize(_ size: Double) -> String {
+        let roundedSize = size.rounded()
+        if abs(size - roundedSize) < 0.001 {
+            return String(Int(roundedSize))
+        }
+
+        let formatted = String(format: "%.1f", size)
+        if formatted.hasSuffix(".0") {
+            return String(formatted.dropLast(2))
+        }
+        return formatted
     }
 }
 

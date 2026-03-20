@@ -7,12 +7,30 @@ struct GhosttyConfig {
         case dark
     }
 
+    enum PersistenceError: LocalizedError {
+        case configPathIsNotRegularFile(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .configPathIsNotRegularFile(let path):
+                return "Ghostty config path is not a regular file: \(path)"
+            }
+        }
+    }
+
+    struct TerminalFontSettings: Equatable {
+        var fontFamily: String
+        var fontSize: CGFloat
+    }
+
     private static let cmuxReleaseBundleIdentifier = "com.cmuxterm.app"
+    static let defaultFontFamily = "Menlo"
+    static let defaultFontSize: CGFloat = 12
     private static let loadCacheLock = NSLock()
     private static var cachedConfigsByColorScheme: [ColorSchemePreference: GhosttyConfig] = [:]
 
-    var fontFamily: String = "Menlo"
-    var fontSize: CGFloat = 12
+    var fontFamily: String = defaultFontFamily
+    var fontSize: CGFloat = defaultFontSize
     var theme: String?
     var workingDirectory: String?
     var scrollbackLimit: Int = 10000
@@ -57,6 +75,10 @@ struct GhosttyConfig {
         return backgroundColor.darken(by: isLightBackground ? 0.08 : 0.4)
     }
 
+    var terminalFontSettings: TerminalFontSettings {
+        TerminalFontSettings(fontFamily: fontFamily, fontSize: fontSize)
+    }
+
     static func load(
         preferredColorScheme: ColorSchemePreference? = nil,
         useCache: Bool = true,
@@ -78,6 +100,45 @@ struct GhosttyConfig {
         loadCacheLock.lock()
         cachedConfigsByColorScheme.removeAll()
         loadCacheLock.unlock()
+    }
+
+    static func currentTerminalFontSettings(useCache: Bool = false) -> TerminalFontSettings {
+        load(useCache: useCache).terminalFontSettings
+    }
+
+    static func primaryUserConfigURL(fileManager: FileManager = .default) -> URL {
+        fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config", isDirectory: true)
+            .appendingPathComponent("ghostty", isDirectory: true)
+            .appendingPathComponent("config", isDirectory: false)
+    }
+
+    static func saveTerminalFontSettings(
+        _ settings: TerminalFontSettings,
+        fileManager: FileManager = .default
+    ) throws {
+        let configURL = primaryUserConfigURL(fileManager: fileManager)
+        try fileManager.createDirectory(
+            at: configURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        var isDirectory: ObjCBool = false
+        let existingContents: String
+        if fileManager.fileExists(atPath: configURL.path, isDirectory: &isDirectory) {
+            guard !isDirectory.boolValue else {
+                throw PersistenceError.configPathIsNotRegularFile(configURL.path)
+            }
+            existingContents = try String(contentsOf: configURL, encoding: .utf8)
+        } else {
+            existingContents = ""
+        }
+
+        let updatedContents = updatedConfigContents(
+            existingContents,
+            terminalFontSettings: settings
+        )
+        try updatedContents.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
     private static func cachedLoad(for colorScheme: ColorSchemePreference) -> GhosttyConfig? {
@@ -139,6 +200,67 @@ struct GhosttyConfig {
             return releasePaths
         }
         return []
+    }
+
+    private static func updatedConfigContents(
+        _ contents: String,
+        terminalFontSettings: TerminalFontSettings
+    ) -> String {
+        let replacements = [
+            "font-family": "font-family = \(terminalFontSettings.fontFamily)",
+            "font-size": "font-size = \(formattedConfigFontSize(terminalFontSettings.fontSize))",
+        ]
+        let orderedKeys = ["font-family", "font-size"]
+
+        var lines = contents.isEmpty ? [] : contents.components(separatedBy: .newlines)
+        if contents.hasSuffix("\n"), lines.last == "" {
+            lines.removeLast()
+        }
+
+        var updatedLines: [String] = []
+        var replacedKeys: Set<String> = []
+
+        for line in lines {
+            guard let key = configAssignmentKey(in: line),
+                  let replacement = replacements[key] else {
+                updatedLines.append(line)
+                continue
+            }
+
+            if replacedKeys.insert(key).inserted {
+                updatedLines.append(replacement)
+            }
+        }
+
+        for key in orderedKeys where !replacedKeys.contains(key) {
+            if let replacement = replacements[key] {
+                updatedLines.append(replacement)
+            }
+        }
+
+        return updatedLines.joined(separator: "\n") + "\n"
+    }
+
+    private static func configAssignmentKey(in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+
+        let parts = trimmed.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        return parts[0].trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func formattedConfigFontSize(_ size: CGFloat) -> String {
+        let roundedSize = size.rounded()
+        if abs(size - roundedSize) < 0.001 {
+            return String(Int(roundedSize))
+        }
+
+        let formatted = String(format: "%.1f", size)
+        if formatted.hasSuffix(".0") {
+            return String(formatted.dropLast(2))
+        }
+        return formatted
     }
 
     mutating func resolveSidebarBackground(preferredColorScheme: ColorSchemePreference) {
