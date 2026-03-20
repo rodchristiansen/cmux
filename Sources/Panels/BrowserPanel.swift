@@ -1709,6 +1709,13 @@ final class BrowserPortalAnchorView: NSView {
 }
 
 private struct BrowserPasskeyAuthorizationRequest {
+    private static let allowedPurposes: Set<String> = [
+        "availability",
+        "conditional",
+        "assertion",
+        "registration",
+    ]
+
     let purpose: String
     let relyingParty: String?
 
@@ -1719,7 +1726,7 @@ private struct BrowserPasskeyAuthorizationRequest {
         }
 
         let purpose = rawPurpose.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !purpose.isEmpty else { return nil }
+        guard Self.allowedPurposes.contains(purpose) else { return nil }
 
         self.purpose = purpose
         if let relyingParty = body["relyingParty"] as? String {
@@ -1768,6 +1775,10 @@ private final class BrowserPasskeyAuthorizationCoordinator: NSObject, WKScriptMe
             replyHandler(nil, "Invalid WebAuthn authorization request")
             return
         }
+        guard isTrustedAuthorizationRequest(message) else {
+            replyHandler(nil, "WebAuthn authorization is unavailable for this frame")
+            return
+        }
 
         Task { @MainActor [weak self] in
             guard let self else {
@@ -1777,6 +1788,68 @@ private final class BrowserPasskeyAuthorizationCoordinator: NSObject, WKScriptMe
 
             let reply = await authorizationReply(for: request)
             replyHandler(reply.jsValue, nil)
+        }
+    }
+
+    private func isTrustedAuthorizationRequest(_ message: WKScriptMessage) -> Bool {
+        let frameOrigin = message.frameInfo.securityOrigin
+        guard isPotentiallyTrustworthy(frameOrigin) else { return false }
+
+        guard let mainDocumentURL = message.frameInfo.request.mainDocumentURL ?? message.webView?.url else {
+            return false
+        }
+        guard isPotentiallyTrustworthy(mainDocumentURL) else { return false }
+        return matchesOrigin(frameOrigin, url: mainDocumentURL)
+    }
+
+    private func isPotentiallyTrustworthy(_ origin: WKSecurityOrigin) -> Bool {
+        let scheme = origin.protocol.lowercased()
+        if scheme == "https" {
+            return true
+        }
+        guard scheme == "http" else { return false }
+        return isLoopbackHost(origin.host)
+    }
+
+    private func isPotentiallyTrustworthy(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "https" {
+            return true
+        }
+        guard scheme == "http", let host = url.host else { return false }
+        return isLoopbackHost(host)
+    }
+
+    private func isLoopbackHost(_ host: String) -> Bool {
+        let normalizedHost = host.lowercased()
+        return normalizedHost == "localhost"
+            || normalizedHost.hasSuffix(".localhost")
+            || normalizedHost == "127.0.0.1"
+            || normalizedHost == "::1"
+            || normalizedHost == "[::1]"
+    }
+
+    private func matchesOrigin(_ origin: WKSecurityOrigin, url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased() else {
+            return false
+        }
+        return origin.protocol.lowercased() == scheme
+            && origin.host.lowercased() == host
+            && origin.port == normalizedPort(for: url)
+    }
+
+    private func normalizedPort(for url: URL) -> Int {
+        if let port = url.port {
+            return port
+        }
+        switch url.scheme?.lowercased() {
+        case "http":
+            return 80
+        case "https":
+            return 443
+        default:
+            return 0
         }
     }
 
@@ -2019,6 +2092,75 @@ final class BrowserPanel: Panel, ObservableObject {
         }
       };
 
+      const requestMayUsePlatformAuthenticator = (purpose, options) => {
+        if (purpose === "availability" || purpose === "conditional") {
+          return true;
+        }
+
+        try {
+          if (purpose === "registration") {
+            const selection = options && options.publicKey && options.publicKey.authenticatorSelection;
+            const attachment = selection && selection.authenticatorAttachment;
+            if (attachment === "cross-platform") return false;
+            return true;
+          }
+
+          if (purpose === "assertion") {
+            if (options && options.mediation === "conditional") {
+              return true;
+            }
+
+            const allowCredentials = options && options.publicKey && options.publicKey.allowCredentials;
+            if (!Array.isArray(allowCredentials) || allowCredentials.length === 0) {
+              return true;
+            }
+
+            return allowCredentials.some((credential) => {
+              const transports = credential && credential.transports;
+              if (!Array.isArray(transports) || transports.length === 0) {
+                return true;
+              }
+              return transports.includes("internal");
+            });
+          }
+        } catch (_) {}
+
+        return true;
+      };
+
+      const requestRequiresPlatformAuthenticator = (purpose, options) => {
+        if (purpose === "availability" || purpose === "conditional") {
+          return true;
+        }
+
+        try {
+          if (purpose === "registration") {
+            const selection = options && options.publicKey && options.publicKey.authenticatorSelection;
+            return !!selection && selection.authenticatorAttachment === "platform";
+          }
+
+          if (purpose === "assertion") {
+            if (options && options.mediation === "conditional") {
+              return true;
+            }
+
+            const allowCredentials = options && options.publicKey && options.publicKey.allowCredentials;
+            if (!Array.isArray(allowCredentials) || allowCredentials.length === 0) {
+              return false;
+            }
+
+            return allowCredentials.every((credential) => {
+              const transports = credential && credential.transports;
+              return Array.isArray(transports)
+                && transports.length > 0
+                && transports.every((transport) => transport === "internal");
+            });
+          }
+        } catch (_) {}
+
+        return false;
+      };
+
       const throwNotAllowedError = (message) => {
         if (typeof DOMException === "function") {
           throw new DOMException(message, "NotAllowedError");
@@ -2053,9 +2195,9 @@ final class BrowserPanel: Panel, ObservableObject {
           const originalGet = navigator.credentials.get.bind(navigator.credentials);
           navigator.credentials.get = async function(...args) {
             const options = args[0];
-            if (options && options.publicKey) {
+            if (options && options.publicKey && requestMayUsePlatformAuthenticator("assertion", options)) {
               const authorization = await ensureAuthorization("assertion", options);
-              if (authorization.state === "denied") {
+              if (authorization.state === "denied" && requestRequiresPlatformAuthenticator("assertion", options)) {
                 throwNotAllowedError("Browser access to passkeys was denied.");
               }
             }
@@ -2067,9 +2209,9 @@ final class BrowserPanel: Panel, ObservableObject {
           const originalCreate = navigator.credentials.create.bind(navigator.credentials);
           navigator.credentials.create = async function(...args) {
             const options = args[0];
-            if (options && options.publicKey) {
+            if (options && options.publicKey && requestMayUsePlatformAuthenticator("registration", options)) {
               const authorization = await ensureAuthorization("registration", options);
-              if (authorization.state === "denied") {
+              if (authorization.state === "denied" && requestRequiresPlatformAuthenticator("registration", options)) {
                 throwNotAllowedError("Browser access to passkeys was denied.");
               }
             }
