@@ -57,25 +57,17 @@ if [[ -z "$VERSION" || -z "$RELEASE_TAG" || -z "$REPO" || -z "$OUTPUT_DIR" ]]; t
   exit 1
 fi
 
-if ! command -v go >/dev/null 2>&1; then
-  echo "error: go is required to build cmuxd-remote release assets" >&2
+if ! command -v zig >/dev/null 2>&1; then
+  echo "error: zig is required to build cmuxd-remote release assets" >&2
   exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DAEMON_ROOT="${REPO_ROOT}/daemon/remote"
+DAEMON_ROOT="${REPO_ROOT}/daemon/remote/zig"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 rm -f "$OUTPUT_DIR"/cmuxd-remote-* "$OUTPUT_DIR"/cmuxd-remote-checksums.txt "$OUTPUT_DIR"/cmuxd-remote-manifest.json
-
-DAEMON_GO_LDFLAGS="-s -w -X main.version=${VERSION}"
-DAEMON_GO_BUILD_ARGS=(
-  build
-  -trimpath
-  -buildvcs=false
-  -ldflags "$DAEMON_GO_LDFLAGS"
-)
 
 CHECKSUMS_ASSET_NAME="cmuxd-remote-checksums.txt"
 CHECKSUMS_PATH="${OUTPUT_DIR}/${CHECKSUMS_ASSET_NAME}"
@@ -97,16 +89,33 @@ for target in "${TARGETS[@]}"; do
   read -r GOOS GOARCH <<<"$target"
   ASSET_NAME="cmuxd-remote-${GOOS}-${GOARCH}"
   OUTPUT_PATH="${OUTPUT_DIR}/${ASSET_NAME}"
+  case "${GOOS}-${GOARCH}" in
+    darwin-arm64)
+      ZIG_TARGET="aarch64-macos"
+      ;;
+    darwin-amd64)
+      ZIG_TARGET="x86_64-macos"
+      ;;
+    linux-arm64)
+      ZIG_TARGET="aarch64-linux-gnu"
+      ;;
+    linux-amd64)
+      ZIG_TARGET="x86_64-linux-gnu"
+      ;;
+    *)
+      echo "error: unsupported target ${GOOS}-${GOARCH}" >&2
+      exit 1
+      ;;
+  esac
 
   (
     cd "$DAEMON_ROOT"
-    GOOS="$GOOS" \
-    GOARCH="$GOARCH" \
-    CGO_ENABLED=0 \
-    go "${DAEMON_GO_BUILD_ARGS[@]}" \
-      -o "$OUTPUT_PATH" \
-      ./cmd/cmuxd-remote
+    zig build \
+      -Doptimize=ReleaseSafe \
+      -Dtarget="${ZIG_TARGET}" \
+      -Dversion="${VERSION}"
   )
+  cp "${DAEMON_ROOT}/zig-out/bin/cmuxd-remote" "$OUTPUT_PATH"
   chmod 755 "$OUTPUT_PATH"
 
   SHA256="$(shasum -a 256 "$OUTPUT_PATH" | awk '{print $1}')"
