@@ -1577,6 +1577,68 @@ final class WindowTerminalHostViewTests: XCTestCase {
         let contentPointInHost = host.convert(contentPointInWindow, from: nil)
         XCTAssertTrue(host.hitTest(contentPointInHost) === child)
     }
+
+    func testHostViewStopsSidebarPassThroughJustInsideTerminalContent() {
+        let terminalSideOverlapWidth: CGFloat = 2
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 180),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let splitView = NSSplitView(frame: contentView.bounds)
+        splitView.autoresizingMask = [.width, .height]
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        let splitDelegate = BonsplitMockSplitDelegate()
+        splitView.delegate = splitDelegate
+        let first = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: contentView.bounds.height))
+        let second = NSView(frame: NSRect(x: 121, y: 0, width: 179, height: contentView.bounds.height))
+        splitView.addSubview(first)
+        splitView.addSubview(second)
+        contentView.addSubview(splitView)
+        splitView.setPosition(1, ofDividerAt: 0)
+        splitView.adjustSubviews()
+        contentView.layoutSubtreeIfNeeded()
+
+        let host = WindowTerminalHostView(frame: contentView.bounds)
+        host.autoresizingMask = [.width, .height]
+        let child = CapturingView(frame: host.bounds)
+        child.autoresizingMask = [.width, .height]
+        host.addSubview(child)
+        contentView.addSubview(host)
+
+        let dividerPointInSplit = NSPoint(
+            x: splitView.arrangedSubviews[0].frame.maxX + (splitView.dividerThickness * 0.5),
+            y: splitView.bounds.midY
+        )
+        let dividerPointInWindow = splitView.convert(dividerPointInSplit, to: nil)
+        let dividerPointInHost = host.convert(dividerPointInWindow, from: nil)
+
+        let resizeBandPoint = NSPoint(
+            x: dividerPointInHost.x + terminalSideOverlapWidth,
+            y: dividerPointInHost.y
+        )
+        XCTAssertNil(
+            host.hitTest(resizeBandPoint),
+            "The narrow terminal-side overlap should still pass through to the sidebar resizer"
+        )
+
+        let textSelectionPoint = NSPoint(
+            x: dividerPointInHost.x + terminalSideOverlapWidth + 1,
+            y: dividerPointInHost.y
+        )
+        XCTAssertTrue(
+            host.hitTest(textSelectionPoint) === child,
+            "Once the pointer moves past the reduced terminal-side overlap, terminal content should win hit-testing"
+        )
+    }
 }
 
 
@@ -1688,6 +1750,102 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         hostedView.setInactiveOverlay(color: .black, opacity: 0.35, visible: false)
         state = hostedView.debugInactiveOverlayState()
         XCTAssertTrue(state.isHidden)
+    }
+
+    func testPreferredScrollerStyleChangeRecalculatesTerminalSurfaceWidth() {
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        let hostedView = surface.hostedView
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        hostedView.frame = contentView.bounds
+        hostedView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostedView)
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard let scrollView = hostedView.subviews.first(where: { $0 is NSScrollView }) as? NSScrollView else {
+            XCTFail("Expected hosted terminal scroll view")
+            return
+        }
+        guard let initialSurfaceSize = hostedView.debugPendingSurfaceSize() else {
+            XCTFail("Expected an initial terminal surface size")
+            return
+        }
+
+        let initialContentWidth = scrollView.contentSize.width
+        XCTAssertEqual(initialSurfaceSize.width, initialContentWidth, accuracy: 0.5)
+
+        scrollView.scrollerStyle = .legacy
+        scrollView.layoutSubtreeIfNeeded()
+        let legacyContentWidth = scrollView.contentSize.width
+        XCTAssertLessThan(
+            legacyContentWidth,
+            initialContentWidth,
+            "Legacy scrollbars should reserve width in the scroll view content area"
+        )
+        XCTAssertEqual(
+            hostedView.debugPendingSurfaceSize()?.width,
+            initialSurfaceSize.width,
+            accuracy: 0.5,
+            "Changing the scroll view style alone should leave the terminal grid stale until the scroller-style observer runs"
+        )
+
+        NotificationCenter.default.post(name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertEqual(scrollView.scrollerStyle, .legacy)
+        XCTAssertEqual(
+            hostedView.debugPendingSurfaceSize()?.width,
+            legacyContentWidth,
+            accuracy: 0.5,
+            "Preferred scroller style changes should recalculate the terminal grid width immediately"
+        )
+
+        scrollView.scrollerStyle = .overlay
+        scrollView.layoutSubtreeIfNeeded()
+        let overlayContentWidth = scrollView.contentSize.width
+        XCTAssertGreaterThan(
+            overlayContentWidth,
+            legacyContentWidth,
+            "Overlay scrollbars should restore the full terminal content width"
+        )
+        XCTAssertEqual(
+            hostedView.debugPendingSurfaceSize()?.width,
+            legacyContentWidth,
+            accuracy: 0.5,
+            "Changing the scroll view style alone should leave the terminal grid stale until the scroller-style observer runs"
+        )
+
+        NotificationCenter.default.post(name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertEqual(scrollView.scrollerStyle, .overlay)
+        XCTAssertEqual(
+            hostedView.debugPendingSurfaceSize()?.width,
+            overlayContentWidth,
+            accuracy: 0.5,
+            "Preferred scroller style changes should also restore the wider terminal grid when overlay scrollbars return"
+        )
     }
 
     func testWindowResignKeyClearsFocusedTerminalFirstResponder() {
