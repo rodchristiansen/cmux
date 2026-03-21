@@ -29,6 +29,11 @@ final class PaneStripUITests: XCTestCase {
         assertPassingPaneStripPayload(payload, scenario: "initial_terminal_visible")
     }
 
+    func testInitialTerminalColdStartPaintsWithoutHarnessRepaint() {
+        let payload = runPaneStripScenario("initial_terminal_cold_start")
+        assertPassingPaneStripPayload(payload, scenario: "initial_terminal_cold_start")
+    }
+
     func testInitialTerminalRendersAfterInput() {
         let payload = runPaneStripScenario("initial_terminal_renders_after_input")
         assertPassingPaneStripPayload(payload, scenario: "initial_terminal_renders_after_input")

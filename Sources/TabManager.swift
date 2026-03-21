@@ -4300,6 +4300,8 @@ class TabManager: ObservableObject {
             switch scenario {
             case "initial_terminal_visible":
                 return 0
+            case "initial_terminal_cold_start":
+                return 0
             case "initial_terminal_renders_after_input":
                 return 1
             case "initial_terminal_recovers_after_late_activation":
@@ -4352,30 +4354,37 @@ class TabManager: ObservableObject {
         ], at: path)
 
         @MainActor
-        func reassertPaneStripMotionTestWindow(forceActivate: Bool = true) {
-            guard let window else { return }
-            if forceActivate {
-                NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-                window.makeMain()
-                window.makeKeyAndOrderFront(nil)
-                window.orderFrontRegardless()
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            window.layoutIfNeeded()
-            window.displayIfNeeded()
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.contentView?.displayIfNeeded()
+        func ensurePaneStripMotionWindowForeground(forceActivate: Bool = true) {
+            guard forceActivate, let window else { return }
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            window.makeMain()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        @MainActor
+        func capturePaneStripWindowDiagnostics() -> [String: String] {
+            guard let window else { return ["windowPresent": "0"] }
+            return [
+                "windowPresent": "1",
+                "windowIsVisible": window.isVisible ? "1" : "0",
+                "windowIsKey": window.isKeyWindow ? "1" : "0",
+                "appIsActive": NSApp.isActive ? "1" : "0",
+            ]
         }
 
         let shouldDelayInitialActivation = launchMode == "background_then_activate"
         let useWindowHideForLateActivation = launchMode == "hide_then_reactivate"
-        let requiresPrePaintedInitialTerminal = scenario != "initial_terminal_recovers_after_late_activation"
+        let requiresPrePaintedInitialTerminal =
+            scenario != "initial_terminal_recovers_after_late_activation" &&
+            scenario != "initial_terminal_cold_start"
 
         if let window {
             var frame = window.frame
             frame.size = CGSize(width: 1440, height: 900)
             window.setFrame(frame, display: true, animate: false)
-            reassertPaneStripMotionTestWindow(forceActivate: !shouldDelayInitialActivation)
+            ensurePaneStripMotionWindowForeground(forceActivate: !shouldDelayInitialActivation)
         }
 
         let tab: Workspace = {
@@ -4386,7 +4395,7 @@ class TabManager: ObservableObject {
             }
             return addWorkspace(select: true, eagerLoadTerminal: true, autoWelcomeIfNeeded: false)
         }()
-        reassertPaneStripMotionTestWindow(forceActivate: !shouldDelayInitialActivation)
+        ensurePaneStripMotionWindowForeground(forceActivate: !shouldDelayInitialActivation)
 
         guard let sourcePanelId = tab.focusedPanelId else {
             fail("Missing initial focused panel")
@@ -4430,7 +4439,7 @@ class TabManager: ObservableObject {
                 if let panelId = created.first(where: { tab.terminalPanel(for: $0) != nil }) {
                     return panelId
                 }
-                reassertPaneStripMotionTestWindow()
+                ensurePaneStripMotionWindowForeground()
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
             return Set(tab.panels.keys)
@@ -4448,7 +4457,7 @@ class TabManager: ObservableObject {
                 if let panelId = created.first(where: { tab.browserPanel(for: $0) != nil }) {
                     return panelId
                 }
-                reassertPaneStripMotionTestWindow()
+                ensurePaneStripMotionWindowForeground()
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
             return Set(tab.panels.keys)
@@ -4511,10 +4520,10 @@ class TabManager: ObservableObject {
                 if let terminal = tab.terminalPanel(for: panelId) {
                     let renderStats = terminal.surface.hostedView.debugRenderStats()
                     if !renderStats.windowIsKey || !renderStats.appIsActive || !renderStats.windowOcclusionVisible {
-                        reassertPaneStripMotionTestWindow()
+                        ensurePaneStripMotionWindowForeground()
                     }
                 } else {
-                    reassertPaneStripMotionTestWindow()
+                    ensurePaneStripMotionWindowForeground()
                 }
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
@@ -4531,6 +4540,7 @@ class TabManager: ObservableObject {
             let inlineSample = hostedView.debugInlineMotionSample(normalizedCrop: crop)
             return [
                 "portalStats": debugJSONString(TerminalWindowPortalRegistry.debugPortalStats()),
+                "windowDiagnostics": debugJSONString(capturePaneStripWindowDiagnostics()),
                 "renderStats": debugJSONString([
                     "drawCount": renderStats.drawCount,
                     "metalDrawableCount": renderStats.metalDrawableCount,
@@ -4582,6 +4592,7 @@ class TabManager: ObservableObject {
 
             let snapshot = BrowserWindowPortalRegistry.debugSnapshot(for: browser.webView)
             return [
+                "windowDiagnostics": debugJSONString(capturePaneStripWindowDiagnostics()),
                 "browserPortalSnapshot": snapshot.map { debugJSONString([
                     "visibleInUI": $0.visibleInUI,
                     "anchorHidden": $0.anchorHidden,
@@ -4604,7 +4615,7 @@ class TabManager: ObservableObject {
                    sample.hostedFrameInWindow.height > 24 {
                     return true
                 }
-                reassertPaneStripMotionTestWindow()
+                ensurePaneStripMotionWindowForeground()
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
             return false
@@ -4670,6 +4681,37 @@ class TabManager: ObservableObject {
                 return
             }
 
+        case "initial_terminal_cold_start":
+            result = await capturePaneStripMotionTimeline(
+                frameCount: frameCount,
+                actionFrame: actionFrame,
+                targets: [
+                    .init(
+                        label: "T",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
+                ],
+                hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint
+            )
+
+            if result.sampleCounts["T", default: 0] == 0 {
+                fail(
+                    "Initial terminal produced no hosted samples",
+                    extra: terminalVisibilityDebugInfo(for: sourcePanelId)
+                )
+                return
+            }
+            if result.nonBlankSampleCounts["T", default: 0] == 0 {
+                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                extra["sampleCounts"] = debugJSONString(result.sampleCounts)
+                extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
+                extra["timelineTrace"] = result.trace.joined(separator: "|")
+                fail("Initial terminal never produced visible content during capture", extra: extra)
+                return
+            }
+
         case "initial_terminal_recovers_after_late_activation":
             let shouldHideOnFirstFrame = !shouldDelayInitialActivation
             result = await capturePaneStripMotionTimeline(
@@ -4702,7 +4744,7 @@ class TabManager: ObservableObject {
                         } else {
                             NSApp.unhide(nil)
                         }
-                        reassertPaneStripMotionTestWindow()
+                        ensurePaneStripMotionWindowForeground()
                     }),
                 ]
             )
@@ -4756,12 +4798,12 @@ class TabManager: ObservableObject {
             // Pre-render the right pane before capture starts so this scenario measures reveal
             // motion, not first-paint latency on a newly created terminal under CI.
             primeTerminalContent(rightPanelId, label: "RIGHT")
-            reassertPaneStripMotionTestWindow()
+            ensurePaneStripMotionWindowForeground()
             guard dispatchShortcut(.focusRight) else {
                 fail("Failed to focus right pane before focus-reveal capture")
                 return
             }
-            reassertPaneStripMotionTestWindow()
+            ensurePaneStripMotionWindowForeground()
             guard await waitForTerminalPanelPainted(rightPanelId) else {
                 fail(
                     "Right pane did not paint visible content before focus-reveal capture",
@@ -4773,7 +4815,7 @@ class TabManager: ObservableObject {
                 fail("Failed to focus left pane before focus-reveal capture")
                 return
             }
-            reassertPaneStripMotionTestWindow()
+            ensurePaneStripMotionWindowForeground()
             guard await waitForTerminalPanelPainted(sourcePanelId) else {
                 fail(
                     "Left pane did not repaint visible content after focus reset",
@@ -4966,12 +5008,12 @@ class TabManager: ObservableObject {
                 )
                 return
             }
-            reassertPaneStripMotionTestWindow()
+            ensurePaneStripMotionWindowForeground()
             guard dispatchShortcut(.focusRight) else {
                 fail("Failed to focus right browser pane before focus-reveal capture")
                 return
             }
-            reassertPaneStripMotionTestWindow()
+            ensurePaneStripMotionWindowForeground()
             guard await waitForBrowserPanelPortalReady(rightPanel.id) else {
                 fail(
                     "Right browser pane did not become portal-visible before focus-reveal capture",
@@ -4983,7 +5025,7 @@ class TabManager: ObservableObject {
                 fail("Failed to focus left terminal pane before focus-reveal capture")
                 return
             }
-            reassertPaneStripMotionTestWindow()
+            ensurePaneStripMotionWindowForeground()
             guard await waitForTerminalPanelPainted(sourcePanelId) else {
                 fail(
                     "Left pane did not repaint visible content after browser focus reset",
