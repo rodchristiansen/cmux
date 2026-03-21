@@ -24,7 +24,7 @@ final class AutomationSocketUITests: XCTestCase {
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
-        launchTag = "ui-tests-automation-socket-\(UUID().uuidString.prefix(8))"
+        launchTag = "ui-tests-automation-socket-\(UUID().uuidString.prefix(8).lowercased())"
         socketPath = "/tmp/cmux-debug-\(launchTag).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-diagnostics-\(UUID().uuidString).json"
         ensureTerminalSurfaceFailure = ""
