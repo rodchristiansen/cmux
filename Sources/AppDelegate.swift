@@ -2804,7 +2804,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
 
-        guard let target = resolvedAutomationSocketStressTarget(tabManager: tabManager) else {
+        let workspaceListResponse = TerminalController.probeSocketCommand(
+            "list_workspaces",
+            at: socketPath,
+            timeout: 1.0
+        )
+        guard let workspaceId = automationSocketStressPrimaryId(from: workspaceListResponse) else {
             finishAutomationSocketStressAttempt(
                 tabManager: tabManager,
                 remainingAttempts: remainingAttempts,
@@ -2812,19 +2817,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 trace: [
                     "socket=\(socketPath)",
                     "ping=PONG",
-                    "target=<nil>",
+                    "workspaces=\(workspaceListResponse ?? "<nil>")",
                 ]
             )
             return
         }
 
-        let workspaceId = target.workspaceId.uuidString
-        let surfaceId = target.surfaceId.uuidString
+        let surfaceListResponse = TerminalController.probeSocketCommand(
+            "list_surfaces \(workspaceId)",
+            at: socketPath,
+            timeout: 1.0
+        )
+        guard let surfaceId = automationSocketStressPrimaryId(from: surfaceListResponse) else {
+            finishAutomationSocketStressAttempt(
+                tabManager: tabManager,
+                remainingAttempts: remainingAttempts,
+                status: "waiting",
+                trace: [
+                    "socket=\(socketPath)",
+                    "ping=PONG",
+                    "workspace=\(workspaceId)",
+                    "workspaces=\(workspaceListResponse ?? "<nil>")",
+                    "surfaces=\(surfaceListResponse ?? "<nil>")",
+                ]
+            )
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.performAutomationSocketStressLoop(
                 socketPath: socketPath,
                 workspaceId: workspaceId,
-                surfaceId: surfaceId
+                surfaceId: surfaceId,
+                baselineListResponse: surfaceListResponse
             )
         }
     }
@@ -2860,47 +2885,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func resolvedAutomationSocketStressTarget(tabManager: TabManager) -> (workspaceId: UUID, surfaceId: UUID)? {
-        guard let workspaceId = tabManager.selectedTabId ?? tabManager.tabs.first?.id else {
-            return nil
-        }
-
-        if let surfaceId = tabManager.focusedPanelId(for: workspaceId) {
-            return (workspaceId: workspaceId, surfaceId: surfaceId)
-        }
-
-        guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else {
-            return nil
-        }
-
-        if let focusedTerminalPanel = workspace.focusedTerminalPanel {
-            return (workspaceId: workspaceId, surfaceId: focusedTerminalPanel.id)
-        }
-
-        if let inheritedTerminalPanel = workspace.terminalPanelForConfigInheritance() {
-            return (workspaceId: workspaceId, surfaceId: inheritedTerminalPanel.id)
-        }
-
-        guard let firstTerminalSurfaceId = workspace.panels.values
-            .compactMap({ ($0 as? TerminalPanel)?.id })
-            .sorted(by: { $0.uuidString < $1.uuidString })
-            .first else {
-            return nil
-        }
-
-        return (workspaceId: workspaceId, surfaceId: firstTerminalSurfaceId)
-    }
-
     private func performAutomationSocketStressLoop(
         socketPath: String,
         workspaceId: String,
-        surfaceId: String
+        surfaceId: String,
+        baselineListResponse: String?
     ) {
         var trace: [String] = [
             "socket=\(socketPath)",
             "workspace=\(workspaceId)",
             "surface=\(surfaceId)",
-            "baseline.list=\(TerminalController.probeSocketCommand("list_surfaces \(workspaceId)", at: socketPath, timeout: 1.0) ?? "<nil>")",
+            "baseline.list=\(baselineListResponse ?? "<nil>")",
         ]
 
         for iteration in 1...8 {
@@ -2946,6 +2941,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func automationSocketStressListResponse(_ response: String?, containsSurface surfaceId: String) -> Bool {
         guard let response, !response.isEmpty, response != "No surfaces" else { return false }
         return response.contains(surfaceId)
+    }
+
+    private func automationSocketStressPrimaryId(from response: String?) -> String? {
+        let entries = automationSocketStressListEntries(from: response)
+        return entries.first(where: \.isSelected)?.id ?? entries.first?.id
+    }
+
+    private func automationSocketStressListEntries(from response: String?) -> [(id: String, isSelected: Bool)] {
+        guard let response,
+              !response.isEmpty,
+              !response.hasPrefix("ERROR:"),
+              response != "No workspaces",
+              response != "No surfaces" else {
+            return []
+        }
+
+        return response
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { rawLine in
+                var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !line.isEmpty else { return nil }
+
+                let isSelected = line.hasPrefix("*")
+                if line.hasPrefix("* ") || line.hasPrefix("  ") {
+                    line = String(line.dropFirst(2))
+                }
+
+                let parts = line.split(whereSeparator: \.isWhitespace)
+                guard parts.count >= 2 else { return nil }
+
+                let id = String(parts[1])
+                guard UUID(uuidString: id) != nil else { return nil }
+                return (id: id, isSelected: isSelected)
+            }
     }
 
     private func setupDisplayResolutionUITestDiagnosticsIfNeeded() {
