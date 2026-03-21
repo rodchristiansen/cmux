@@ -1072,7 +1072,7 @@ class TabManager: ObservableObject {
         let nextTabCount = snapshot.tabs.count + 1
         sentryBreadcrumb("workspace.create", data: ["tabCount": nextTabCount])
         let explicitWorkingDirectory = normalizedWorkingDirectory(overrideWorkingDirectory)
-        let workingDirectory = explicitWorkingDirectory ?? preferredWorkingDirectoryForNewTab(snapshot: snapshot)
+        let workingDirectory = explicitWorkingDirectory ?? preferredWorkingDirectoryForNewWorkspace(snapshot: snapshot)
         let inheritedConfig = inheritedTerminalConfigForNewWorkspace(snapshot: snapshot)
         let ordinal = Self.nextPortOrdinal
         Self.nextPortOrdinal += 1
@@ -1903,6 +1903,20 @@ class TabManager: ObservableObject {
 
     private func preferredWorkingDirectoryForNewTab() -> String? {
         preferredWorkingDirectoryForNewTab(snapshot: workspaceCreationSnapshot())
+    }
+
+    private func preferredWorkingDirectoryForNewWorkspace(
+        snapshot: WorkspaceCreationSnapshot
+    ) -> String? {
+        configuredWorkingDirectoryForNewWorkspace() ?? preferredWorkingDirectoryForNewTab(snapshot: snapshot)
+    }
+
+    private func configuredWorkingDirectoryForNewWorkspace() -> String? {
+        guard let configuredDirectory = loadGhosttyConfig().workingDirectory else {
+            return nil
+        }
+        let expandedDirectory = NSString(string: configuredDirectory).expandingTildeInPath
+        return normalizedWorkingDirectory(expandedDirectory)
     }
 
     private func preferredWorkingDirectoryForNewTab(
