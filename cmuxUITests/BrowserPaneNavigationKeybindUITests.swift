@@ -1393,11 +1393,35 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             appendCLIPathCandidates(fromProductsDirectory: productsDir, to: &candidates)
         }
 
+        appendCLIPathCandidates(
+            fromAncestorDirectoriesOf: Bundle.main.bundleURL.resolvingSymlinksInPath(),
+            levels: 6,
+            to: &candidates
+        )
+        appendCLIPathCandidates(
+            fromAncestorDirectoriesOf: Bundle(for: type(of: self)).bundleURL.resolvingSymlinksInPath(),
+            levels: 8,
+            to: &candidates
+        )
+
         for path in uniquePaths(candidates) {
             guard fileManager.isExecutableFile(atPath: path) else { continue }
             return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         }
         return nil
+    }
+
+    private func appendCLIPathCandidates(
+        fromAncestorDirectoriesOf url: URL,
+        levels: Int,
+        to candidates: inout [String]
+    ) {
+        guard levels > 0 else { return }
+        var current = url
+        for _ in 0..<levels {
+            current.deleteLastPathComponent()
+            appendCLIPathCandidates(fromProductsDirectory: current.path, to: &candidates)
+        }
     }
 
     private func appendCLIPathCandidates(fromProductsDirectory productsDir: String, to candidates: inout [String]) {
