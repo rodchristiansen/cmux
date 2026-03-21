@@ -112,6 +112,32 @@ final class TerminalServerDiscoveryTests: XCTestCase {
         XCTAssertEqual(hosts.first?.hostname, "cmux-macmini")
     }
 
+    func testDiscoveryMergesMachineRowsAcrossAllMemberships() async throws {
+        let memberships = [
+            makeMembership(teamID: "team-1", serverMetadata: nil),
+            makeMembership(teamID: "team-2", serverMetadata: nil)
+        ]
+        let discovery = TerminalServerDiscovery(
+            machineHosts: TerminalServerDiscovery.testMachineHostsPublisher(
+                teamMemberships: Just(memberships).eraseToAnyPublisher(),
+                machineHostsByTeam: [
+                    "team-1": [
+                        makeMachineHost(id: "machine-1", hostname: "team-one-mac", teamID: "team-1")
+                    ],
+                    "team-2": [
+                        makeMachineHost(id: "machine-2", hostname: "team-two-mac", teamID: "team-2")
+                    ]
+                ]
+            ),
+            teamMemberships: Just(memberships).eraseToAnyPublisher()
+        )
+
+        let hosts = await firstValue(from: discovery.hostsPublisher)
+
+        XCTAssertEqual(hosts.map(\.stableID), ["machine-1", "machine-2"])
+        XCTAssertEqual(hosts.map(\.teamID), ["team-1", "team-2"])
+    }
+
     private func makeMembership(teamID: String, serverMetadata: String?) -> TeamsListTeamMembershipsItem {
         TeamsListTeamMembershipsItem(
             team: TeamsListTeamMembershipsItemTeam(
@@ -139,6 +165,22 @@ final class TerminalServerDiscoveryTests: XCTestCase {
         )
     }
 
+    private func makeMachineHost(id: String, hostname: String, teamID: String) -> TerminalHost {
+        TerminalHost(
+            stableID: id,
+            name: hostname,
+            hostname: hostname,
+            username: "cmux",
+            symbolName: "desktopcomputer",
+            palette: .sky,
+            source: .discovered,
+            transportPreference: .remoteDaemon,
+            teamID: teamID,
+            serverID: id,
+            allowsSSHFallback: false
+        )
+    }
+
     private func firstValue<T>(from publisher: AnyPublisher<T, Never>) async -> T {
         await withCheckedContinuation { continuation in
             var cancellable: AnyCancellable?
@@ -148,6 +190,17 @@ final class TerminalServerDiscoveryTests: XCTestCase {
                     continuation.resume(returning: value)
                     cancellable?.cancel()
                 }
+        }
+    }
+}
+
+private extension TerminalServerDiscovery {
+    static func testMachineHostsPublisher(
+        teamMemberships: AnyPublisher<TeamsListTeamMembershipsReturn, Never>,
+        machineHostsByTeam: [String: [TerminalHost]]
+    ) -> AnyPublisher<[TerminalHost], Never> {
+        makeMachineHostsPublisher(teamMemberships: teamMemberships) { teamID in
+            Just(machineHostsByTeam[teamID] ?? []).eraseToAnyPublisher()
         }
     }
 }

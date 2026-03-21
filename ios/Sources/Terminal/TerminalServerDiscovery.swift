@@ -20,7 +20,21 @@ final class TerminalServerDiscovery: TerminalServerDiscovering {
             .eraseToAnyPublisher()
         let machineHosts = Self.makeMachineHostsPublisher(
             teamMemberships: memberships,
-            convexClient: convexClient
+            machineHostsForTeam: { teamID in
+                convexClient
+                    .subscribe(
+                        to: "mobileMachines:listForUser",
+                        with: ["teamSlugOrId": teamID],
+                        yielding: [MobileMachineRow].self
+                    )
+                    .map { rows in
+                        rows.map { $0.asTerminalHost() }
+                    }
+                    .catch { _ in
+                        Just([])
+                    }
+                    .eraseToAnyPublisher()
+            }
         )
         self.init(machineHosts: machineHosts, teamMemberships: memberships)
     }
@@ -40,36 +54,51 @@ final class TerminalServerDiscovery: TerminalServerDiscovering {
             .eraseToAnyPublisher()
     }
 
-    private static func makeMachineHostsPublisher(
+    static func makeMachineHostsPublisher(
         teamMemberships: AnyPublisher<TeamsListTeamMembershipsReturn, Never>,
-        convexClient: ConvexClientWithAuth<StackAuthResult>
+        machineHostsForTeam: @escaping (String) -> AnyPublisher<[TerminalHost], Never>
     ) -> AnyPublisher<[TerminalHost], Never> {
         teamMemberships
-            .map { memberships in
-                memberships.first?.teamId.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+            .map(uniqueTeamIDs(from:))
             .removeDuplicates()
-            .map { teamID -> AnyPublisher<[TerminalHost], Never> in
-                guard let teamID, !teamID.isEmpty else {
+            .map { teamIDs -> AnyPublisher<[TerminalHost], Never> in
+                guard !teamIDs.isEmpty else {
                     return Just([]).eraseToAnyPublisher()
                 }
 
-                return convexClient
-                    .subscribe(
-                        to: "mobileMachines:listForUser",
-                        with: ["teamSlugOrId": teamID],
-                        yielding: [MobileMachineRow].self
-                    )
-                    .map { rows in
-                        rows.map { $0.asTerminalHost() }
+                let initialState = Dictionary(
+                    uniqueKeysWithValues: teamIDs.map { ($0, [TerminalHost]()) }
+                )
+                let publishers = teamIDs.map { teamID in
+                    machineHostsForTeam(teamID)
+                        .map { (teamID, $0) }
+                        .eraseToAnyPublisher()
+                }
+
+                return Publishers.MergeMany(publishers)
+                    .scan(initialState) { state, update in
+                        var nextState = state
+                        nextState[update.0] = update.1
+                        return nextState
                     }
-                    .catch { _ in
-                        Just([])
+                    .map { hostRowsByTeam in
+                        teamIDs.flatMap { hostRowsByTeam[$0] ?? [] }
                     }
                     .eraseToAnyPublisher()
             }
             .switchToLatest()
             .eraseToAnyPublisher()
+    }
+
+    private static func uniqueTeamIDs(from memberships: TeamsListTeamMembershipsReturn) -> [String] {
+        var seen = Set<String>()
+        return memberships.compactMap { membership in
+            let teamID = membership.teamId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !teamID.isEmpty, seen.insert(teamID).inserted else {
+                return nil
+            }
+            return teamID
+        }
     }
 
     private static func legacyHosts(from memberships: TeamsListTeamMembershipsReturn) -> [TerminalHost] {

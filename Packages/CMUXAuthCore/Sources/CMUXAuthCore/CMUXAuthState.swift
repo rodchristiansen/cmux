@@ -90,7 +90,7 @@ public struct CMUXAuthState: Equatable, Sendable {
         }
 
         return Self(
-            isAuthenticated: hasTokens || cachedUser != nil,
+            isAuthenticated: hasTokens,
             currentUser: cachedUser,
             isRestoringSession: false
         )

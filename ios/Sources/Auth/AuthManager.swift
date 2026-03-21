@@ -139,25 +139,21 @@ class AuthManager: ObservableObject {
         #endif
 
         let cachedUser = authUserCache.load()
-        let hasCachedSession = authSessionCache.hasTokens || cachedUser != nil
+        let hasAccessToken = await stack.getAccessToken() != nil
         let hasRefreshToken = await stack.getRefreshToken() != nil
+        let hasStoredTokens = hasAccessToken || hasRefreshToken
 
-        if hasCachedSession || hasRefreshToken {
+        if hasStoredTokens {
             authSessionCache.setHasTokens(true)
             if currentUser == nil, let cachedUser {
                 currentUser = cachedUser
             }
-            await validateCachedSession(hasRefreshToken: hasRefreshToken)
-            return
-        }
-
-        if await stack.getAccessToken() != nil {
-            authSessionCache.setHasTokens(true)
-            await validateCachedSession(hasRefreshToken: false)
+            await validateCachedSession(hasStoredTokens: hasStoredTokens)
             return
         }
 
         clearAuthState()
+        await ConvexClientManager.shared.clearAuth()
     }
 
     private func performAutoLogin(_ credentials: AuthAutoLoginCredentials) async {
@@ -169,7 +165,7 @@ class AuthManager: ObservableObject {
         }
     }
 
-    private func validateCachedSession(hasRefreshToken: Bool) async {
+    private func validateCachedSession(hasStoredTokens: Bool) async {
         do {
             if let user = try await stack.getUser(or: .returnNull) {
                 await applySignedInUser(user)
@@ -179,7 +175,7 @@ class AuthManager: ObservableObject {
             print("🔐 Session validation failed: \(error)")
         }
 
-        if hasRefreshToken || authSessionCache.hasTokens || currentUser != nil {
+        if hasStoredTokens {
             authSessionCache.setHasTokens(true)
             isAuthenticated = true
             return

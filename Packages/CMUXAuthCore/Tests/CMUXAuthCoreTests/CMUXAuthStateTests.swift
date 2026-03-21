@@ -138,6 +138,24 @@ struct CMUXAuthStateTests {
         #expect(!state.isRestoringSession)
     }
 
+    @Test("Primed state does not authenticate from cached user alone")
+    func primedStateDoesNotAuthenticateFromCachedUserAlone() {
+        let user = CMUXAuthUser(id: "user_123", primaryEmail: "user@example.com", displayName: "Test User")
+        let state = CMUXAuthState.primed(
+            clearAuthRequested: false,
+            mockDataEnabled: false,
+            fixtureUser: nil,
+            autoLoginCredentials: nil,
+            cachedUser: user,
+            hasTokens: false,
+            mockUser: CMUXAuthUser(id: "mock", primaryEmail: "mock@example.com", displayName: "Mock")
+        )
+
+        #expect(!state.isAuthenticated)
+        #expect(state.currentUser == user)
+        #expect(!state.isRestoringSession)
+    }
+
     @Test("Primed state uses fixture user")
     func primedStateUsesFixtureUser() {
         let fixtureUser = CMUXAuthUser(id: "fixture", primaryEmail: "fixture@example.com", displayName: "Fixture")
