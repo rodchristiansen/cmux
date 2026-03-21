@@ -88,13 +88,13 @@ const RuntimeSession = struct {
     }
 };
 
-const State = struct {
+pub const State = struct {
     alloc: std.mem.Allocator,
     proxies: proxy_streams.Manager,
     registry: session_registry.Registry,
     runtimes: std.StringHashMap(*RuntimeSession),
 
-    fn init(alloc: std.mem.Allocator) State {
+    pub fn init(alloc: std.mem.Allocator) State {
         return .{
             .alloc = alloc,
             .proxies = proxy_streams.Manager.init(alloc),
@@ -103,7 +103,7 @@ const State = struct {
         };
     }
 
-    fn deinit(self: *State) void {
+    pub fn deinit(self: *State) void {
         var iter = self.runtimes.valueIterator();
         while (iter.next()) |runtime| {
             runtime.*.deinit();
@@ -170,7 +170,7 @@ fn handleLine(state: *State, output: anytype, raw_line: []const u8) !void {
     try writeResponse(output, alloc, response);
 }
 
-fn dispatch(state: *State, req: *const json_rpc.Request) ![]u8 {
+pub fn dispatch(state: *State, req: *const json_rpc.Request) ![]u8 {
     const alloc = state.alloc;
 
     if (std.mem.eql(u8, req.method, "hello")) {
