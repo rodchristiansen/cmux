@@ -8885,6 +8885,17 @@ struct CMUXCLI {
         throw CLIError(message: "Pane has no surface to target")
     }
 
+    private func tmuxCallerCanonicalPaneId(
+        workspaceId: String,
+        client: SocketClient
+    ) -> String? {
+        guard tmuxCallerWorkspaceHandle() == workspaceId,
+              let callerPane = tmuxCallerPaneHandle() else {
+            return nil
+        }
+        return try? tmuxCanonicalPaneId(callerPane, workspaceId: workspaceId, client: client)
+    }
+
     private func tmuxResolveSurfaceTarget(
         _ raw: String?,
         client: SocketClient
@@ -9431,15 +9442,31 @@ struct CMUXCLI {
             } else {
                 direction = parsed.hasFlag("-b") ? "up" : "down"
             }
+            let targetPaneId = target.paneId
+                ?? tmuxCallerCanonicalPaneId(workspaceId: target.workspaceId, client: client)
+            let compatTarget = try tmuxClaudeTeamsSplitTarget(
+                workspaceId: target.workspaceId,
+                targetPaneId: targetPaneId,
+                surfaceId: target.surfaceId,
+                direction: direction,
+                client: client
+            )
             let created = try client.sendV2(method: "surface.split", params: [
                 "workspace_id": target.workspaceId,
-                "surface_id": target.surfaceId,
-                "direction": direction
+                "surface_id": compatTarget.surfaceId,
+                "direction": compatTarget.direction
             ])
             guard let surfaceId = created["surface_id"] as? String else {
                 throw CLIError(message: "surface.split did not return surface_id")
             }
             let paneId = created["pane_id"] as? String
+            try tmuxRecordSplitState(
+                workspaceId: target.workspaceId,
+                targetPaneId: compatTarget.targetPaneId,
+                createdPaneId: paneId,
+                createdSurfaceId: surfaceId,
+                direction: compatTarget.direction
+            )
             // Keep the leader pane focused while Claude starts teammates beside it.
             if let text = tmuxShellCommandText(commandTokens: parsed.positional, cwd: parsed.value("-c")) {
                 _ = try client.sendV2(method: "surface.send_text", params: [
@@ -9661,7 +9688,18 @@ struct CMUXCLI {
             let parsed = try parseTmuxArguments(rawArgs, valueFlags: ["-t"], boolFlags: [])
             _ = try tmuxResolveWorkspaceTarget(parsed.value("-t"), client: client)
 
-        case "select-layout", "set-option", "set", "set-window-option", "setw", "source-file", "refresh-client", "attach-session", "detach-client":
+        case "select-layout":
+            let parsed = try parseTmuxArguments(rawArgs, valueFlags: ["-t"], boolFlags: [])
+            let layoutName = parsed.positional.last?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard let layoutName, !layoutName.isEmpty else { return }
+            let workspaceId = try tmuxResolveWorkspaceTarget(parsed.value("-t"), client: client)
+            if layoutName == "main-vertical" {
+                try tmuxConfigureMainVerticalLayout(workspaceId: workspaceId, client: client)
+            } else {
+                try tmuxClearMainVerticalLayout(workspaceId: workspaceId)
+            }
+
+        case "set-option", "set", "set-window-option", "setw", "source-file", "refresh-client", "attach-session", "detach-client":
             return
 
         default:
@@ -9672,11 +9710,27 @@ struct CMUXCLI {
     private struct TmuxCompatStore: Codable {
         var buffers: [String: String] = [:]
         var hooks: [String: String] = [:]
+        var mainVerticalLayouts: [String: TmuxCompatMainVerticalLayout] = [:]
+        var lastSplits: [String: TmuxCompatLastSplit] = [:]
+    }
+
+    private struct TmuxCompatMainVerticalLayout: Codable {
+        var mainPaneId: String
+        var stackPaneId: String?
+    }
+
+    private struct TmuxCompatLastSplit: Codable {
+        var targetPaneId: String?
+        var createdPaneId: String
+        var createdSurfaceId: String
+        var direction: String
     }
 
     private func tmuxCompatStoreURL() -> URL {
-        let root = NSString(string: "~/.cmuxterm").expandingTildeInPath
-        return URL(fileURLWithPath: root).appendingPathComponent("tmux-compat-store.json")
+        let homePath = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let root = URL(fileURLWithPath: homePath, isDirectory: true)
+            .appendingPathComponent(".cmuxterm", isDirectory: true)
+        return root.appendingPathComponent("tmux-compat-store.json")
     }
 
     private func loadTmuxCompatStore() -> TmuxCompatStore {
@@ -9694,6 +9748,89 @@ struct CMUXCLI {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true, attributes: nil)
         let data = try JSONEncoder().encode(store)
         try data.write(to: url, options: .atomic)
+    }
+
+    private func tmuxRecordSplitState(
+        workspaceId: String,
+        targetPaneId: String?,
+        createdPaneId: String?,
+        createdSurfaceId: String,
+        direction: String
+    ) throws {
+        guard let createdPaneId else { return }
+        var store = loadTmuxCompatStore()
+        store.lastSplits[workspaceId] = TmuxCompatLastSplit(
+            targetPaneId: targetPaneId,
+            createdPaneId: createdPaneId,
+            createdSurfaceId: createdSurfaceId,
+            direction: direction
+        )
+        if var layout = store.mainVerticalLayouts[workspaceId] {
+            if direction == "down" {
+                layout.stackPaneId = createdPaneId
+            } else if direction == "right", targetPaneId == layout.mainPaneId {
+                layout.stackPaneId = createdPaneId
+            }
+            store.mainVerticalLayouts[workspaceId] = layout
+        }
+        try saveTmuxCompatStore(store)
+    }
+
+    private func tmuxConfigureMainVerticalLayout(
+        workspaceId: String,
+        client: SocketClient
+    ) throws {
+        var store = loadTmuxCompatStore()
+        let mainPaneId = try tmuxCallerCanonicalPaneId(workspaceId: workspaceId, client: client)
+            ?? store.mainVerticalLayouts[workspaceId]?.mainPaneId
+            ?? store.lastSplits[workspaceId]?.targetPaneId
+            ?? tmuxFocusedPaneId(workspaceId: workspaceId, client: client)
+        var stackPaneId = store.mainVerticalLayouts[workspaceId]?.stackPaneId
+        if let lastSplit = store.lastSplits[workspaceId],
+           lastSplit.direction == "right",
+           lastSplit.targetPaneId == mainPaneId {
+            stackPaneId = lastSplit.createdPaneId
+        }
+        store.mainVerticalLayouts[workspaceId] = TmuxCompatMainVerticalLayout(
+            mainPaneId: mainPaneId,
+            stackPaneId: stackPaneId
+        )
+        try saveTmuxCompatStore(store)
+    }
+
+    private func tmuxClearMainVerticalLayout(workspaceId: String) throws {
+        var store = loadTmuxCompatStore()
+        store.mainVerticalLayouts.removeValue(forKey: workspaceId)
+        try saveTmuxCompatStore(store)
+    }
+
+    private func tmuxClaudeTeamsSplitTarget(
+        workspaceId: String,
+        targetPaneId: String?,
+        surfaceId: String,
+        direction: String,
+        client: SocketClient
+    ) throws -> (targetPaneId: String?, surfaceId: String, direction: String) {
+        guard direction == "right" else {
+            return (targetPaneId, surfaceId, direction)
+        }
+        let store = loadTmuxCompatStore()
+        guard let layout = store.mainVerticalLayouts[workspaceId],
+              let stackPaneId = layout.stackPaneId,
+              stackPaneId != layout.mainPaneId else {
+            return (targetPaneId, surfaceId, direction)
+        }
+        let targetsMainPane = targetPaneId == nil || targetPaneId == layout.mainPaneId
+        let targetsCurrentStack = targetPaneId == stackPaneId
+        guard targetsMainPane || targetsCurrentStack else {
+            return (targetPaneId, surfaceId, direction)
+        }
+        let stackSurfaceId = try tmuxSelectedSurfaceId(
+            workspaceId: workspaceId,
+            paneId: stackPaneId,
+            client: client
+        )
+        return (stackPaneId, stackSurfaceId, "down")
     }
 
     private func runShellCommand(_ command: String, stdinText: String) throws -> (status: Int32, stdout: String, stderr: String) {
