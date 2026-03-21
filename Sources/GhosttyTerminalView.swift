@@ -6207,6 +6207,7 @@ final class GhosttySurfaceScrollView: NSView {
     private var pendingDropZone: DropZone?
     private var dropZoneOverlayAnimationGeneration: UInt64 = 0
     private var pendingAutomaticFirstResponderApply = false
+    private var visibilityRefreshRecoveryGeneration: UInt64 = 0
     // Intentionally no focus retry loops: rely on AppKit first-responder and bonsplit selection.
 
     /// Tracks whether keyboard focus should go to the search field or the terminal
@@ -6635,6 +6636,36 @@ final class GhosttySurfaceScrollView: NSView {
     /// contents do not remain stretched during live resize churn.
     func refreshSurfaceNow(reason: String = "portal.refreshSurfaceNow") {
         surfaceView.terminalSurface?.forceRefresh(reason: reason)
+    }
+
+    private func scheduleVisibilityRefreshRecovery(reason: String) {
+        visibilityRefreshRecoveryGeneration &+= 1
+        let generation = visibilityRefreshRecoveryGeneration
+        let runRefreshPass: (String) -> Void = { [weak self] phase in
+            guard let self else { return }
+            guard self.visibilityRefreshRecoveryGeneration == generation else { return }
+            let hiddenInHierarchy = self.isHiddenOrHasHiddenAncestor || self.surfaceView.isHiddenOrHasHiddenAncestor
+            guard self.surfaceView.isVisibleInUI,
+                  !hiddenInHierarchy,
+                  self.window != nil,
+                  self.bounds.width > 1,
+                  self.bounds.height > 1 else { return }
+#if DEBUG
+            dlog(
+                "surface.reveal.refresh surface=\(self.surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+                "reason=\(reason).\(phase)"
+            )
+#endif
+            self.reconcileGeometryNow()
+            self.refreshSurfaceNow(reason: "\(reason).\(phase)")
+        }
+
+        DispatchQueue.main.async {
+            runRefreshPass("async")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            runRefreshPass("delayed")
+        }
     }
 
     @discardableResult
@@ -7388,12 +7419,20 @@ final class GhosttySurfaceScrollView: NSView {
             )
         }
         if !visible {
+            visibilityRefreshRecoveryGeneration &+= 1
             // If we were focused, yield first responder.
             if let window, let fr = window.firstResponder as? NSView,
                fr === surfaceView || fr.isDescendant(of: surfaceView) {
                 window.makeFirstResponder(nil)
             }
         } else {
+            if !wasVisible {
+                // `setVisibleInUI(true)` clears `isHidden` immediately, so a workspace return can
+                // skip TerminalWindowPortal's `portal.reveal` refresh path when there is no frame
+                // delta. Nudge the surface here as it becomes visible again so render recovery does
+                // not depend on a later focus/layout event.
+                scheduleVisibilityRefreshRecovery(reason: "visibleInUIReveal")
+            }
             scheduleAutomaticFirstResponderApply(reason: "setVisibleInUI")
         }
     }
