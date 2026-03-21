@@ -37,11 +37,33 @@ struct DebugTerminalPortalMotionSample {
     let hostedFrameInWindow: CGRect
     let anchorHidden: Bool
     let hostedHidden: Bool
-    let hostLayerClass: String = "nil"
-    let hostWantsLayer: Bool = false
-    let hostedLayerClass: String = "nil"
-    let hostedHasMetalLayer: Bool = false
+    let hostLayerClass: String
+    let hostWantsLayer: Bool
+    let hostedLayerClass: String
+    let hostedHasMetalLayer: Bool
     let surfaceSample: GhosttySurfaceScrollView.DebugFrameSample?
+
+    init(
+        anchorFrameInWindow: CGRect,
+        hostedFrameInWindow: CGRect,
+        anchorHidden: Bool,
+        hostedHidden: Bool,
+        hostLayerClass: String = "nil",
+        hostWantsLayer: Bool = false,
+        hostedLayerClass: String = "nil",
+        hostedHasMetalLayer: Bool = false,
+        surfaceSample: GhosttySurfaceScrollView.DebugFrameSample?
+    ) {
+        self.anchorFrameInWindow = anchorFrameInWindow
+        self.hostedFrameInWindow = hostedFrameInWindow
+        self.anchorHidden = anchorHidden
+        self.hostedHidden = hostedHidden
+        self.hostLayerClass = hostLayerClass
+        self.hostWantsLayer = hostWantsLayer
+        self.hostedLayerClass = hostedLayerClass
+        self.hostedHasMetalLayer = hostedHasMetalLayer
+        self.surfaceSample = surfaceSample
+    }
 }
 #endif
 
