@@ -370,11 +370,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             XCTFail("Missing browserPanelId in setup data")
             return
         }
-        let cliPaths = resolveCmuxCLIPaths()
-        guard !cliPaths.isEmpty else {
-            XCTFail("Expected cmux CLI for browser arrow-key UI test")
-            return
-        }
         let browserPane = app.otherElements["BrowserPanelContent.\(browserPanelId)"].firstMatch
         let browserWebView = app.webViews.firstMatch
         let browserClickTarget: XCUIElement
@@ -386,7 +381,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         }
 
         let harnessInstall = installBrowserArrowHarness(
-            cliPaths: cliPaths,
             surfaceId: browserPanelId
         )
         guard let harness = harnessInstall.harness else {
@@ -402,7 +396,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 
         app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
         guard let baselineDownReport = waitForBrowserArrowReport(
-            cliPaths: cliPaths,
             surfaceId: browserPanelId,
             timeout: 5.0,
             predicate: { report in
@@ -413,14 +406,13 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         ) else {
             XCTFail(
                 "Expected baseline Down Arrow to reach the primary page input. " +
-                "report=\(String(describing: browserArrowReport(cliPaths: cliPaths, surfaceId: browserPanelId)))"
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
             )
             return
         }
 
         app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
         guard let baselineUpReport = waitForBrowserArrowReport(
-            cliPaths: cliPaths,
             surfaceId: browserPanelId,
             timeout: 5.0,
             predicate: { report in
@@ -431,7 +423,7 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         ) else {
             XCTFail(
                 "Expected baseline Up Arrow to reach the primary page input. " +
-                "report=\(String(describing: browserArrowReport(cliPaths: cliPaths, surfaceId: browserPanelId)))"
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
             )
             return
         }
@@ -450,7 +442,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             .click()
 
         guard let clickedInputReport = waitForBrowserArrowReport(
-            cliPaths: cliPaths,
             surfaceId: browserPanelId,
             timeout: 5.0,
             predicate: { report in
@@ -459,14 +450,13 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         ) else {
             XCTFail(
                 "Expected clicking the page to focus the secondary page input before sending arrows. " +
-                "report=\(String(describing: browserArrowReport(cliPaths: cliPaths, surfaceId: browserPanelId)))"
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
             )
             return
         }
 
         app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
         guard let postCmdLDownReport = waitForBrowserArrowReport(
-            cliPaths: cliPaths,
             surfaceId: browserPanelId,
             timeout: 5.0,
             predicate: { report in
@@ -478,14 +468,13 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             XCTFail(
                 "Expected Down Arrow after Cmd+L and page click to reach the secondary page input. " +
                 "clickedInputReport=\(clickedInputReport) " +
-                "report=\(String(describing: browserArrowReport(cliPaths: cliPaths, surfaceId: browserPanelId)))"
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
             )
             return
         }
 
         app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
         guard let postCmdLUpReport = waitForBrowserArrowReport(
-            cliPaths: cliPaths,
             surfaceId: browserPanelId,
             timeout: 5.0,
             predicate: { report in
@@ -497,7 +486,7 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             XCTFail(
                 "Expected Up Arrow after Cmd+L and page click to reach the secondary page input. " +
                 "postCmdLDownReport=\(postCmdLDownReport) " +
-                "report=\(String(describing: browserArrowReport(cliPaths: cliPaths, surfaceId: browserPanelId)))"
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
             )
             return
         }
@@ -1223,11 +1212,8 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         let diagnostic: String
     }
 
-    private func installBrowserArrowHarness(
-        cliPaths: [String],
-        surfaceId: String
-    ) -> BrowserArrowHarnessInstallResult {
-        let readyResult = browserWaitForArrowHarness(cliPaths: cliPaths, surfaceId: surfaceId)
+    private func installBrowserArrowHarness(surfaceId: String) -> BrowserArrowHarnessInstallResult {
+        let readyResult = browserWaitForArrowHarness(surfaceId: surfaceId)
         guard readyResult.terminationStatus == 0 else {
             return BrowserArrowHarnessInstallResult(
                 harness: nil,
@@ -1348,27 +1334,23 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
           });
         })();
         """
-        let evalResult = executeCmuxCommand(
-            executablePaths: cliPaths,
-            arguments: ["browser", surfaceId, "eval", "--script", script]
-        )
-        guard evalResult.terminationStatus == 0 else {
+        guard let evalOutput = browserEval(surfaceId: surfaceId, script: script) else {
             return BrowserArrowHarnessInstallResult(
                 harness: nil,
-                diagnostic: "browser eval failed with status=\(evalResult.terminationStatus) stdout=\(evalResult.stdout) stderr=\(evalResult.stderr)"
+                diagnostic: "browser eval failed via control socket"
             )
         }
-        guard !evalResult.stdout.isEmpty else {
+        guard !evalOutput.isEmpty else {
             return BrowserArrowHarnessInstallResult(
                 harness: nil,
-                diagnostic: "browser eval returned empty stdout stderr=\(evalResult.stderr)"
+                diagnostic: "browser eval returned empty payload"
             )
         }
-        guard let data = evalResult.stdout.data(using: .utf8),
+        guard let data = evalOutput.data(using: .utf8),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return BrowserArrowHarnessInstallResult(
                 harness: nil,
-                diagnostic: "browser eval returned non-JSON stdout=\(evalResult.stdout) stderr=\(evalResult.stderr)"
+                diagnostic: "browser eval returned non-JSON payload=\(evalOutput)"
             )
         }
 
@@ -1406,33 +1388,33 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         )
     }
 
-    private func browserWaitForArrowHarness(
-        cliPaths: [String],
-        surfaceId: String
-    ) -> (terminationStatus: Int32, stdout: String, stderr: String) {
-        executeCmuxCommand(
-            executablePaths: cliPaths,
-            arguments: [
-                "browser",
-                surfaceId,
-                "wait",
-                "--timeout-ms",
-                "8000",
-                "--function",
-                "String(document.readyState || '') === 'complete' && !!(document.body || document.documentElement)"
+    private func browserWaitForArrowHarness(surfaceId: String) -> (terminationStatus: Int32, stdout: String, stderr: String) {
+        let response = browserSocketJSON(
+            method: "browser.wait",
+            params: [
+                "surface_id": surfaceId,
+                "timeout_ms": 8000,
+                "function": "String(document.readyState || '') === 'complete' && !!(document.body || document.documentElement)"
             ]
         )
+        guard let response else {
+            return (terminationStatus: 1, stdout: "", stderr: "No browser.wait response")
+        }
+        guard (response["ok"] as? Bool) == true else {
+            return (terminationStatus: 1, stdout: "", stderr: browserSocketErrorDescription(response))
+        }
+        let stdout = browserSocketResultDescription(response) ?? ""
+        return (terminationStatus: 0, stdout: stdout, stderr: "")
     }
 
     private func waitForBrowserArrowReport(
-        cliPaths: [String],
         surfaceId: String,
         timeout: TimeInterval,
         predicate: @escaping (BrowserArrowReport) -> Bool
     ) -> BrowserArrowReport? {
         var matchedReport: BrowserArrowReport?
         let didMatch = waitForCondition(timeout: timeout) {
-            guard let report = self.browserArrowReport(cliPaths: cliPaths, surfaceId: surfaceId) else {
+            guard let report = self.browserArrowReport(surfaceId: surfaceId) else {
                 return false
             }
             guard predicate(report) else { return false }
@@ -1442,9 +1424,9 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         return didMatch ? matchedReport : nil
     }
 
-    private func browserArrowReport(cliPaths: [String], surfaceId: String, script: String? = nil) -> BrowserArrowReport? {
+    private func browserArrowReport(surfaceId: String, script: String? = nil) -> BrowserArrowReport? {
         let reportScript = script ?? "JSON.stringify(window.cmuxArrowReport ? window.cmuxArrowReport() : null)"
-        guard let raw = browserEval(cliPaths: cliPaths, surfaceId: surfaceId, script: reportScript),
+        guard let raw = browserEval(surfaceId: surfaceId, script: reportScript),
               let data = raw.data(using: .utf8),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -1459,15 +1441,68 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         )
     }
 
-    private func browserEval(cliPaths: [String], surfaceId: String, script: String) -> String? {
-        let result = executeCmuxCommand(
-            executablePaths: cliPaths,
-            arguments: ["browser", surfaceId, "eval", "--script", script]
+    private func browserEval(surfaceId: String, script: String) -> String? {
+        guard let response = browserSocketJSON(
+            method: "browser.eval",
+            params: [
+                "surface_id": surfaceId,
+                "script": script
+            ]
         )
-        guard result.terminationStatus == 0 else {
+        else {
             return nil
         }
-        return result.stdout.isEmpty ? nil : result.stdout
+        guard (response["ok"] as? Bool) == true,
+              let result = response["result"] as? [String: Any],
+              let value = result["value"] else {
+            return nil
+        }
+        if value is NSNull {
+            return "null"
+        }
+        if let stringValue = value as? String {
+            return stringValue
+        }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value),
+              let json = String(data: data, encoding: .utf8) else {
+            return String(describing: value)
+        }
+        return json
+    }
+
+    private func browserSocketJSON(method: String, params: [String: Any]) -> [String: Any]? {
+        let request: [String: Any] = [
+            "id": UUID().uuidString,
+            "method": method,
+            "params": params
+        ]
+        return ControlSocketClient(path: socketPath, responseTimeout: 8.0).sendJSON(request)
+    }
+
+    private func browserSocketErrorDescription(_ response: [String: Any]) -> String {
+        guard let error = response["error"] as? [String: Any] else {
+            return "Unknown error"
+        }
+        let code = (error["code"] as? String) ?? "unknown"
+        let message = (error["message"] as? String) ?? "missing message"
+        if let data = error["data"],
+           JSONSerialization.isValidJSONObject(data),
+           let encoded = try? JSONSerialization.data(withJSONObject: data),
+           let json = String(data: encoded, encoding: .utf8) {
+            return "\(code): \(message) data=\(json)"
+        }
+        return "\(code): \(message)"
+    }
+
+    private func browserSocketResultDescription(_ response: [String: Any]) -> String? {
+        guard let result = response["result"] else { return nil }
+        guard JSONSerialization.isValidJSONObject(result),
+              let data = try? JSONSerialization.data(withJSONObject: result),
+              let json = String(data: data, encoding: .utf8) else {
+            return String(describing: result)
+        }
+        return json
     }
 
     private func resolveCmuxCLIPaths() -> [String] {
@@ -1630,5 +1665,122 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             object: nil
         )
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private final class ControlSocketClient {
+        private let path: String
+        private let responseTimeout: TimeInterval
+
+        init(path: String, responseTimeout: TimeInterval) {
+            self.path = path
+            self.responseTimeout = responseTimeout
+        }
+
+        func sendJSON(_ object: [String: Any]) -> [String: Any]? {
+            guard JSONSerialization.isValidJSONObject(object),
+                  let data = try? JSONSerialization.data(withJSONObject: object),
+                  let line = String(data: data, encoding: .utf8),
+                  let response = sendLine(line),
+                  let responseData = response.data(using: .utf8),
+                  let parsed = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
+                return nil
+            }
+            return parsed
+        }
+
+        func sendLine(_ line: String) -> String? {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard fd >= 0 else { return nil }
+            defer { close(fd) }
+
+            var socketTimeout = timeval(
+                tv_sec: Int(responseTimeout.rounded(.down)),
+                tv_usec: Int32(((responseTimeout - floor(responseTimeout)) * 1_000_000).rounded())
+            )
+
+#if os(macOS)
+            var noSigPipe: Int32 = 1
+            _ = withUnsafePointer(to: &noSigPipe) { ptr in
+                setsockopt(
+                    fd,
+                    SOL_SOCKET,
+                    SO_NOSIGPIPE,
+                    ptr,
+                    socklen_t(MemoryLayout<Int32>.size)
+                )
+            }
+#endif
+            _ = withUnsafePointer(to: &socketTimeout) { ptr in
+                setsockopt(
+                    fd,
+                    SOL_SOCKET,
+                    SO_RCVTIMEO,
+                    ptr,
+                    socklen_t(MemoryLayout<timeval>.size)
+                )
+            }
+            _ = withUnsafePointer(to: &socketTimeout) { ptr in
+                setsockopt(
+                    fd,
+                    SOL_SOCKET,
+                    SO_SNDTIMEO,
+                    ptr,
+                    socklen_t(MemoryLayout<timeval>.size)
+                )
+            }
+
+            var addr = sockaddr_un()
+            memset(&addr, 0, MemoryLayout<sockaddr_un>.size)
+            addr.sun_family = sa_family_t(AF_UNIX)
+
+            let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
+            let bytes = Array(path.utf8CString)
+            guard bytes.count <= maxLen else { return nil }
+            withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+                let raw = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
+                memset(raw, 0, maxLen)
+                for index in 0..<bytes.count {
+                    raw[index] = bytes[index]
+                }
+            }
+
+            let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \.sun_path) ?? 0
+            let addrLen = socklen_t(pathOffset + bytes.count)
+#if os(macOS)
+            addr.sun_len = UInt8(min(Int(addrLen), 255))
+#endif
+
+            let connected = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    connect(fd, sa, addrLen)
+                }
+            }
+            guard connected == 0 else { return nil }
+
+            let payload = line + "\n"
+            let payloadBytes = Array(payload.utf8)
+            let written = payloadBytes.withUnsafeBytes { bytes -> ssize_t in
+                guard let baseAddress = bytes.baseAddress else { return -1 }
+                return send(fd, baseAddress, payloadBytes.count, 0)
+            }
+            guard written == payloadBytes.count else { return nil }
+
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            var response = Data()
+            while true {
+                let count = recv(fd, &buffer, buffer.count, 0)
+                if count <= 0 { break }
+                response.append(buffer, count: count)
+                if buffer[..<count].contains(UInt8(ascii: "\n")) {
+                    break
+                }
+            }
+
+            guard !response.isEmpty,
+                  let raw = String(data: response, encoding: .utf8) else {
+                return nil
+            }
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 }
