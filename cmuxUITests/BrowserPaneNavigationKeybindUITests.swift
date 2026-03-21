@@ -2,6 +2,7 @@ import XCTest
 import Foundation
 
 final class BrowserPaneNavigationKeybindUITests: XCTestCase {
+    private static let uiTestSimulateShortcutNotification = Notification.Name("com.cmuxterm.ui-test.simulate-shortcut")
     private var dataPath = ""
     private var socketPath = ""
     private var launchDiagnosticsPath = ""
@@ -1225,15 +1226,25 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     }
 
     private func simulateShortcut(_ combo: String) {
-        guard let response = browserSocketLine("simulate_shortcut \(combo)") else {
-            XCTFail("Expected simulate_shortcut \(combo) to return a socket response")
+        let requestId = UUID().uuidString
+        DistributedNotificationCenter.default().postNotificationName(
+            Self.uiTestSimulateShortcutNotification,
+            object: nil,
+            userInfo: [
+                "combo": combo,
+                "requestId": requestId,
+            ],
+            deliverImmediately: true
+        )
+        guard let response = waitForDataSnapshot(timeout: 5.0, predicate: { data in
+            data["uiTestShortcutLastRequestId"] == requestId
+        }) else {
+            XCTFail("Expected UI-test shortcut \(combo) request \(requestId) to be acknowledged. data=\(String(describing: self.loadData()))")
             return
         }
-        XCTAssertEqual(
-            response,
-            "OK",
-            "Expected simulate_shortcut \(combo) to return OK. response=\(response)"
-        )
+        XCTAssertEqual(response["uiTestShortcutLastCombo"], combo, "Expected UI-test shortcut ack to match combo \(combo). response=\(response)")
+        XCTAssertEqual(response["uiTestShortcutLastResult"], "OK", "Expected UI-test shortcut \(combo) to return OK. response=\(response)")
+        XCTAssertEqual(response["uiTestShortcutLastError"] ?? "", "", "Expected UI-test shortcut \(combo) to have no error. response=\(response)")
     }
 
     private func loadData() -> [String: String]? {
@@ -1544,13 +1555,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             "params": params
         ]
         return ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendJSON(request)
-    }
-
-    private func browserSocketLine(
-        _ line: String,
-        responseTimeout: TimeInterval = 8.0
-    ) -> String? {
-        ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendLine(line)
     }
 
     private func browserSocketErrorDescription(_ response: [String: Any]) -> String {
