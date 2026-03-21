@@ -1239,20 +1239,8 @@ struct BrowserPanelView: View {
         reason: String,
         isPanelFocusedOverride: Bool? = nil
     ) {
-        guard let cmuxWebView = panel.webView as? CmuxWebView else { return }
         let isPanelFocused = isPanelFocusedOverride ?? isFocused
-        let next = isPanelFocused && !panel.shouldSuppressWebViewFocus()
-        if cmuxWebView.allowsFirstResponderAcquisition != next {
-#if DEBUG
-            dlog(
-                "browser.focus.policy.resync panel=\(panel.id.uuidString.prefix(5)) " +
-                "web=\(ObjectIdentifier(cmuxWebView)) old=\(cmuxWebView.allowsFirstResponderAcquisition ? 1 : 0) " +
-                "new=\(next ? 1 : 0) reason=\(reason) " +
-                "panelFocusedUsed=\(isPanelFocused ? 1 : 0)"
-            )
-#endif
-        }
-        cmuxWebView.allowsFirstResponderAcquisition = next
+        panel.syncWebViewFirstResponderPolicy(isPanelFocused: isPanelFocused, reason: reason)
     }
 
     private func setAddressBarFocused(_ focused: Bool, reason: String) {
@@ -6286,19 +6274,11 @@ struct WebViewRepresentable: NSViewRepresentable {
         webView: WKWebView,
         isPanelFocused: Bool
     ) {
-        guard let cmuxWebView = webView as? CmuxWebView else { return }
-        let next = isPanelFocused && !panel.shouldSuppressWebViewFocus()
-        if cmuxWebView.allowsFirstResponderAcquisition != next {
-#if DEBUG
-            dlog(
-                "browser.focus.policy panel=\(panel.id.uuidString.prefix(5)) " +
-                "web=\(ObjectIdentifier(cmuxWebView)) old=\(cmuxWebView.allowsFirstResponderAcquisition ? 1 : 0) " +
-                "new=\(next ? 1 : 0) isPanelFocused=\(isPanelFocused ? 1 : 0) " +
-                "suppress=\(panel.shouldSuppressWebViewFocus() ? 1 : 0)"
-            )
-#endif
-        }
-        cmuxWebView.allowsFirstResponderAcquisition = next
+        guard webView is CmuxWebView else { return }
+        panel.syncWebViewFirstResponderPolicy(
+            isPanelFocused: isPanelFocused,
+            reason: "applyWebViewFirstResponderPolicy"
+        )
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {

@@ -8564,6 +8564,12 @@ class TerminalController {
                 tabManager.selectWorkspace(ws)
             }
 
+            browserPanel.prepareForExplicitWebViewFocus(
+                isPanelFocused: true,
+                reason: "socket.browser.focus_webview"
+            )
+            NotificationCenter.default.post(name: .browserDidBlurAddressBar, object: surfaceId)
+
             // Prevent omnibar auto-focus from immediately stealing first responder back.
             browserPanel.suppressOmnibarAutofocus(for: 1.0)
 
@@ -11726,19 +11732,19 @@ class TerminalController {
         case "left":
             storedKey = "←"
             keyCode = 123
-            charactersIgnoringModifiers = storedKey
+            charactersIgnoringModifiers = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
         case "right":
             storedKey = "→"
             keyCode = 124
-            charactersIgnoringModifiers = storedKey
+            charactersIgnoringModifiers = String(UnicodeScalar(NSRightArrowFunctionKey)!)
         case "down":
             storedKey = "↓"
             keyCode = 125
-            charactersIgnoringModifiers = storedKey
+            charactersIgnoringModifiers = String(UnicodeScalar(NSDownArrowFunctionKey)!)
         case "up":
             storedKey = "↑"
             keyCode = 126
-            charactersIgnoringModifiers = storedKey
+            charactersIgnoringModifiers = String(UnicodeScalar(NSUpArrowFunctionKey)!)
         case "enter", "return":
             storedKey = "\r"
             keyCode = UInt16(kVK_Return)
@@ -13505,8 +13511,10 @@ class TerminalController {
 
             // Programmatic WebView focus should win over stale omnibar focus state, especially
             // after workspace switches where the blank-page omnibar auto-focus can re-trigger.
-            browserPanel.endSuppressWebViewFocusForAddressBar()
-            browserPanel.clearWebViewFocusSuppression()
+            browserPanel.prepareForExplicitWebViewFocus(
+                isPanelFocused: true,
+                reason: "socket.focus_webview"
+            )
             NotificationCenter.default.post(name: .browserDidBlurAddressBar, object: panelId)
 
             // Prevent omnibar auto-focus from immediately stealing first responder back.

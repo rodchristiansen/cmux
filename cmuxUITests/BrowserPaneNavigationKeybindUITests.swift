@@ -344,24 +344,32 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 
     func testArrowKeysReachClickedPageInputAfterCmdL() {
         let app = XCUIApplication()
-        app.launchArguments += ["-socketControlMode", "allowAll"]
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
-        app.launchEnvironment["CMUX_SOCKET_MODE"] = "allowAll"
         app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
         app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_INPUT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_ARROW_SETUP"] = "1"
         launchAndEnsureForeground(app)
 
         XCTAssertTrue(
             waitForData(
                 keys: [
                     "browserPanelId",
-                    "webViewFocused"
+                    "webViewFocused",
+                    "webInputFocusSeeded",
+                    "webInputFocusElementId",
+                    "webInputFocusSecondaryElementId",
+                    "webInputFocusSecondaryClickOffsetX",
+                    "webInputFocusSecondaryClickOffsetY",
+                    "browserArrowInstalled",
+                    "browserArrowDownCount",
+                    "browserArrowUpCount",
+                    "browserArrowActiveElementId"
                 ],
-                timeout: 12.0
+                timeout: 15.0
             ),
-            "Expected basic browser setup data to be written"
+            "Expected browser arrow setup data to be written"
         )
 
         guard let setup = loadData() else {
@@ -369,67 +377,83 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return
         }
 
-        guard let browserPanelId = setup["browserPanelId"], !browserPanelId.isEmpty else {
-            XCTFail("Missing browserPanelId in setup data")
+        XCTAssertEqual(setup["webInputFocusSeeded"], "true", "Expected test page input to be focused before arrow-key checks")
+
+        guard let primaryInputId = setup["webInputFocusElementId"], !primaryInputId.isEmpty else {
+            XCTFail("Missing webInputFocusElementId in setup data")
             return
         }
-        let browserPane = app.otherElements["BrowserPanelContent.\(browserPanelId)"].firstMatch
-        let browserWebView = app.webViews.firstMatch
-        let browserClickTarget: XCUIElement
-        if browserPane.waitForExistence(timeout: 2.0) {
-            browserClickTarget = browserPane
-        } else {
-            XCTAssertTrue(browserWebView.waitForExistence(timeout: 8.0), "Expected browser web area before arrow-key regression check")
-            browserClickTarget = browserWebView
+        guard let secondaryInputId = setup["webInputFocusSecondaryElementId"], !secondaryInputId.isEmpty else {
+            XCTFail("Missing webInputFocusSecondaryElementId in setup data")
+            return
         }
-
-        let harnessInstall = installBrowserArrowHarness(
-            surfaceId: browserPanelId
-        )
-        guard let harness = harnessInstall.harness else {
-            XCTFail("Expected browser arrow harness setup to succeed. \(harnessInstall.diagnostic)")
+        guard let secondaryClickOffsetXRaw = setup["webInputFocusSecondaryClickOffsetX"],
+              let secondaryClickOffsetYRaw = setup["webInputFocusSecondaryClickOffsetY"],
+              let secondaryClickOffsetX = Double(secondaryClickOffsetXRaw),
+              let secondaryClickOffsetY = Double(secondaryClickOffsetYRaw) else {
+            XCTFail(
+                "Missing or invalid secondary input click offsets in setup data. " +
+                "webInputFocusSecondaryClickOffsetX=\(setup["webInputFocusSecondaryClickOffsetX"] ?? "nil") " +
+                "webInputFocusSecondaryClickOffsetY=\(setup["webInputFocusSecondaryClickOffsetY"] ?? "nil")"
+            )
             return
         }
 
-        let primaryInputId = harness.primaryInputId
-        let secondaryInputId = harness.secondaryInputId
-        let initialReport = harness.report
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window before arrow-key regression check")
 
-        XCTAssertEqual(initialReport.active, primaryInputId, "Expected primary page input to stay focused before baseline arrows")
+        guard let initialArrowSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowInstalled"] == "true" &&
+                    data["browserArrowActiveElementId"] == primaryInputId &&
+                    data["browserArrowDownCount"] == "0" &&
+                    data["browserArrowUpCount"] == "0"
+            }
+        ) else {
+            XCTFail(
+                "Expected arrow recorder to initialize with the primary page input focused. " +
+                "data=\(String(describing: loadData()))"
+            )
+            return
+        }
+        let initialDownCount = Int(initialArrowSnapshot["browserArrowDownCount"] ?? "") ?? -1
+        let initialUpCount = Int(initialArrowSnapshot["browserArrowUpCount"] ?? "") ?? -1
 
         app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
-        guard let baselineDownReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard let baselineDownSnapshot = waitForDataSnapshot(
             timeout: 5.0,
-            predicate: { report in
-                report.active == primaryInputId &&
-                    report.down == initialReport.down + 1 &&
-                    report.up == initialReport.up
+            predicate: { data in
+                data["browserArrowActiveElementId"] == primaryInputId &&
+                    data["browserArrowDownCount"] == "\(initialDownCount + 1)" &&
+                    data["browserArrowUpCount"] == "\(initialUpCount)"
             }
         ) else {
             XCTFail(
                 "Expected baseline Down Arrow to reach the primary page input. " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "data=\(String(describing: loadData()))"
             )
             return
         }
+        let baselineDownCount = Int(baselineDownSnapshot["browserArrowDownCount"] ?? "") ?? -1
+        let baselineUpCount = Int(baselineDownSnapshot["browserArrowUpCount"] ?? "") ?? -1
 
         app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
-        guard let baselineUpReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard let baselineUpSnapshot = waitForDataSnapshot(
             timeout: 5.0,
-            predicate: { report in
-                report.active == primaryInputId &&
-                    report.down == baselineDownReport.down &&
-                    report.up == baselineDownReport.up + 1
+            predicate: { data in
+                data["browserArrowActiveElementId"] == primaryInputId &&
+                    data["browserArrowDownCount"] == "\(baselineDownCount)" &&
+                    data["browserArrowUpCount"] == "\(baselineUpCount + 1)"
             }
         ) else {
             XCTFail(
                 "Expected baseline Up Arrow to reach the primary page input. " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "data=\(String(describing: loadData()))"
             )
             return
         }
+        let baselineUpCountAfterUp = Int(baselineUpSnapshot["browserArrowUpCount"] ?? "") ?? -1
 
         app.typeKey("l", modifierFlags: [.command])
         XCTAssertTrue(
@@ -439,62 +463,59 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             "Expected Cmd+L to focus the omnibar before the page-click arrow-key check"
         )
 
-        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-        browserClickTarget
-            .coordinate(withNormalizedOffset: CGVector(dx: harness.secondaryCenterX, dy: harness.secondaryCenterY))
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: secondaryClickOffsetX, dy: secondaryClickOffsetY))
             .click()
 
-        guard let clickedInputReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard waitForDataMatch(
             timeout: 5.0,
-            predicate: { report in
-                report.active == secondaryInputId
+            predicate: { data in
+                data["browserArrowActiveElementId"] == secondaryInputId
             }
         ) else {
             XCTFail(
                 "Expected clicking the page to focus the secondary page input before sending arrows. " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "data=\(String(describing: loadData()))"
             )
             return
         }
 
         app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
-        guard let postCmdLDownReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard let postCmdLDownSnapshot = waitForDataSnapshot(
             timeout: 5.0,
-            predicate: { report in
-                report.active == secondaryInputId &&
-                    report.down == baselineUpReport.down + 1 &&
-                    report.up == baselineUpReport.up
+            predicate: { data in
+                data["browserArrowActiveElementId"] == secondaryInputId &&
+                    data["browserArrowDownCount"] == "\(baselineDownCount + 1)" &&
+                    data["browserArrowUpCount"] == "\(baselineUpCountAfterUp)"
             }
         ) else {
             XCTFail(
                 "Expected Down Arrow after Cmd+L and page click to reach the secondary page input. " +
-                "clickedInputReport=\(clickedInputReport) " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "data=\(String(describing: loadData()))"
             )
             return
         }
+        let postCmdLDownCount = Int(postCmdLDownSnapshot["browserArrowDownCount"] ?? "") ?? -1
 
         app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
-        guard let postCmdLUpReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard let postCmdLUpSnapshot = waitForDataSnapshot(
             timeout: 5.0,
-            predicate: { report in
-                report.active == secondaryInputId &&
-                    report.down == postCmdLDownReport.down &&
-                    report.up == postCmdLDownReport.up + 1
+            predicate: { data in
+                data["browserArrowActiveElementId"] == secondaryInputId &&
+                    data["browserArrowDownCount"] == "\(postCmdLDownCount)" &&
+                    data["browserArrowUpCount"] == "\(baselineUpCountAfterUp + 1)"
             }
         ) else {
             XCTFail(
                 "Expected Up Arrow after Cmd+L and page click to reach the secondary page input. " +
-                "postCmdLDownReport=\(postCmdLDownReport) " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "postCmdLDownSnapshot=\(postCmdLDownSnapshot) " +
+                "data=\(String(describing: loadData()))"
             )
             return
         }
 
-        XCTAssertEqual(postCmdLUpReport.active, secondaryInputId, "Expected the clicked secondary page input to remain focused")
+        XCTAssertEqual(postCmdLUpSnapshot["browserArrowActiveElementId"], secondaryInputId, "Expected the clicked secondary page input to remain focused")
     }
 
     func testCmdLOpensBrowserWhenTerminalFocused() {
@@ -1175,6 +1196,19 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             guard let data = self.loadData() else { return false }
             return predicate(data)
         }
+    }
+
+    private func waitForDataSnapshot(
+        timeout: TimeInterval,
+        predicate: @escaping ([String: String]) -> Bool
+    ) -> [String: String]? {
+        var matched: [String: String]?
+        let didMatch = waitForCondition(timeout: timeout) {
+            guard let data = self.loadData(), predicate(data) else { return false }
+            matched = data
+            return true
+        }
+        return didMatch ? matched : nil
     }
 
     private func waitForNonExistence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
