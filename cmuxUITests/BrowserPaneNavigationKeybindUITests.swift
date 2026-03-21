@@ -1167,6 +1167,17 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
            app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] == nil {
             app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
         }
+        if app.launchEnvironment["CMUX_SOCKET_PATH"] != nil {
+            if !app.launchArguments.contains("-socketControlMode") {
+                app.launchArguments += ["-socketControlMode", "allowAll"]
+            }
+            if app.launchEnvironment["CMUX_SOCKET_ENABLE"] == nil {
+                app.launchEnvironment["CMUX_SOCKET_ENABLE"] = "1"
+            }
+            if app.launchEnvironment["CMUX_SOCKET_MODE"] == nil {
+                app.launchEnvironment["CMUX_SOCKET_MODE"] = "allowAll"
+            }
+        }
     }
 
     private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
