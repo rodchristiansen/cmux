@@ -8503,7 +8503,7 @@ final class GhosttySurfaceScrollView: NSView {
 
         let visibleRect = scrollView.contentView.documentVisibleRect
         let scrollOffset = scrollOffsetFromBottom(for: visibleRect)
-        updateUserScrolledAwayFromBottomState(visibleRect: visibleRect)
+        updateUserScrolledAwayFromBottomState(scrollOffset: scrollOffset)
 
         let row = Int(scrollOffset / cellHeight)
 
@@ -8526,11 +8526,20 @@ final class GhosttySurfaceScrollView: NSView {
 
     private func viewportIsAtBottom(visibleRect: NSRect? = nil) -> Bool {
         let visibleRect = visibleRect ?? scrollView.contentView.documentVisibleRect
-        return scrollOffsetFromBottom(for: visibleRect) <= Self.scrollToBottomThreshold
+        return viewportIsAtBottom(scrollOffset: scrollOffsetFromBottom(for: visibleRect))
+    }
+
+    private func viewportIsAtBottom(scrollOffset: CGFloat) -> Bool {
+        scrollOffset <= Self.scrollToBottomThreshold
     }
 
     private func updateUserScrolledAwayFromBottomState(visibleRect: NSRect? = nil) {
-        userScrolledAwayFromBottom = !viewportIsAtBottom(visibleRect: visibleRect)
+        let visibleRect = visibleRect ?? scrollView.contentView.documentVisibleRect
+        updateUserScrolledAwayFromBottomState(scrollOffset: scrollOffsetFromBottom(for: visibleRect))
+    }
+
+    private func updateUserScrolledAwayFromBottomState(scrollOffset: CGFloat) {
+        userScrolledAwayFromBottom = !viewportIsAtBottom(scrollOffset: scrollOffset)
     }
 
     private func documentHeight() -> CGFloat {
