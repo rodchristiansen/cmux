@@ -1214,25 +1214,14 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     }
 
     private func simulateShortcut(_ combo: String) {
-        guard let response = browserSocketJSON(
-            method: "debug.shortcut.simulate",
-            params: ["combo": combo]
-        ) else {
-            XCTFail("Expected debug.shortcut.simulate \(combo) to return a socket response")
+        guard let response = browserSocketLine("simulate_shortcut \(combo)") else {
+            XCTFail("Expected simulate_shortcut \(combo) to return a socket response")
             return
         }
-
-        if let error = response["error"] as? [String: Any] {
-            XCTFail(
-                "Expected debug.shortcut.simulate \(combo) to succeed. " +
-                "error=\(browserSocketErrorDescription(["error": error]))"
-            )
-            return
-        }
-
-        XCTAssertNotNil(
-            response["result"],
-            "Expected debug.shortcut.simulate \(combo) to return a result payload. response=\(response)"
+        XCTAssertEqual(
+            response,
+            "OK",
+            "Expected simulate_shortcut \(combo) to return OK. response=\(response)"
         )
     }
 
@@ -1544,6 +1533,13 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             "params": params
         ]
         return ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendJSON(request)
+    }
+
+    private func browserSocketLine(
+        _ line: String,
+        responseTimeout: TimeInterval = 8.0
+    ) -> String? {
+        ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendLine(line)
     }
 
     private func browserSocketErrorDescription(_ response: [String: Any]) -> String {
