@@ -1,12 +1,15 @@
-# cmuxd-remote (Go)
+# cmuxd-remote
 
-Go remote daemon for `cmux ssh` bootstrap, capability negotiation, and CLI relay.
+Zig remote daemon for `cmux ssh` bootstrap, direct TLS attach, capability negotiation, PTY-backed terminal sessions, and CLI relay.
+
+Session state now lives in Zig and uses `ghostty-vt` as the terminal-state engine. The session core follows the same PTY ownership, VT feeding, and replay discipline used in [vendor/zmx](../../../vendor/zmx), while keeping cmux's existing multi-session JSON-RPC server shape instead of zmx's one-daemon-per-session Unix-socket model.
 
 ## Commands
 
 1. `cmuxd-remote version`
 2. `cmuxd-remote serve --stdio`
-3. `cmuxd-remote cli <command> [args...]` — relay cmux commands to the local app over the reverse TCP forward
+3. `cmuxd-remote serve --tls`
+4. `cmuxd-remote cli <command> [args...]` — relay cmux commands to the local app over the reverse TCP forward
 
 When invoked as `cmux` (via wrapper/symlink installed during bootstrap), the binary auto-dispatches to the `cli` subcommand. This is busybox-style argv[0] detection.
 
@@ -25,16 +28,20 @@ When invoked as `cmux` (via wrapper/symlink installed during bootstrap), the bin
 11. `session.detach`
 12. `session.status`
 
+The public newline-delimited JSON-RPC contract is intentionally preserved across the Zig rewrite. iOS, macOS, and SSH bootstrap clients still speak the same `hello`, `proxy.*`, `terminal.*`, and `session.*` protocol.
+
 Current integration in cmux:
 1. `workspace.remote.configure` now bootstraps this binary over SSH when missing.
 2. Client sends `hello` before enabling remote proxy transport.
 3. Local workspace proxy broker serves SOCKS5 + HTTP CONNECT and tunnels stream traffic through `proxy.*` RPC over `serve --stdio`.
 4. Daemon status/capabilities are exposed in `workspace.remote.status -> remote.daemon` (including `session.resize.min`).
 
-Internal packages:
-1. `internal/rpc` owns newline-delimited JSON-RPC framing for stdio and future direct carriers.
-2. `internal/session` owns attachment tracking and `smallest screen wins` session sizing.
-3. `internal/auth` owns short-lived daemon ticket signing and verification for direct transport.
+Internal Zig modules:
+1. `zig/src/json_rpc.zig` owns newline-delimited JSON-RPC framing.
+2. `zig/src/terminal_session.zig` owns PTY state, `ghostty-vt`, replay, and raw byte offsets.
+3. `zig/src/session_registry.zig` owns session IDs, attachment IDs, and `smallest screen wins` sizing.
+4. `zig/src/serve_stdio.zig` and `zig/src/serve_tls.zig` expose the public daemon API.
+5. `zig/src/ticket_auth.zig` owns short-lived daemon ticket verification for direct transport.
 
 `workspace.remote.configure` contract notes:
 1. `port` / `local_proxy_port` accept integer values and numeric strings; explicit `null` clears each field.
