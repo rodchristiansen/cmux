@@ -361,11 +361,12 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             browserClickTarget = browserWebView
         }
 
-        guard let harness = installBrowserArrowHarness(
+        let harnessInstall = installBrowserArrowHarness(
             cliPath: cliPath,
             surfaceId: browserPanelId
-        ) else {
-            XCTFail("Expected browser arrow harness setup to succeed")
+        )
+        guard let harness = harnessInstall.harness else {
+            XCTFail("Expected browser arrow harness setup to succeed. \(harnessInstall.diagnostic)")
             return
         }
 
@@ -1179,10 +1180,23 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         let secondaryCenterY: Double
     }
 
+    private struct BrowserArrowHarnessInstallResult {
+        let harness: BrowserArrowHarness?
+        let diagnostic: String
+    }
+
     private func installBrowserArrowHarness(
         cliPath: String,
         surfaceId: String
-    ) -> BrowserArrowHarness? {
+    ) -> BrowserArrowHarnessInstallResult {
+        let readyResult = browserWaitForArrowHarness(cliPath: cliPath, surfaceId: surfaceId)
+        guard readyResult.terminationStatus == 0 else {
+            return BrowserArrowHarnessInstallResult(
+                harness: nil,
+                diagnostic: "browser wait failed with status=\(readyResult.terminationStatus) stdout=\(readyResult.stdout) stderr=\(readyResult.stderr)"
+            )
+        }
+
         let script = """
         (() => {
           const root = document.body || document.documentElement;
@@ -1296,11 +1310,30 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
           });
         })();
         """
-        guard let raw = browserEval(cliPath: cliPath, surfaceId: surfaceId, script: script),
-              let data = raw.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+        let evalResult = executeCmuxCommand(
+            executablePath: cliPath,
+            arguments: ["browser", surfaceId, "eval", "--script", script]
+        )
+        guard evalResult.terminationStatus == 0 else {
+            return BrowserArrowHarnessInstallResult(
+                harness: nil,
+                diagnostic: "browser eval failed with status=\(evalResult.terminationStatus) stdout=\(evalResult.stdout) stderr=\(evalResult.stderr)"
+            )
         }
+        guard !evalResult.stdout.isEmpty else {
+            return BrowserArrowHarnessInstallResult(
+                harness: nil,
+                diagnostic: "browser eval returned empty stdout stderr=\(evalResult.stderr)"
+            )
+        }
+        guard let data = evalResult.stdout.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return BrowserArrowHarnessInstallResult(
+                harness: nil,
+                diagnostic: "browser eval returned non-JSON stdout=\(evalResult.stdout) stderr=\(evalResult.stderr)"
+            )
+        }
+
         let primaryInputId = (payload["primaryId"] as? String) ?? ""
         let secondaryInputId = (payload["secondaryId"] as? String) ?? ""
         let secondaryCenterX = (payload["secondaryCenterX"] as? NSNumber)?.doubleValue ?? -1
@@ -1311,20 +1344,45 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
               secondaryCenterX < 1,
               secondaryCenterY > 0,
               secondaryCenterY < 1 else {
-            return nil
+            return BrowserArrowHarnessInstallResult(
+                harness: nil,
+                diagnostic: "browser eval returned incomplete payload=\(payload)"
+            )
         }
-        return BrowserArrowHarness(
-            report: BrowserArrowReport(
-                down: (payload["down"] as? NSNumber)?.intValue ?? 0,
-                up: (payload["up"] as? NSNumber)?.intValue ?? 0,
-                active: (payload["active"] as? String) ?? "",
-                selectionStart: (payload["selectionStart"] as? NSNumber)?.intValue,
-                selectionEnd: (payload["selectionEnd"] as? NSNumber)?.intValue
+
+        return BrowserArrowHarnessInstallResult(
+            harness: BrowserArrowHarness(
+                report: BrowserArrowReport(
+                    down: (payload["down"] as? NSNumber)?.intValue ?? 0,
+                    up: (payload["up"] as? NSNumber)?.intValue ?? 0,
+                    active: (payload["active"] as? String) ?? "",
+                    selectionStart: (payload["selectionStart"] as? NSNumber)?.intValue,
+                    selectionEnd: (payload["selectionEnd"] as? NSNumber)?.intValue
+                ),
+                primaryInputId: primaryInputId,
+                secondaryInputId: secondaryInputId,
+                secondaryCenterX: secondaryCenterX,
+                secondaryCenterY: secondaryCenterY
             ),
-            primaryInputId: primaryInputId,
-            secondaryInputId: secondaryInputId,
-            secondaryCenterX: secondaryCenterX,
-            secondaryCenterY: secondaryCenterY
+            diagnostic: "ok"
+        )
+    }
+
+    private func browserWaitForArrowHarness(
+        cliPath: String,
+        surfaceId: String
+    ) -> (terminationStatus: Int32, stdout: String, stderr: String) {
+        executeCmuxCommand(
+            executablePath: cliPath,
+            arguments: [
+                "browser",
+                surfaceId,
+                "wait",
+                "--timeout-ms",
+                "8000",
+                "--function",
+                "String(document.readyState || '') === 'complete' && !!(document.body || document.documentElement)"
+            ]
         )
     }
 
