@@ -4483,6 +4483,26 @@ class TabManager: ObservableObject {
             return terminal.surface.hostedView.debugInlineMotionSample(normalizedCrop: crop)
         }
 
+        func terminalLayerDiagnostics(for panelId: UUID?, firstNonBlankFrame: Int? = nil) -> [String: String] {
+            guard let sample = motionSample(for: panelId) else {
+                return [
+                    "hostLayerClass": "nil",
+                    "hostWantsLayer": "0",
+                    "hostedLayerClass": "nil",
+                    "hostedHasMetalLayer": "0",
+                    "firstNonBlankFrame": String(firstNonBlankFrame ?? -1),
+                ]
+            }
+
+            return [
+                "hostLayerClass": sample.hostLayerClass,
+                "hostWantsLayer": sample.hostWantsLayer ? "1" : "0",
+                "hostedLayerClass": sample.hostedLayerClass,
+                "hostedHasMetalLayer": sample.hostedHasMetalLayer ? "1" : "0",
+                "firstNonBlankFrame": String(firstNonBlankFrame ?? -1),
+            ]
+        }
+
         func browserMotionSample(for panelId: UUID?) -> DebugTerminalPortalMotionSample? {
             guard let panelId,
                   let browser = tab.browserPanel(for: panelId) else {
@@ -4530,59 +4550,64 @@ class TabManager: ObservableObject {
             return false
         }
 
-        func terminalVisibilityDebugInfo(for panelId: UUID) -> [String: String] {
+        func terminalVisibilityDebugInfo(for panelId: UUID, firstNonBlankFrame: Int? = nil) -> [String: String] {
+            var payload = terminalLayerDiagnostics(for: panelId, firstNonBlankFrame: firstNonBlankFrame)
             guard let terminal = tab.terminalPanel(for: panelId) else {
-                return ["terminalPanelMissing": "1"]
+                payload["terminalPanelMissing"] = "1"
+                return payload
             }
 
             let hostedView = terminal.surface.hostedView
             let renderStats = hostedView.debugRenderStats()
             let inlineSample = hostedView.debugInlineMotionSample(normalizedCrop: crop)
-            return [
-                "portalStats": debugJSONString(TerminalWindowPortalRegistry.debugPortalStats()),
-                "windowDiagnostics": debugJSONString(capturePaneStripWindowDiagnostics()),
-                "renderStats": debugJSONString([
-                    "drawCount": renderStats.drawCount,
-                    "metalDrawableCount": renderStats.metalDrawableCount,
-                    "presentCount": renderStats.presentCount,
-                    "layerClass": renderStats.layerClass,
-                    "layerContentsKey": renderStats.layerContentsKey,
-                    "inWindow": renderStats.inWindow,
-                    "windowIsKey": renderStats.windowIsKey,
-                    "windowOcclusionVisible": renderStats.windowOcclusionVisible,
-                    "appIsActive": renderStats.appIsActive,
-                    "isActive": renderStats.isActive,
-                    "desiredFocus": renderStats.desiredFocus,
-                    "isFirstResponder": renderStats.isFirstResponder,
-                ]),
-                "inlineSampleAvailable": inlineSample == nil ? "0" : "1",
-                "inlineSample": inlineSample.map { sample in
-                    debugJSONString([
-                        "anchorFrame": NSStringFromRect(sample.anchorFrameInWindow),
-                        "hostedFrame": NSStringFromRect(sample.hostedFrameInWindow),
-                        "anchorHidden": sample.anchorHidden,
-                        "hostedHidden": sample.hostedHidden,
-                        "hasSurfaceSample": sample.surfaceSample != nil,
-                    ])
-                } ?? "",
-                "windowCaptureSample": terminalWindowCaptureSample(for: panelId).map { sample in
-                    debugJSONString([
-                        "sampleCount": sample.sampleCount,
-                        "uniqueQuantized": sample.uniqueQuantized,
-                        "lumaStdDev": sample.lumaStdDev,
-                        "modeFraction": sample.modeFraction,
-                        "fingerprint": String(sample.fingerprint),
-                        "iosurfaceWidthPx": sample.iosurfaceWidthPx,
-                        "iosurfaceHeightPx": sample.iosurfaceHeightPx,
-                        "expectedWidthPx": sample.expectedWidthPx,
-                        "expectedHeightPx": sample.expectedHeightPx,
-                        "layerClass": sample.layerClass,
-                        "layerContentsGravity": sample.layerContentsGravity,
-                        "layerContentsKey": sample.layerContentsKey,
-                        "isProbablyBlank": sample.isProbablyBlank,
-                    ])
-                } ?? "",
-            ]
+            payload["portalStats"] = debugJSONString(TerminalWindowPortalRegistry.debugPortalStats())
+            payload["windowDiagnostics"] = debugJSONString(capturePaneStripWindowDiagnostics())
+            payload["renderStats"] = debugJSONString([
+                "drawCount": renderStats.drawCount,
+                "metalDrawableCount": renderStats.metalDrawableCount,
+                "presentCount": renderStats.presentCount,
+                "layerClass": renderStats.layerClass,
+                "layerContentsKey": renderStats.layerContentsKey,
+                "inWindow": renderStats.inWindow,
+                "windowIsKey": renderStats.windowIsKey,
+                "windowOcclusionVisible": renderStats.windowOcclusionVisible,
+                "appIsActive": renderStats.appIsActive,
+                "isActive": renderStats.isActive,
+                "desiredFocus": renderStats.desiredFocus,
+                "isFirstResponder": renderStats.isFirstResponder,
+            ])
+            payload["inlineSampleAvailable"] = inlineSample == nil ? "0" : "1"
+            payload["inlineSample"] = inlineSample.map { sample in
+                debugJSONString([
+                    "anchorFrame": NSStringFromRect(sample.anchorFrameInWindow),
+                    "hostedFrame": NSStringFromRect(sample.hostedFrameInWindow),
+                    "anchorHidden": sample.anchorHidden,
+                    "hostedHidden": sample.hostedHidden,
+                    "hostLayerClass": sample.hostLayerClass,
+                    "hostWantsLayer": sample.hostWantsLayer,
+                    "hostedLayerClass": sample.hostedLayerClass,
+                    "hostedHasMetalLayer": sample.hostedHasMetalLayer,
+                    "hasSurfaceSample": sample.surfaceSample != nil,
+                ])
+            } ?? ""
+            payload["windowCaptureSample"] = terminalWindowCaptureSample(for: panelId).map { sample in
+                debugJSONString([
+                    "sampleCount": sample.sampleCount,
+                    "uniqueQuantized": sample.uniqueQuantized,
+                    "lumaStdDev": sample.lumaStdDev,
+                    "modeFraction": sample.modeFraction,
+                    "fingerprint": String(sample.fingerprint),
+                    "iosurfaceWidthPx": sample.iosurfaceWidthPx,
+                    "iosurfaceHeightPx": sample.iosurfaceHeightPx,
+                    "expectedWidthPx": sample.expectedWidthPx,
+                    "expectedHeightPx": sample.expectedHeightPx,
+                    "layerClass": sample.layerClass,
+                    "layerContentsGravity": sample.layerContentsGravity,
+                    "layerContentsKey": sample.layerContentsKey,
+                    "isProbablyBlank": sample.isProbablyBlank,
+                ])
+            } ?? ""
+            return payload
         }
 
         func browserVisibilityDebugInfo(for panelId: UUID) -> [String: String] {
@@ -4673,7 +4698,10 @@ class TabManager: ObservableObject {
                 return
             }
             if result.nonBlankSampleCounts["T", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: sourcePanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["T"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4704,7 +4732,10 @@ class TabManager: ObservableObject {
                 return
             }
             if result.nonBlankSampleCounts["T", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: sourcePanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["T"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4750,7 +4781,10 @@ class TabManager: ObservableObject {
             )
 
             if result.nonBlankSampleCounts["T", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: sourcePanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["T"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4779,7 +4813,10 @@ class TabManager: ObservableObject {
             )
 
             if result.nonBlankSampleCounts["T", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: sourcePanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["T"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4852,7 +4889,10 @@ class TabManager: ObservableObject {
                 ]
             )
             if result.nonBlankSampleCounts["R", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: rightPanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: rightPanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["R"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4900,7 +4940,10 @@ class TabManager: ObservableObject {
                 ]
             )
             if result.nonBlankSampleCounts["R", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: rightPanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: rightPanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["R"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -4968,7 +5011,10 @@ class TabManager: ObservableObject {
                 return
             }
             if result.nonBlankSampleCounts["R", default: 0] == 0 {
-                var extra = terminalVisibilityDebugInfo(for: createdPanelId)
+                var extra = terminalVisibilityDebugInfo(
+                    for: createdPanelId,
+                    firstNonBlankFrame: result.firstNonBlankFrameByLabel["R"]
+                )
                 extra["sampleCounts"] = debugJSONString(result.sampleCounts)
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
@@ -5092,6 +5138,13 @@ class TabManager: ObservableObject {
                 .map { "\($0.key)=\($0.value)" }
                 .joined(separator: ","),
         ]
+        updates.merge(
+            terminalLayerDiagnostics(
+                for: sourcePanelId,
+                firstNonBlankFrame: result.firstNonBlankFrameByLabel["T"]
+            ),
+            uniquingKeysWith: { _, new in new }
+        )
 
         if let alignment = result.alignment {
             updates["alignmentFailureSeen"] = "1"

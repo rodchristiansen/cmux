@@ -2466,6 +2466,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private var backgroundSurfaceStartQueued = false
     private var surfaceCallbackContext: Unmanaged<GhosttySurfaceCallbackContext>?
     private var desiredOcclusionVisible = true
+    private var bootstrapRefreshPending = false
     private enum PortalLifecycleState: String {
         case live
         case closing
@@ -3172,10 +3173,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         flushPendingTextIfNeeded()
 
-        // Kick an initial draw after creation/size setup. On some startup paths Ghostty can
-        // miss the first vsync callback and sit on a blank frame until another focus/visibility
-        // transition nudges the renderer.
-        forceBootstrapRefresh(reason: "surface.create")
+        // Keep the initial bootstrap refresh pending until the hosted view is in a real
+        // layer-backed window with non-trivial geometry.
+        markBootstrapRefreshPending()
+        performDeferredBootstrapRefreshIfReady(reason: "surface.create")
 
 #if DEBUG
         let runtimeFontText = cmuxCurrentSurfaceFontSizePoints(createdSurface).map {
@@ -3236,6 +3237,24 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         // Let Ghostty continue rendering on its own wakeups for steady-state frames.
         return true
+    }
+
+    func markBootstrapRefreshPending() {
+        bootstrapRefreshPending = true
+    }
+
+    func performDeferredBootstrapRefreshIfReady(reason: String) {
+        guard bootstrapRefreshPending,
+              let view = attachedView,
+              view.window != nil,
+              view.bounds.width > 1,
+              view.bounds.height > 1,
+              (view.layer as? CAMetalLayer) != nil else {
+            return
+        }
+
+        bootstrapRefreshPending = false
+        forceBootstrapRefresh(reason: reason)
     }
 
     /// Force a full size recalculation and surface redraw.
@@ -6365,6 +6384,10 @@ final class GhosttySurfaceScrollView: NSView {
         }
     }
 
+    func performDeferredBootstrapRefreshIfReady(reason: String) {
+        surfaceView.terminalSurface?.performDeferredBootstrapRefreshIfReady(reason: reason)
+    }
+
     /// Detect whether the terminal layer already has usable contents for an initial reveal.
     /// This is intentionally cheap: avoid pixel sampling and only require non-zero layer
     /// bounds plus non-empty contents (or a non-zero IOSurface).
@@ -8069,11 +8092,17 @@ final class GhosttySurfaceScrollView: NSView {
             return false
         }()
 
+        let layerClass = layer.map { String(describing: type(of: $0)) } ?? "nil"
+
         return DebugTerminalPortalMotionSample(
             anchorFrameInWindow: frameInWindow,
             hostedFrameInWindow: frameInWindow,
             anchorHidden: hiddenByHierarchy,
             hostedHidden: isHidden || window.occlusionState.contains(.visible) == false,
+            hostLayerClass: layerClass,
+            hostWantsLayer: wantsLayer,
+            hostedLayerClass: layerClass,
+            hostedHasMetalLayer: (layer as? CAMetalLayer) != nil,
             surfaceSample: debugSampleIOSurface(normalizedCrop: normalizedCrop)
         )
     }

@@ -1,5 +1,6 @@
 import AppKit
 import ObjectiveC
+import QuartzCore
 #if DEBUG
 import PaneKit
 #endif
@@ -36,6 +37,10 @@ struct DebugTerminalPortalMotionSample {
     let hostedFrameInWindow: CGRect
     let anchorHidden: Bool
     let hostedHidden: Bool
+    let hostLayerClass: String = "nil"
+    let hostWantsLayer: Bool = false
+    let hostedLayerClass: String = "nil"
+    let hostedHasMetalLayer: Bool = false
     let surfaceSample: GhosttySurfaceScrollView.DebugFrameSample?
 }
 #endif
@@ -789,7 +794,9 @@ final class WindowTerminalPortal: NSObject {
         // in-place surface refresh when reconciliation actually changed terminal geometry.
         for entry in entriesByHostedId.values {
             guard let hostedView = entry.hostedView, !hostedView.isHidden else { continue }
-            if hostedView.reconcileGeometryNow() {
+            let geometryChanged = hostedView.reconcileGeometryNow()
+            hostedView.performDeferredBootstrapRefreshIfReady(reason: "portal.externalGeometrySync")
+            if geometryChanged {
                 hostedView.refreshSurfaceNow(reason: "portal.externalGeometrySync")
             }
         }
@@ -1156,11 +1163,18 @@ final class WindowTerminalPortal: NSObject {
             return nil
         }
 
+        let hostLayerClass = hostView.layer.map { String(describing: type(of: $0)) } ?? "nil"
+        let hostedLayerClass = hostedView.layer.map { String(describing: type(of: $0)) } ?? "nil"
+
         return DebugTerminalPortalMotionSample(
             anchorFrameInWindow: debugEffectivePresentationFrameInWindow(for: anchorView).integral,
             hostedFrameInWindow: debugVisibleHostedPresentationFrameInWindow(for: hostedView).integral,
             anchorHidden: Self.isHiddenOrAncestorHidden(anchorView),
             hostedHidden: hostedView.isHidden,
+            hostLayerClass: hostLayerClass,
+            hostWantsLayer: hostView.wantsLayer,
+            hostedLayerClass: hostedLayerClass,
+            hostedHasMetalLayer: (hostedView.layer as? CAMetalLayer) != nil,
             surfaceSample: hostedView.debugSampleIOSurface(normalizedCrop: crop)
         )
     }
