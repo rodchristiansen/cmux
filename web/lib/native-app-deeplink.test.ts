@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildNativeAppHref, isAllowedNativeAppHref } from "./native-app-deeplink";
+import {
+  buildNativeAppHref,
+  extractNativeAppHref,
+  isAllowedNativeAppHref,
+} from "./native-app-deeplink";
 
 describe("native app deeplink helper", () => {
   test("allows cmux callback deeplinks", () => {
@@ -24,5 +28,14 @@ describe("native app deeplink helper", () => {
     ).toBe(
       "cmux-dev-auth-mobile://auth-callback?stack_refresh=refresh-123&stack_access=%5B%22refresh-123%22%2C%22access-456%22%5D",
     );
+  });
+
+  test("extracts nested native callback from after_auth_return_to URL", () => {
+    expect(
+      extractNativeAppHref(
+        null,
+        "http://127.0.0.1:4310/handler/after-sign-in?native_app_return_to=cmux-dev-desktop-mobile-e2e://auth-callback",
+      ),
+    ).toBe("cmux-dev-desktop-mobile-e2e://auth-callback");
   });
 });

@@ -19,6 +19,34 @@ export function isAllowedNativeAppHref(target: string): boolean {
   }
 }
 
+export function extractNativeAppHref(
+  nativeAppReturnTo: string | null | undefined,
+  afterAuthReturnTo: string | null | undefined,
+): string | null {
+  if (nativeAppReturnTo && isAllowedNativeAppHref(nativeAppReturnTo)) {
+    return nativeAppReturnTo;
+  }
+
+  if (!afterAuthReturnTo) {
+    return null;
+  }
+
+  if (isAllowedNativeAppHref(afterAuthReturnTo)) {
+    return afterAuthReturnTo;
+  }
+
+  try {
+    const nestedNativeAppReturnTo = new URL(afterAuthReturnTo).searchParams.get(
+      "native_app_return_to",
+    );
+    if (nestedNativeAppReturnTo && isAllowedNativeAppHref(nestedNativeAppReturnTo)) {
+      return nestedNativeAppReturnTo;
+    }
+  } catch {}
+
+  return null;
+}
+
 export function buildNativeAppHref(
   baseHref: string | null,
   stackRefreshToken: string | undefined,

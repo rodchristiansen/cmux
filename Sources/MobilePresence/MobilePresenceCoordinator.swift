@@ -105,9 +105,7 @@ final class MobilePresenceCoordinator {
             needsRepublish = false
             do {
                 try await heartbeatPublisher.publishNow()
-            } catch {
-                NSLog("mobile.presence publish failed: %@", error.localizedDescription)
-            }
+            } catch {}
             if needsRepublish {
                 continue
             }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import StackAuth
 #if canImport(Security)
 import Security
 #endif
@@ -24,21 +25,52 @@ enum AuthManagerError: LocalizedError {
     }
 }
 
-protocol StackAuthTokenStoreProtocol: Sendable {
+protocol StackAuthTokenStoreProtocol: TokenStoreProtocol, Sendable {
     func seed(accessToken: String, refreshToken: String) async
     func clear() async
     func currentAccessToken() async -> String?
     func currentRefreshToken() async -> String?
 }
 
+extension StackAuthTokenStoreProtocol {
+    func seed(accessToken: String, refreshToken: String) async {
+        await setTokens(accessToken: accessToken, refreshToken: refreshToken)
+    }
+
+    func clear() async {
+        await clearTokens()
+    }
+
+    func currentAccessToken() async -> String? {
+        await getStoredAccessToken()
+    }
+
+    func currentRefreshToken() async -> String? {
+        await getStoredRefreshToken()
+    }
+}
+
 protocol AuthClientProtocol: Sendable {
     func currentUser() async throws -> CMUXAuthUser?
     func listTeams() async throws -> [AuthTeamSummary]
     func currentAccessToken() async throws -> String?
+    func signOut() async throws
 }
 
 extension AuthClientProtocol {
     func currentAccessToken() async throws -> String? { nil }
+    func signOut() async throws {}
+}
+
+enum AuthKeychainServiceName {
+    static let stableFallback = "com.cmuxterm.app.auth"
+
+    static func make(bundleIdentifier: String? = Bundle.main.bundleIdentifier) -> String {
+        guard let bundleIdentifier, !bundleIdentifier.isEmpty else {
+            return stableFallback
+        }
+        return "\(bundleIdentifier).auth"
+    }
 }
 
 @MainActor
@@ -50,11 +82,16 @@ final class AuthManager: ObservableObject {
     @Published private(set) var availableTeams: [AuthTeamSummary] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isRestoringSession = false
+    @Published private(set) var didCompleteBrowserSignIn = false
     @Published var selectedTeamID: String? {
         didSet {
             guard selectedTeamID != oldValue else { return }
             settingsStore.selectedTeamID = selectedTeamID
         }
+    }
+
+    var resolvedTeamID: String? {
+        Self.resolveTeamID(selectedTeamID: selectedTeamID, teams: availableTeams)
     }
 
     let requiresAuthenticationGate = false
@@ -99,15 +136,13 @@ final class AuthManager: ObservableObject {
             refreshToken: payload.refreshToken
         )
         try await refreshSession()
+        didCompleteBrowserSignIn = true
     }
 
     func signOut() async {
+        try? await client.signOut()
         await tokenStore.clear()
-        availableTeams = []
-        currentUser = nil
-        isAuthenticated = false
-        selectedTeamID = nil
-        settingsStore.saveCachedUser(nil)
+        clearSessionState(clearSelectedTeam: true)
     }
 
     func getAccessToken() async throws -> String {
@@ -127,9 +162,7 @@ final class AuthManager: ObservableObject {
         let hasRefreshToken = await tokenStore.currentRefreshToken() != nil
         let hasTokens = hasAccessToken || hasRefreshToken
         guard hasTokens else {
-            if currentUser == nil {
-                isAuthenticated = false
-            }
+            clearSessionState(clearSelectedTeam: true)
             return
         }
 
@@ -154,12 +187,18 @@ final class AuthManager: ObservableObject {
         settingsStore.saveCachedUser(user)
         availableTeams = teams
         isAuthenticated = user != nil || hasRefreshToken
+        selectedTeamID = Self.resolveTeamID(selectedTeamID: selectedTeamID, teams: teams)
+    }
 
-        if let selectedTeamID,
-           teams.contains(where: { $0.id == selectedTeamID }) {
-            return
+    private func clearSessionState(clearSelectedTeam: Bool) {
+        availableTeams = []
+        currentUser = nil
+        isAuthenticated = false
+        didCompleteBrowserSignIn = false
+        if clearSelectedTeam {
+            selectedTeamID = nil
         }
-        self.selectedTeamID = teams.first?.id
+        settingsStore.saveCachedUser(nil)
     }
 
     private static func makeDefaultClient(
@@ -186,36 +225,67 @@ final class AuthManager: ObservableObject {
         }
         NSWorkspace.shared.open(url)
     }
+
+    private static func resolveTeamID(
+        selectedTeamID: String?,
+        teams: [AuthTeamSummary]
+    ) -> String? {
+        if let selectedTeamID,
+           teams.contains(where: { $0.id == selectedTeamID }) {
+            return selectedTeamID
+        }
+        return teams.first?.id
+    }
 }
 
 private actor KeychainStackTokenStore: StackAuthTokenStoreProtocol {
     private static let accessTokenAccount = "cmux-auth-access-token"
     private static let refreshTokenAccount = "cmux-auth-refresh-token"
-    private static let service = "com.cmuxterm.app.auth"
+    private let service = AuthKeychainServiceName.make()
 
-    func seed(accessToken: String, refreshToken: String) async {
-        setKeychainValue(accessToken, account: Self.accessTokenAccount)
-        setKeychainValue(refreshToken, account: Self.refreshTokenAccount)
+    func getStoredAccessToken() async -> String? {
+        keychainValue(account: Self.accessTokenAccount)
     }
 
-    func clear() async {
+    func getStoredRefreshToken() async -> String? {
+        keychainValue(account: Self.refreshTokenAccount)
+    }
+
+    func setTokens(accessToken: String?, refreshToken: String?) async {
+        if let accessToken {
+            setKeychainValue(accessToken, account: Self.accessTokenAccount)
+        } else {
+            deleteKeychainValue(account: Self.accessTokenAccount)
+        }
+
+        if let refreshToken {
+            setKeychainValue(refreshToken, account: Self.refreshTokenAccount)
+        } else {
+            deleteKeychainValue(account: Self.refreshTokenAccount)
+        }
+    }
+
+    func clearTokens() async {
         deleteKeychainValue(account: Self.accessTokenAccount)
         deleteKeychainValue(account: Self.refreshTokenAccount)
     }
 
-    func currentAccessToken() async -> String? {
-        keychainValue(account: Self.accessTokenAccount)
-    }
-
-    func currentRefreshToken() async -> String? {
-        keychainValue(account: Self.refreshTokenAccount)
+    func compareAndSet(
+        compareRefreshToken: String,
+        newRefreshToken: String?,
+        newAccessToken: String?
+    ) async {
+        guard keychainValue(account: Self.refreshTokenAccount) == compareRefreshToken else {
+            return
+        }
+        await setTokens(accessToken: newAccessToken, refreshToken: newRefreshToken)
     }
 
     private func keychainValue(account: String) -> String? {
 #if canImport(Security)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
@@ -236,7 +306,7 @@ private actor KeychainStackTokenStore: StackAuthTokenStoreProtocol {
         guard let data = value.data(using: .utf8) else { return }
         let lookup: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
         let attributes: [String: Any] = [
@@ -256,7 +326,7 @@ private actor KeychainStackTokenStore: StackAuthTokenStoreProtocol {
 #if canImport(Security)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
         SecItemDelete(query as CFDictionary)
@@ -264,172 +334,55 @@ private actor KeychainStackTokenStore: StackAuthTokenStoreProtocol {
     }
 }
 
-private actor LiveAuthClient: AuthClientProtocol {
-    private struct UserResponse: Decodable {
-        let id: String
-        let primaryEmail: String?
-        let displayName: String?
-
-        private enum CodingKeys: String, CodingKey {
-            case id
-            case primaryEmail = "primary_email"
-            case displayName = "display_name"
-        }
-    }
-
-    private struct TeamListResponse: Decodable {
-        let items: [TeamResponse]
-    }
-
-    private struct TeamResponse: Decodable {
-        let id: String
-        let displayName: String
-
-        private enum CodingKeys: String, CodingKey {
-            case id
-            case displayName = "display_name"
-        }
-    }
-
-    private let tokenStore: any StackAuthTokenStoreProtocol
-    private let session: URLSession
-    private let decoder = JSONDecoder()
-    private let publishableClientKeyNotNecessarySentinel = "publishable-client-key-not-set"
+actor LiveAuthClient: AuthClientProtocol {
+    private let stack: StackClientApp
 
     init(
-        tokenStore: any StackAuthTokenStoreProtocol,
-        session: URLSession = .shared
+        tokenStore: any StackAuthTokenStoreProtocol
     ) {
-        self.tokenStore = tokenStore
-        self.session = session
+        self.stack = StackClientApp(
+            projectId: AuthEnvironment.stackProjectID,
+            publishableClientKey: AuthEnvironment.stackPublishableClientKey,
+            baseUrl: AuthEnvironment.stackBaseURL.absoluteString,
+            tokenStore: .custom(tokenStore),
+            noAutomaticPrefetch: true
+        )
     }
 
     func currentAccessToken() async throws -> String? {
-        try await validAccessToken()
+        await stack.getAccessToken()
     }
 
     func currentUser() async throws -> CMUXAuthUser? {
-        guard let accessToken = try await validAccessToken() else { return nil }
-        var request = URLRequest(
-            url: AuthEnvironment.stackBaseURL.appendingPathComponent("api/v1/users/me")
-        )
-        request.httpMethod = "GET"
-        addStackHeaders(to: &request, accessToken: accessToken)
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else { return nil }
-        guard httpResponse.statusCode == 200 else { return nil }
-        let payload = try decoder.decode(UserResponse.self, from: data)
+        guard let payload = try await stack.getUser() else { return nil }
         return CMUXAuthUser(
-            id: payload.id,
-            primaryEmail: payload.primaryEmail,
-            displayName: payload.displayName
+            id: await payload.id,
+            primaryEmail: await payload.primaryEmail,
+            displayName: await payload.displayName
         )
     }
 
     func listTeams() async throws -> [AuthTeamSummary] {
-        guard let accessToken = try await validAccessToken() else { return [] }
-        var request = URLRequest(
-            url: AuthEnvironment.stackBaseURL.appendingPathComponent("api/v1/teams")
-                .appending(queryItems: [URLQueryItem(name: "user_id", value: "me")])
-        )
-        request.httpMethod = "GET"
-        addStackHeaders(to: &request, accessToken: accessToken)
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+        guard let user = try await stack.getUser() else {
             return []
         }
-        let payload = try decoder.decode(TeamListResponse.self, from: data)
-        return payload.items.map {
-            AuthTeamSummary(id: $0.id, displayName: $0.displayName)
+
+        let teams = try await user.listTeams()
+        var summaries: [AuthTeamSummary] = []
+        summaries.reserveCapacity(teams.count)
+        for team in teams {
+            summaries.append(
+                AuthTeamSummary(
+                    id: team.id,
+                    displayName: await team.displayName
+                )
+            )
         }
+        return summaries
     }
 
-    private func validAccessToken() async throws -> String? {
-        if let accessToken = await tokenStore.currentAccessToken(),
-           Self.isTokenFreshEnough(accessToken) {
-            return accessToken
-        }
-
-        guard let refreshToken = await tokenStore.currentRefreshToken(),
-              !refreshToken.isEmpty else {
-            return await tokenStore.currentAccessToken()
-        }
-
-        guard let refreshedToken = try await refreshAccessToken(refreshToken: refreshToken) else {
-            return await tokenStore.currentAccessToken()
-        }
-        await tokenStore.seed(accessToken: refreshedToken, refreshToken: refreshToken)
-        return refreshedToken
-    }
-
-    private func refreshAccessToken(refreshToken: String) async throws -> String? {
-        var request = URLRequest(
-            url: AuthEnvironment.stackBaseURL.appendingPathComponent("api/v1/auth/oauth/token")
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue(AuthEnvironment.stackProjectID, forHTTPHeaderField: "x-stack-project-id")
-        request.setValue(
-            AuthEnvironment.stackPublishableClientKey,
-            forHTTPHeaderField: "x-stack-publishable-client-key"
-        )
-        let body = [
-            "grant_type=refresh_token",
-            "refresh_token=\(Self.formURLEncode(refreshToken))",
-            "client_id=\(Self.formURLEncode(AuthEnvironment.stackProjectID))",
-            "client_secret=\(Self.formURLEncode(AuthEnvironment.stackPublishableClientKey.isEmpty ? publishableClientKeyNotNecessarySentinel : AuthEnvironment.stackPublishableClientKey))",
-        ].joined(separator: "&")
-        request.httpBody = body.data(using: .utf8)
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200,
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        return json["access_token"] as? String
-    }
-
-    private func addStackHeaders(to request: inout URLRequest, accessToken: String) {
-        request.setValue(accessToken, forHTTPHeaderField: "x-stack-access-token")
-        request.setValue(AuthEnvironment.stackProjectID, forHTTPHeaderField: "x-stack-project-id")
-        request.setValue(
-            AuthEnvironment.stackPublishableClientKey,
-            forHTTPHeaderField: "x-stack-publishable-client-key"
-        )
-    }
-
-    private static func isTokenFreshEnough(_ token: String) -> Bool {
-        guard let payload = decodeJWTPayload(token) else { return false }
-        let expiresInMillis = (payload.exp * 1000) - (Date().timeIntervalSince1970 * 1000)
-        let issuedMillisAgo = (Date().timeIntervalSince1970 * 1000) - (payload.iat * 1000)
-        return expiresInMillis > 20_000 && issuedMillisAgo < 75_000
-    }
-
-    private static func decodeJWTPayload(_ token: String) -> (exp: TimeInterval, iat: TimeInterval)? {
-        let segments = token.split(separator: ".")
-        guard segments.count >= 2 else { return nil }
-        var base64 = String(segments[1])
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        let remainder = base64.count % 4
-        if remainder > 0 {
-            base64 += String(repeating: "=", count: 4 - remainder)
-        }
-        guard let data = Data(base64Encoded: base64),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let exp = json["exp"] as? TimeInterval,
-              let iat = json["iat"] as? TimeInterval else {
-            return nil
-        }
-        return (exp: exp, iat: iat)
-    }
-
-    private static func formURLEncode(_ value: String) -> String {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    func signOut() async throws {
+        try await stack.signOut()
     }
 }
 
@@ -474,15 +427,5 @@ private struct UITestAuthClient: AuthClientProtocol {
 
     func currentAccessToken() async throws -> String? {
         await tokenStore.currentAccessToken()
-    }
-}
-
-private extension URL {
-    func appending(queryItems: [URLQueryItem]) -> URL {
-        guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else {
-            return self
-        }
-        components.queryItems = (components.queryItems ?? []) + queryItems
-        return components.url ?? self
     }
 }

@@ -35,6 +35,8 @@
 		A5001420 /* MarkdownPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001418 /* MarkdownPanel.swift */; };
 		A5001421 /* MarkdownPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001419 /* MarkdownPanelView.swift */; };
 		A5001290 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A5001291 /* MarkdownUI */; };
+		A5200202A1B2C3D4E5F60718 /* StackAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A5200201A1B2C3D4E5F60718 /* StackAuth */; };
+		A5200203A1B2C3D4E5F60718 /* StackAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A5200201A1B2C3D4E5F60718 /* StackAuth */; };
 		A5001405 /* PanelContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001415 /* PanelContentView.swift */; };
 		A5001406 /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001416 /* Workspace.swift */; };
 		A5001407 /* WorkspaceContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001417 /* WorkspaceContentView.swift */; };
@@ -342,6 +344,7 @@
 					A5001250 /* Sentry in Frameworks */,
 					A5001270 /* PostHog in Frameworks */,
 					A5001290 /* MarkdownUI in Frameworks */,
+					A5200202A1B2C3D4E5F60718 /* StackAuth in Frameworks */,
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
@@ -356,6 +359,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5200203A1B2C3D4E5F60718 /* StackAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -657,6 +661,7 @@
 					A5001271 /* PostHog */,
 					A5001261 /* Bonsplit */,
 					A5001291 /* MarkdownUI */,
+					A5200201A1B2C3D4E5F60718 /* StackAuth */,
 				);
 			name = GhosttyTabs;
 			productName = GhosttyTabs;
@@ -713,6 +718,9 @@
 			dependencies = (
 				F1000009A1B2C3D4E5F60718 /* PBXTargetDependency */,
 			);
+			packageProductDependencies = (
+				A5200201A1B2C3D4E5F60718 /* StackAuth */,
+			);
 			name = cmuxTests;
 			productName = cmuxTests;
 			productReference = F1000002A1B2C3D4E5F60718 /* cmuxTests.xctest */;
@@ -760,6 +768,7 @@
 					A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 					A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 					A5001260 /* XCLocalSwiftPackageReference "bonsplit" */,
+					A5200200A1B2C3D4E5F60718 /* XCRemoteSwiftPackageReference "swift-sdk-prerelease" */,
 				);
 			productRefGroup = A5001042 /* Products */;
 			projectDirPath = "";
@@ -1222,14 +1231,22 @@
 					minimumVersion = 3.41.0;
 				};
 			};
-			A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
-				isa = XCRemoteSwiftPackageReference;
-				repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
-				requirement = {
-					kind = upToNextMajorVersion;
-					minimumVersion = 2.4.1;
-				};
+		A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
 			};
+		};
+		A5200200A1B2C3D4E5F60718 /* XCRemoteSwiftPackageReference "swift-sdk-prerelease" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stack-auth/swift-sdk-prerelease";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 			A5001260 /* XCLocalSwiftPackageReference "bonsplit" */ = {
 				isa = XCLocalSwiftPackageReference;
 				relativePath = vendor/bonsplit;
@@ -1257,11 +1274,16 @@
 				package = A5001260 /* XCLocalSwiftPackageReference "bonsplit" */;
 				productName = Bonsplit;
 			};
-			A5001291 /* MarkdownUI */ = {
-				isa = XCSwiftPackageProductDependency;
-				package = A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
-				productName = MarkdownUI;
-			};
+		A5001291 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+		A5200201A1B2C3D4E5F60718 /* StackAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A5200200A1B2C3D4E5F60718 /* XCRemoteSwiftPackageReference "swift-sdk-prerelease" */;
+			productName = StackAuth;
+		};
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */

@@ -33,7 +33,7 @@ load_public_auth_env() {
   if [[ -z "${CMUX_PUBLIC_AUTH_WWW_ORIGIN:-}" ]]; then
     local local_auth_port="${CMUX_PORT:-${PORT:-}}"
     if [[ -n "${local_auth_port:-}" ]]; then
-      CMUX_PUBLIC_AUTH_WWW_ORIGIN="http://127.0.0.1:${local_auth_port}"
+      CMUX_PUBLIC_AUTH_WWW_ORIGIN="http://localhost:${local_auth_port}"
     fi
   fi
 

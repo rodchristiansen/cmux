@@ -35,7 +35,7 @@ final class MobileHeartbeatPublisher {
 
     func publishNow() async throws {
         guard authManager.isAuthenticated,
-              let teamID = authManager.selectedTeamID else {
+              let teamID = authManager.resolvedTeamID else {
             return
         }
         guard let tailscaleStatus = await tailscaleStatusProvider.currentStatus() else {
@@ -61,11 +61,11 @@ final class MobileHeartbeatPublisher {
         } else {
             directConnect = nil
         }
+        let rows = workspaceSnapshotBuilder.rows(for: tabManager.tabs)
         let machineSession = try await machineSessionClient.machineSession(
             teamID: teamID,
             identity: identity
         )
-        let rows = workspaceSnapshotBuilder.rows(for: tabManager.tabs)
         let timestamp = Int(now().timeIntervalSince1970 * 1000)
         let payload = MobileHeartbeatPayload(
             machineID: identity.machineID,

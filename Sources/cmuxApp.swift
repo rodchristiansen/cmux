@@ -359,6 +359,7 @@ struct cmuxApp: App {
                     updateSocketController()
                 }
         }
+        .handlesExternalEvents(matching: Set<String>())
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .appSettings) {
@@ -3813,6 +3814,8 @@ struct SettingsView: View {
     private var commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
     @AppStorage(CommandPaletteSwitcherSearchSettings.searchAllSurfacesKey)
     private var commandPaletteSearchAllSurfaces = CommandPaletteSwitcherSearchSettings.defaultSearchAllSurfaces
+    @AppStorage(SettingsPIIDisplayMode.key)
+    private var settingsPIIDisplayMode = SettingsPIIDisplayMode.defaultValue
     @AppStorage(ShortcutHintDebugSettings.alwaysShowHintsKey)
     private var alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
     @AppStorage(WorkspacePlacementSettings.placementKey) private var newWorkspacePlacement = WorkspacePlacementSettings.defaultPlacement.rawValue
@@ -4108,6 +4111,43 @@ struct SettingsView: View {
         )
     }
 
+    private var accountPrimaryEmailText: String? {
+        guard let email = authManager.currentUser?.primaryEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty else {
+            return nil
+        }
+        return email
+    }
+
+    private var selectedSettingsPIIDisplayMode: SettingsPIIDisplayMode {
+        SettingsPIIDisplayMode(rawValue: settingsPIIDisplayMode) ?? .visible
+    }
+
+    private var settingsPIIDisplayModeSelection: Binding<String> {
+        Binding(
+            get: { selectedSettingsPIIDisplayMode.rawValue },
+            set: { settingsPIIDisplayMode = $0 }
+        )
+    }
+
+    private var hidesSensitiveSettingsDetails: Bool {
+        selectedSettingsPIIDisplayMode == .hidden
+    }
+
+    private var hiddenSettingsValueText: String {
+        String(
+            localized: "settings.account.hiddenValue",
+            defaultValue: "Hidden"
+        )
+    }
+
+    private var hiddenSettingsSubtitleText: String {
+        String(
+            localized: "settings.account.hiddenSubtitle",
+            defaultValue: "Personal info is hidden in Settings."
+        )
+    }
+
     private var accountStatusSubtitle: String {
         if authManager.isAuthenticated {
             return String(
@@ -4117,12 +4157,12 @@ struct SettingsView: View {
         }
         return String(
             localized: "settings.account.subtitle.signedOut",
-            defaultValue: "Optional. Sign in to publish this Mac to iPhone."
+            defaultValue: "Optional. Sign in so this Mac appears in your mobile terminal list."
         )
     }
 
     private var selectedAccountTeamName: String {
-        if let selectedTeamID = authManager.selectedTeamID,
+        if let selectedTeamID = authManager.resolvedTeamID,
            let team = authManager.availableTeams.first(where: { $0.id == selectedTeamID }) {
             return team.displayName
         }
@@ -4132,9 +4172,13 @@ struct SettingsView: View {
         )
     }
 
+    private var displayedAccountTeamName: String {
+        hidesSensitiveSettingsDetails ? hiddenSettingsValueText : selectedAccountTeamName
+    }
+
     private var accountTeamSelection: Binding<String> {
         Binding(
-            get: { authManager.selectedTeamID ?? authManager.availableTeams.first?.id ?? "" },
+            get: { authManager.resolvedTeamID ?? "" },
             set: { newValue in
                 authManager.selectedTeamID = newValue.isEmpty ? nil : newValue
             }
@@ -4358,19 +4402,28 @@ struct SettingsView: View {
                         SettingsCardRow(
                             String(localized: "settings.account.title", defaultValue: "cmux Account"),
                             subtitle: accountStatusSubtitle,
-                            controlWidth: pickerColumnWidth
+                            controlWidth: authManager.isAuthenticated ? nil : pickerColumnWidth
                         ) {
                             if authManager.isLoading || authManager.isRestoringSession {
                                 ProgressView()
                                     .controlSize(.small)
                             } else if authManager.isAuthenticated {
-                                HStack(spacing: 8) {
-                                    Text(accountEmailText)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 220, alignment: .trailing)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
+                                HStack(spacing: 10) {
+                                    if authManager.didCompleteBrowserSignIn {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.green)
+                                            Text(
+                                                String(
+                                                    localized: "settings.account.state.signedIn",
+                                                    defaultValue: "Signed in"
+                                                )
+                                            )
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                        }
+                                        .accessibilityIdentifier("settings.account.signedInBanner")
+                                    }
 
                                     Button(
                                         String(localized: "settings.account.signOut", defaultValue: "Sign Out")
@@ -4392,6 +4445,39 @@ struct SettingsView: View {
                             }
                         }
 
+                        if authManager.isAuthenticated {
+                            SettingsCardDivider()
+
+                            SettingsPickerRow(
+                                String(localized: "settings.account.displayMode", defaultValue: "Display Mode"),
+                                subtitle: String(
+                                    localized: "settings.account.displayMode.subtitle",
+                                    defaultValue: "Hide personal info while presenting Settings."
+                                ),
+                                controlWidth: pickerColumnWidth,
+                                selection: settingsPIIDisplayModeSelection
+                            ) {
+                                ForEach(SettingsPIIDisplayMode.allCases) { mode in
+                                    Text(mode.displayName).tag(mode.rawValue)
+                                }
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsCardRow(
+                                String(localized: "settings.account.email", defaultValue: "Email"),
+                                subtitle: hidesSensitiveSettingsDetails ? hiddenSettingsSubtitleText : nil,
+                                controlWidth: pickerColumnWidth
+                            ) {
+                                Text(hidesSensitiveSettingsDetails ? hiddenSettingsValueText : accountEmailText)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: pickerColumnWidth, alignment: .trailing)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+
                         if authManager.isAuthenticated, !authManager.availableTeams.isEmpty {
                             SettingsCardDivider()
 
@@ -4403,7 +4489,12 @@ struct SettingsView: View {
                                 ),
                                 controlWidth: pickerColumnWidth
                             ) {
-                                if authManager.availableTeams.count > 1 {
+                                if hidesSensitiveSettingsDetails {
+                                    Text(displayedAccountTeamName)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: pickerColumnWidth, alignment: .trailing)
+                                } else if authManager.availableTeams.count > 1 {
                                     Picker("", selection: accountTeamSelection) {
                                         ForEach(authManager.availableTeams) { team in
                                             Text(team.displayName).tag(team.id)
@@ -4412,7 +4503,7 @@ struct SettingsView: View {
                                     .labelsHidden()
                                     .frame(width: pickerColumnWidth)
                                 } else {
-                                    Text(selectedAccountTeamName)
+                                    Text(displayedAccountTeamName)
                                         .font(.system(size: 12))
                                         .foregroundStyle(.secondary)
                                         .frame(width: pickerColumnWidth, alignment: .trailing)
@@ -5964,6 +6055,42 @@ private struct SettingsCardNote: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SettingsCardStatusBanner: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.green)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.green.opacity(0.09))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.green.opacity(0.24), lineWidth: 1)
+        )
+        .padding(8)
     }
 }
 

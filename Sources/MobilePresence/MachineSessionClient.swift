@@ -152,7 +152,12 @@ final class MachineSessionClient: @unchecked Sendable {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200 ..< 300).contains(httpResponse.statusCode) else {
-            throw NSError(domain: "cmux.mobile.machine-session", code: 1)
+            let responseBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            throw NSError(
+                domain: "cmux.mobile.machine-session",
+                code: (response as? HTTPURLResponse)?.statusCode ?? 1,
+                userInfo: [NSLocalizedDescriptionKey: "machine-session failed: \(responseBody)"]
+            )
         }
         let machineSession = try decoder.decode(MobileMachineSession.self, from: data)
         await cache.store(machineSession)
@@ -170,10 +175,15 @@ final class MachineSessionClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try encoder.encode(payload)
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200 ..< 300).contains(httpResponse.statusCode) else {
-            throw NSError(domain: "cmux.mobile.heartbeat", code: 1)
+            let responseBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            throw NSError(
+                domain: "cmux.mobile.heartbeat",
+                code: (response as? HTTPURLResponse)?.statusCode ?? 1,
+                userInfo: [NSLocalizedDescriptionKey: "heartbeat failed: \(responseBody)"]
+            )
         }
     }
 

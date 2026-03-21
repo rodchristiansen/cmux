@@ -24,6 +24,31 @@ struct CMUXAuthUser: Codable, Equatable, Sendable {
     }
 }
 
+enum SettingsPIIDisplayMode: String, CaseIterable, Identifiable, Sendable {
+    case visible
+    case hidden
+
+    static let key = "cmux.settings.piiDisplayMode"
+    static let defaultValue = visible.rawValue
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .visible:
+            return String(
+                localized: "settings.account.displayMode.visible",
+                defaultValue: "Show personal info"
+            )
+        case .hidden:
+            return String(
+                localized: "settings.account.displayMode.hidden",
+                defaultValue: "Hide personal info"
+            )
+        }
+    }
+}
+
 final class AuthSettingsStore {
     private enum Keys {
         static let selectedTeamID = "cmux.auth.selectedTeamID"

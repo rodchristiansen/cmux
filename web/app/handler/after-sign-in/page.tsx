@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { RequestCookie } from "next/dist/compiled/@edge-runtime/cookies";
 
-import { buildNativeAppHref, isAllowedNativeAppHref } from "@/lib/native-app-deeplink";
+import { buildNativeAppHref, extractNativeAppHref } from "@/lib/native-app-deeplink";
 import { stackServerApp } from "@/lib/stack";
 import { stackEnv } from "@/lib/stack-env";
 import { OpenCmuxClient } from "./OpenCmuxClient";
@@ -182,21 +182,14 @@ export default async function AfterSignInPage({ searchParams: searchParamsPromis
   const searchParams = await searchParamsPromise;
   const nativeAppReturnTo = getSingleValue(searchParams?.native_app_return_to);
   const afterAuthReturnTo = getSingleValue(searchParams?.after_auth_return_to);
+  const resolvedNativeAppHref = extractNativeAppHref(
+    nativeAppReturnTo,
+    afterAuthReturnTo,
+  );
 
-  if (nativeAppReturnTo && isAllowedNativeAppHref(nativeAppReturnTo)) {
+  if (resolvedNativeAppHref) {
     const cmuxHref = buildNativeAppHref(
-      nativeAppReturnTo,
-      stackRefreshToken,
-      stackAccessCookie,
-    );
-    if (cmuxHref) {
-      return <OpenCmuxClient href={cmuxHref} />;
-    }
-  }
-
-  if (afterAuthReturnTo && isAllowedNativeAppHref(afterAuthReturnTo)) {
-    const cmuxHref = buildNativeAppHref(
-      afterAuthReturnTo,
+      resolvedNativeAppHref,
       stackRefreshToken,
       stackAccessCookie,
     );

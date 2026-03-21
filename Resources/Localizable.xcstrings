@@ -183,6 +183,91 @@
         }
       }
     },
+    "settings.account.displayMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display Mode"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示モード"
+          }
+        }
+      }
+    },
+    "settings.account.displayMode.hidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide personal info"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "個人情報を隠す"
+          }
+        }
+      }
+    },
+    "settings.account.displayMode.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide personal info while presenting Settings."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定画面を見せるときに個人情報を隠します。"
+          }
+        }
+      }
+    },
+    "settings.account.displayMode.visible": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show personal info"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "個人情報を表示"
+          }
+        }
+      }
+    },
+    "settings.account.email": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メールアドレス"
+          }
+        }
+      }
+    },
     "settings.account.state.signedIn": {
       "extractionState": "manual",
       "localizations": {
@@ -196,6 +281,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "サインイン済み"
+          }
+        }
+      }
+    },
+    "settings.account.hiddenSubtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personal info is hidden in Settings."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定では個人情報が隠されています。"
+          }
+        }
+      }
+    },
+    "settings.account.hiddenValue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hidden"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非表示"
           }
         }
       }
@@ -223,13 +342,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Optional. Sign in to publish this Mac to iPhone."
+            "value": "Optional. Sign in so this Mac appears in your mobile terminal list."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "任意です。iPhoneにこのMacを表示するにはサインインしてください。"
+            "value": "任意です。このMacをモバイルのターミナル一覧に表示するにはサインインしてください。"
           }
         }
       }

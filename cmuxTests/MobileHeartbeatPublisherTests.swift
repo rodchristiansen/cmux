@@ -40,6 +40,10 @@ final class MobileHeartbeatPublisherTests: XCTestCase {
             urlOpener: { _ in }
         )
 
+        await waitUntil("auth restores team list before publish") {
+            authManager.availableTeams.count == 1
+        }
+
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [URLProtocolRecorder.self]
         let session = URLSession(configuration: sessionConfiguration)
@@ -171,6 +175,158 @@ final class MobileHeartbeatPublisherTests: XCTestCase {
         XCTAssertEqual(workspaces[0]["title"] as? String, "Alpha")
         XCTAssertEqual(workspaces[0]["preview"] as? String, "/tmp/alpha")
     }
+
+    func testPublishNowFallsBackToFirstAvailableTeamWhenStoredSelectionIsInvalid() async throws {
+        let suiteName = "MobileHeartbeatPublisherTests.invalidTeam.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let settingsStore = AuthSettingsStore(userDefaults: defaults)
+        let user = CMUXAuthUser(
+            id: "user_123",
+            primaryEmail: "lawrence@cmux.dev",
+            displayName: "Lawrence"
+        )
+        settingsStore.saveCachedUser(user)
+        settingsStore.selectedTeamID = "00000000-0000-4000-8000-000000000000"
+
+        let authManager = AuthManager(
+            client: StubAuthClient(
+                user: user,
+                teams: [AuthTeamSummary(id: "team_alpha", displayName: "Alpha")]
+            ),
+            tokenStore: StubStackTokenStore(
+                accessToken: "access-123",
+                refreshToken: "refresh-123"
+            ),
+            settingsStore: settingsStore,
+            urlOpener: { _ in }
+        )
+
+        await waitUntil("auth restores team list before publish") {
+            authManager.availableTeams.count == 1
+        }
+        authManager.selectedTeamID = "00000000-0000-4000-8000-000000000000"
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [URLProtocolRecorder.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let identityStore = MachineIdentityStore(defaults: defaults)
+        let identity = identityStore.identity()
+
+        URLProtocolRecorder.handler = { request in
+            switch request.url?.path {
+            case "/api/mobile/machine-session":
+                let payload = try XCTUnwrap(URLProtocolRecorder.bodyData(for: request))
+                let object = try XCTUnwrap(
+                    try JSONSerialization.jsonObject(with: payload) as? [String: String]
+                )
+                XCTAssertEqual(object["teamSlugOrId"], "team_alpha")
+
+                let response = HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                let body = """
+                {
+                  "token": "machine-session-token",
+                  "teamId": "team_alpha",
+                  "userId": "user_123",
+                  "machineId": "\(identity.machineID)",
+                  "expiresAt": 1700003600000
+                }
+                """.data(using: .utf8)!
+                return (response, body)
+            case "/api/mobile/heartbeat":
+                let response = HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 202,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data("{\"accepted\":true}".utf8))
+            default:
+                throw NSError(domain: "MobileHeartbeatPublisherTests", code: 404)
+            }
+        }
+
+        let tabManager = TabManager(initialWorkingDirectory: "/tmp/alpha")
+        tabManager.tabs = [Workspace(title: "Alpha", workingDirectory: "/tmp/alpha")]
+
+        let publisher = MobileHeartbeatPublisher(
+            identityStore: identityStore,
+            tailscaleStatusProvider: TailscaleStatusProvider { _, _ in
+                """
+                {
+                  "BackendState": "Running",
+                  "Self": {
+                    "HostName": "Lawrence MacBook Pro",
+                    "DNSName": "macbook.tail-scale.ts.net.",
+                    "TailscaleIPs": ["100.64.0.7"]
+                  }
+                }
+                """
+            },
+            machineSessionClient: MachineSessionClient(
+                session: session,
+                authManager: authManager,
+                now: { Date(timeIntervalSince1970: 1_700_000_000) }
+            ),
+            workspaceSnapshotBuilder: WorkspaceSnapshotBuilder(
+                notificationStore: TerminalNotificationStore.shared,
+                now: { Date(timeIntervalSince1970: 1_700_000_000) }
+            ),
+            directDaemonManager: MobileDirectDaemonManager(
+                resolveBinaryPath: { "/tmp/cmuxd-remote" },
+                getApplicationSupportDirectory: {
+                    FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "MobileHeartbeatPublisherTests-invalid-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                },
+                allocatePort: { 9443 },
+                ensureMaterial: { _, _ in
+                    MobileDirectDaemonMaterial(
+                        certPath: "/tmp/server.crt",
+                        keyPath: "/tmp/server.key",
+                        ticketSecret: "ticket-secret",
+                        pin: "sha256:test-pin",
+                        hosts: []
+                    )
+                },
+                spawn: { _, _ in
+                    MobileDirectDaemonProcessHandle(
+                        processIdentifier: 42,
+                        waitUntilReady: { },
+                        terminate: { }
+                    )
+                }
+            ),
+            tabManagerProvider: { tabManager },
+            authManager: authManager,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        try await publisher.publishNow()
+
+        let requests = URLProtocolRecorder.requests
+        XCTAssertEqual(requests.count, 2)
+    }
+
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 1.0,
+        condition: @escaping @MainActor () -> Bool
+    ) async {
+        let expectation = expectation(description: description)
+        Task { @MainActor in
+            while !condition() {
+                await Task.yield()
+            }
+            expectation.fulfill()
+        }
+        await fulfillment(of: [expectation], timeout: timeout)
+    }
 }
 
 private struct StubAuthClient: AuthClientProtocol {
@@ -195,22 +351,28 @@ private actor StubStackTokenStore: StackAuthTokenStoreProtocol {
         self.refreshToken = refreshToken
     }
 
-    func seed(accessToken: String, refreshToken: String) async {
+    func getStoredAccessToken() async -> String? {
+        accessToken
+    }
+
+    func getStoredRefreshToken() async -> String? {
+        refreshToken
+    }
+
+    func setTokens(accessToken: String?, refreshToken: String?) async {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
     }
 
-    func clear() async {
+    func clearTokens() async {
         accessToken = nil
         refreshToken = nil
     }
 
-    func currentAccessToken() async -> String? {
-        accessToken
-    }
-
-    func currentRefreshToken() async -> String? {
-        refreshToken
+    func compareAndSet(compareRefreshToken: String, newRefreshToken: String?, newAccessToken: String?) async {
+        guard refreshToken == compareRefreshToken else { return }
+        accessToken = newAccessToken
+        refreshToken = newRefreshToken
     }
 }
 

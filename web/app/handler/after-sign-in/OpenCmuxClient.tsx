@@ -13,7 +13,7 @@ export function OpenCmuxClient({ href }: { href: string }) {
 
   return (
     <div className="min-h-dvh flex items-center justify-center bg-white px-6 text-neutral-950">
-      <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-8 text-center shadow-sm">
+      <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-8 text-center">
         <h1 className="text-lg font-semibold">Opening cmux…</h1>
         <p className="mt-2 text-sm text-neutral-600">
           If it doesn&apos;t open automatically, use the button below.

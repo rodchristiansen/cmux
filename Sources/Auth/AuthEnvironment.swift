@@ -30,16 +30,20 @@ enum AuthEnvironment {
     }
 
     static var signInWebsiteOrigin: URL {
-        resolvedURL(
+        canonicalizedLoopbackURL(
+            resolvedURL(
             environmentKey: "CMUX_AUTH_WWW_ORIGIN",
             fallback: "https://cmux.dev"
+        )
         )
     }
 
     static var apiBaseURL: URL {
-        resolvedURL(
-            environmentKey: "CMUX_API_BASE_URL",
-            fallback: "https://api.cmux.sh"
+        canonicalizedLoopbackURL(
+            resolvedURL(
+                environmentKey: "CMUX_API_BASE_URL",
+                fallback: "https://api.cmux.sh"
+            )
         )
     }
 
@@ -104,5 +108,20 @@ enum AuthEnvironment {
             return url
         }
         return URL(string: fallback)!
+    }
+
+    private static func canonicalizedLoopbackURL(_ url: URL) -> URL {
+        guard let host = url.host?.lowercased() else {
+            return url
+        }
+
+        let loopbackHosts = ["127.0.0.1", "::1", "[::1]", "0.0.0.0"]
+        guard loopbackHosts.contains(host) else {
+            return url
+        }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.host = "localhost"
+        return components?.url ?? url
     }
 }
