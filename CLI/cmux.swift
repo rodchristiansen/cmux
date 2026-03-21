@@ -9108,6 +9108,21 @@ struct CMUXCLI {
         let surfaceId: String?
     }
 
+    private func claudeTeamsCallerContextFromEnvironment(
+        processEnvironment: [String: String]
+    ) -> [String: Any]? {
+        let workspaceRaw = processEnvironment["CMUX_WORKSPACE_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let surfaceRaw = processEnvironment["CMUX_SURFACE_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var caller: [String: Any] = [:]
+        if let workspaceRaw, !workspaceRaw.isEmpty {
+            caller["workspace_id"] = workspaceRaw
+        }
+        if let surfaceRaw, !surfaceRaw.isEmpty {
+            caller["surface_id"] = surfaceRaw
+        }
+        return caller.isEmpty ? nil : caller
+    }
+
     private func claudeTeamsResolvedSocketPath(processEnvironment: [String: String]) -> String {
         let envSocketPath: String? = {
             for key in ["CMUX_SOCKET_PATH", "CMUX_SOCKET"] {
@@ -9151,13 +9166,26 @@ struct CMUXCLI {
             )
             defer { client.close() }
 
-            let payload = try client.sendV2(method: "system.identify")
+            var identifyParams: [String: Any] = [:]
+            if let caller = claudeTeamsCallerContextFromEnvironment(processEnvironment: processEnvironment) {
+                identifyParams["caller"] = caller
+            }
+            let payload = try client.sendV2(method: "system.identify", params: identifyParams)
             let focused = payload["focused"] as? [String: Any] ?? [:]
+            let caller = payload["caller"] as? [String: Any] ?? [:]
+            let preferredContext: [String: Any] = {
+                let callerPane = (caller["pane_id"] as? String) ?? (caller["pane_ref"] as? String)
+                let callerWorkspace = (caller["workspace_id"] as? String) ?? (caller["workspace_ref"] as? String)
+                guard callerPane != nil, callerWorkspace != nil else {
+                    return focused
+                }
+                return caller
+            }()
 
-            let workspaceId = (focused["workspace_id"] as? String)
-                ?? (focused["workspace_ref"] as? String)
-            let paneId = (focused["pane_id"] as? String)
-                ?? (focused["pane_ref"] as? String)
+            let workspaceId = (preferredContext["workspace_id"] as? String)
+                ?? (preferredContext["workspace_ref"] as? String)
+            let paneId = (preferredContext["pane_id"] as? String)
+                ?? (preferredContext["pane_ref"] as? String)
 
             guard let workspaceId, let paneId else {
                 return nil
@@ -9168,17 +9196,17 @@ struct CMUXCLI {
                 return nil
             }
 
-            let windowId = (focused["window_id"] as? String)
-                ?? (focused["window_ref"] as? String)
-            let surfaceId = (focused["surface_id"] as? String)
-                ?? (focused["surface_ref"] as? String)
+            let windowId = (preferredContext["window_id"] as? String)
+                ?? (preferredContext["window_ref"] as? String)
+            let surfaceId = (preferredContext["surface_id"] as? String)
+                ?? (preferredContext["surface_ref"] as? String)
 
             return ClaudeTeamsFocusedContext(
                 socketPath: socketPath,
                 workspaceId: workspaceId,
                 windowId: windowId,
                 paneHandle: paneHandle,
-                paneId: focused["pane_id"] as? String,
+                paneId: preferredContext["pane_id"] as? String,
                 surfaceId: surfaceId
             )
         } catch {
