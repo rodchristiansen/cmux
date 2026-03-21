@@ -17,6 +17,11 @@ pub const RawReadResult = struct {
     truncated: bool,
 };
 
+pub const OffsetWindow = struct {
+    base_offset: u64,
+    next_offset: u64,
+};
+
 pub const TerminalSession = struct {
     alloc: std.mem.Allocator,
     terminal: ghostty_vt.Terminal,
@@ -76,6 +81,13 @@ pub const TerminalSession = struct {
 
     pub fn history(self: *TerminalSession, alloc: std.mem.Allocator, format: serialize.HistoryFormat) ![]u8 {
         return serialize.serializeTerminal(alloc, &self.terminal, format) orelse error.SerializeFailed;
+    }
+
+    pub fn offsetWindow(self: *const TerminalSession) OffsetWindow {
+        return .{
+            .base_offset = self.base_offset,
+            .next_offset = self.next_offset,
+        };
     }
 
     pub fn readRaw(self: *TerminalSession, alloc: std.mem.Allocator, offset: u64, max_bytes: usize) !RawReadResult {

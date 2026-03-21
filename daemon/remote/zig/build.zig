@@ -18,11 +18,13 @@ pub fn build(b: *std.Build) void {
         .name = "cmuxd-remote",
         .root_module = mod,
     });
+    exe.linkLibC();
     b.installArtifact(exe);
 
     const unit_tests = b.addTest(.{
         .root_module = mod,
     });
+    unit_tests.linkLibC();
     const run_unit_tests = b.addRunArtifact(unit_tests);
     b.step("test", "Run unit tests").dependOn(&run_unit_tests.step);
 }

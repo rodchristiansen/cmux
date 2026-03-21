@@ -1,7 +1,122 @@
 const std = @import("std");
+const cross = @import("cross.zig");
+const terminal_session = @import("terminal_session.zig");
 
 pub const PtyHost = struct {
-    pub fn init() PtyHost {
-        return .{};
+    alloc: std.mem.Allocator,
+    master_fd: std.posix.fd_t,
+    pid: std.posix.pid_t,
+    closed: bool = false,
+
+    pub fn init(alloc: std.mem.Allocator, command: []const u8, cols: u16, rows: u16) !PtyHost {
+        const command_z = try alloc.dupeZ(u8, command);
+        defer alloc.free(command_z);
+
+        var winsize = cross.c.struct_winsize{
+            .ws_row = @max(@as(u16, 1), rows),
+            .ws_col = @max(@as(u16, 1), cols),
+            .ws_xpixel = 0,
+            .ws_ypixel = 0,
+        };
+
+        var master_fd: c_int = undefined;
+        const pid = cross.forkpty(&master_fd, null, null, &winsize);
+        if (pid < 0) return error.ForkPtyFailed;
+
+        if (pid == 0) {
+            const shell_path: [*:0]const u8 = "/bin/sh";
+            const argv = [_:null]?[*:0]const u8{
+                "/bin/sh",
+                "-lc",
+                command_z,
+                null,
+            };
+            const err = std.posix.execveZ(shell_path, &argv, std.c.environ);
+            std.log.err("execve failed: {s}", .{@errorName(err)});
+            std.posix.exit(127);
+            unreachable;
+        }
+
+        const flags = try std.posix.fcntl(master_fd, std.posix.F.GETFL, 0);
+        _ = try std.posix.fcntl(master_fd, std.posix.F.SETFL, flags | @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
+
+        return .{
+            .alloc = alloc,
+            .master_fd = master_fd,
+            .pid = pid,
+        };
+    }
+
+    pub fn deinit(self: *PtyHost) void {
+        if (!self.closed) {
+            self.markClosed();
+            std.posix.kill(-self.pid, std.posix.SIG.HUP) catch {};
+            std.posix.kill(-self.pid, std.posix.SIG.KILL) catch {};
+        }
+        _ = std.posix.waitpid(self.pid, 0);
+        std.posix.close(self.master_fd);
+    }
+
+    pub fn write(self: *PtyHost, data: []const u8) !void {
+        var remaining = data;
+        while (remaining.len > 0) {
+            const written = std.posix.write(self.master_fd, remaining) catch |err| switch (err) {
+                error.WouldBlock => return error.WouldBlock,
+                else => return err,
+            };
+            if (written == 0) return;
+            remaining = remaining[written..];
+        }
+    }
+
+    pub fn resize(self: *PtyHost, cols: u16, rows: u16) !void {
+        var winsize = cross.c.struct_winsize{
+            .ws_row = @max(@as(u16, 1), rows),
+            .ws_col = @max(@as(u16, 1), cols),
+            .ws_xpixel = 0,
+            .ws_ypixel = 0,
+        };
+        if (cross.c.ioctl(self.master_fd, cross.c.TIOCSWINSZ, &winsize) != 0) {
+            return error.ResizeFailed;
+        }
+    }
+
+    pub fn waitReadable(self: *PtyHost, timeout_ms: i32) !bool {
+        if (self.closed) return true;
+
+        var fds = [1]std.posix.pollfd{.{
+            .fd = self.master_fd,
+            .events = std.posix.POLL.IN | std.posix.POLL.ERR | std.posix.POLL.HUP,
+            .revents = 0,
+        }};
+        const ready = try std.posix.poll(&fds, timeout_ms);
+        return ready > 0;
+    }
+
+    pub fn pump(self: *PtyHost, session: *terminal_session.TerminalSession) !void {
+        var buf: [32 * 1024]u8 = undefined;
+        while (true) {
+            const read_len = std.posix.read(self.master_fd, &buf) catch |err| switch (err) {
+                error.WouldBlock => break,
+                error.InputOutput, error.BrokenPipe => {
+                    self.markClosed();
+                    break;
+                },
+                else => return err,
+            };
+            if (read_len == 0) {
+                self.markClosed();
+                break;
+            }
+            try session.feed(buf[0..read_len]);
+        }
+    }
+
+    pub fn isClosed(self: *const PtyHost) bool {
+        return self.closed;
+    }
+
+    fn markClosed(self: *PtyHost) void {
+        self.closed = true;
     }
 };
