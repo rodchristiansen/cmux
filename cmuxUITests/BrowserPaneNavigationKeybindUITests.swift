@@ -4,6 +4,7 @@ import Foundation
 final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     private var dataPath = ""
     private var socketPath = ""
+    private var launchDiagnosticsPath = ""
 
     override func setUp() {
         super.setUp()
@@ -12,6 +13,25 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         try? FileManager.default.removeItem(atPath: dataPath)
         socketPath = "/tmp/cmux-ui-test-socket-\(UUID().uuidString).sock"
         try? FileManager.default.removeItem(atPath: socketPath)
+        launchDiagnosticsPath = "/tmp/cmux-ui-test-launch-\(UUID().uuidString).json"
+        try? FileManager.default.removeItem(atPath: launchDiagnosticsPath)
+
+        let diagnosticsPath = launchDiagnosticsPath
+        addTeardownBlock { [weak self] in
+            guard let self,
+                  let contents = try? String(contentsOfFile: diagnosticsPath, encoding: .utf8),
+                  !contents.isEmpty else {
+                return
+            }
+            let attachment = XCTAttachment(string: contents)
+            attachment.name = "ui-test-launch-diagnostics"
+            attachment.lifetime = .deleteOnSuccess
+            self.add(attachment)
+        }
+
+        let cleanup = XCUIApplication()
+        cleanup.terminate()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
     }
 
     func testCmdCtrlHMovesLeftWhenWebViewFocused() {
@@ -1115,11 +1135,25 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     }
 
     private func launchAndEnsureForeground(_ app: XCUIApplication, timeout: TimeInterval = 12.0) {
+        prepareLaunchEnvironment(app)
         app.launch()
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: timeout),
             "Expected app to launch in foreground. state=\(app.state.rawValue)"
         )
+    }
+
+    private func prepareLaunchEnvironment(_ app: XCUIApplication) {
+        if app.launchEnvironment["CMUX_UI_TEST_MODE"] == nil {
+            app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
+        }
+        if app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] == nil {
+            app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] = launchDiagnosticsPath
+        }
+        if app.launchEnvironment["CMUX_SOCKET_PATH"] != nil,
+           app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] == nil {
+            app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
+        }
     }
 
     private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
