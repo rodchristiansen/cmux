@@ -1214,19 +1214,25 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     }
 
     private func simulateShortcut(_ combo: String) {
-        let result = executeCmuxCommand(
-            executablePaths: resolveCmuxCLIPaths(),
-            arguments: ["simulate_shortcut", combo]
-        )
-        XCTAssertEqual(
-            result.terminationStatus,
-            0,
-            "Expected simulate_shortcut \(combo) to run successfully. stdout=\(result.stdout) stderr=\(result.stderr)"
-        )
-        XCTAssertEqual(
-            result.stdout,
-            "OK",
-            "Expected simulate_shortcut \(combo) to return OK. stdout=\(result.stdout) stderr=\(result.stderr)"
+        guard let response = browserSocketJSON(
+            method: "debug.shortcut.simulate",
+            params: ["combo": combo]
+        ) else {
+            XCTFail("Expected debug.shortcut.simulate \(combo) to return a socket response")
+            return
+        }
+
+        if let error = response["error"] as? [String: Any] {
+            XCTFail(
+                "Expected debug.shortcut.simulate \(combo) to succeed. " +
+                "error=\(browserSocketErrorDescription(["error": error]))"
+            )
+            return
+        }
+
+        XCTAssertNotNil(
+            response["result"],
+            "Expected debug.shortcut.simulate \(combo) to return a result payload. response=\(response)"
         )
     }
 
@@ -1563,151 +1569,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return String(describing: result)
         }
         return json
-    }
-
-    private func resolveCmuxCLIPaths() -> [String] {
-        let fileManager = FileManager.default
-        let env = ProcessInfo.processInfo.environment
-        var candidates: [String] = []
-
-        for key in ["CMUX_UI_TEST_CLI_PATH", "CMUXTERM_CLI"] {
-            if let value = env[key], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                candidates.append(value)
-            }
-        }
-
-        if let builtProductsDir = env["BUILT_PRODUCTS_DIR"], !builtProductsDir.isEmpty {
-            appendCLIPathCandidates(fromProductsDirectory: builtProductsDir, to: &candidates)
-        }
-
-        if let hostPath = env["TEST_HOST"], !hostPath.isEmpty {
-            let hostURL = URL(fileURLWithPath: hostPath)
-            let productsDir = hostURL
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .path
-            appendCLIPathCandidates(fromProductsDirectory: productsDir, to: &candidates)
-        }
-
-        appendCLIPathCandidates(
-            fromAncestorDirectoriesOf: Bundle.main.bundleURL.resolvingSymlinksInPath(),
-            levels: 6,
-            to: &candidates
-        )
-        appendCLIPathCandidates(
-            fromAncestorDirectoriesOf: Bundle(for: type(of: self)).bundleURL.resolvingSymlinksInPath(),
-            levels: 8,
-            to: &candidates
-        )
-
-        return uniquePaths(candidates).compactMap { path in
-            guard fileManager.isExecutableFile(atPath: path) else { return nil }
-            return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-        }
-    }
-
-    private func appendCLIPathCandidates(
-        fromAncestorDirectoriesOf url: URL,
-        levels: Int,
-        to candidates: inout [String]
-    ) {
-        guard levels > 0 else { return }
-        var current = url
-        for _ in 0..<levels {
-            current.deleteLastPathComponent()
-            appendCLIPathCandidates(fromProductsDirectory: current.path, to: &candidates)
-        }
-    }
-
-    private func appendCLIPathCandidates(fromProductsDirectory productsDir: String, to candidates: inout [String]) {
-        candidates.append("\(productsDir)/cmux DEV.app/Contents/Resources/bin/cmux")
-        candidates.append("\(productsDir)/cmux.app/Contents/Resources/bin/cmux")
-        candidates.append("\(productsDir)/cmux")
-
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: productsDir) else {
-            return
-        }
-
-        for entry in entries.sorted() where entry.hasSuffix(".app") {
-            let cliPath = URL(fileURLWithPath: productsDir)
-                .appendingPathComponent(entry)
-                .appendingPathComponent("Contents/Resources/bin/cmux")
-                .path
-            candidates.append(cliPath)
-        }
-    }
-
-    private func executeCmuxCommand(executablePaths: [String], arguments: [String]) -> (terminationStatus: Int32, stdout: String, stderr: String) {
-        var commandArguments = ["--socket", socketPath]
-        commandArguments.append(contentsOf: arguments)
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["CMUX_SOCKET_PATH"] = socketPath
-        environment["CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC"] = "4.0"
-
-        var lastPermissionFailure: (terminationStatus: Int32, stdout: String, stderr: String)?
-        for executablePath in uniquePaths(executablePaths) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = commandArguments
-            process.environment = environment
-
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-            } catch {
-                return (
-                    terminationStatus: -1,
-                    stdout: "",
-                    stderr: "Failed to run cmux command: \(error.localizedDescription) (cliPath=\(executablePath))"
-                )
-            }
-
-            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let stdout = String(data: stdoutData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let stderr = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let result: (terminationStatus: Int32, stdout: String, stderr: String) = (
-                process.terminationStatus,
-                stdout,
-                stderr
-            )
-
-            if result.terminationStatus == 0 {
-                return result
-            }
-            if stderr.localizedCaseInsensitiveContains("operation not permitted") {
-                lastPermissionFailure = result
-                continue
-            }
-            return result
-        }
-
-        return lastPermissionFailure ?? (
-            terminationStatus: -1,
-            stdout: "",
-            stderr: "cmux CLI command failed without an executable path"
-        )
-    }
-
-    private func uniquePaths(_ paths: [String]) -> [String] {
-        var unique: [String] = []
-        var seen = Set<String>()
-        for path in paths {
-            if seen.insert(path).inserted {
-                unique.append(path)
-            }
-        }
-        return unique
     }
 
     private func javaScriptLiteral(_ value: String) -> String {
