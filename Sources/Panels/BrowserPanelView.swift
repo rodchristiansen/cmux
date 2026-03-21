@@ -5270,7 +5270,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             // Pass through a narrow leading-edge band so the shared sidebar divider
             // handle can receive hover/click even when WKWebView is attached here.
             // Keeping this deterministic avoids flicker from dynamic left-edge scans.
-            guard point.x >= 0, point.x <= SidebarResizeInteraction.hitWidthPerSide else {
+            guard point.x >= 0, point.x <= SidebarResizeInteraction.contentSideHitWidth else {
                 return false
             }
             guard let window, let contentView = window.contentView else {
