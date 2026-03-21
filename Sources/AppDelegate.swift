@@ -2820,51 +2820,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let workspaceId = target.workspaceId.uuidString
         let surfaceId = target.surfaceId.uuidString
-        var trace: [String] = [
-            "socket=\(socketPath)",
-            "workspace=\(workspaceId)",
-            "surface=\(surfaceId)",
-            "baseline.list=\(TerminalController.probeSocketCommand("list_surfaces \(workspaceId)", at: socketPath, timeout: 1.0) ?? "<nil>")",
-        ]
-
-        for iteration in 1...8 {
-            let pingBefore = TerminalController.probeSocketCommand("ping", at: socketPath, timeout: 1.0)
-            let sendResponse = TerminalController.probeSocketCommand(
-                "send_key_surface \(surfaceId) enter",
-                at: socketPath,
-                timeout: 2.0
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.performAutomationSocketStressLoop(
+                socketPath: socketPath,
+                workspaceId: workspaceId,
+                surfaceId: surfaceId
             )
-            let pingAfter = TerminalController.probeSocketCommand("ping", at: socketPath, timeout: 1.0)
-            let listResponse = TerminalController.probeSocketCommand(
-                "list_surfaces \(workspaceId)",
-                at: socketPath,
-                timeout: 2.0
-            )
-
-            trace.append(
-                "iteration\(iteration)=pingBefore:\(pingBefore ?? "<nil>"),send:\(sendResponse ?? "<nil>"),pingAfter:\(pingAfter ?? "<nil>"),list:\(listResponse ?? "<nil>")"
-            )
-
-            guard pingBefore == "PONG",
-                  sendResponse == "OK",
-                  pingAfter == "PONG",
-                  automationSocketStressListResponse(listResponse, containsSurface: surfaceId) else {
-                updateUITestDiagnosticsIfNeeded([
-                    "automationSocketStressStatus": "failed",
-                    "automationSocketStressDone": "1",
-                    "automationSocketStressIterationsCompleted": String(iteration - 1),
-                    "automationSocketStressTrace": trace.joined(separator: " | "),
-                ])
-                return
-            }
         }
-
-        updateUITestDiagnosticsIfNeeded([
-            "automationSocketStressStatus": "passed",
-            "automationSocketStressDone": "1",
-            "automationSocketStressIterationsCompleted": "8",
-            "automationSocketStressTrace": trace.joined(separator: " | "),
-        ])
     }
 
     private func finishAutomationSocketStressAttempt(
@@ -2927,6 +2889,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         return (workspaceId: workspaceId, surfaceId: firstTerminalSurfaceId)
+    }
+
+    private func performAutomationSocketStressLoop(
+        socketPath: String,
+        workspaceId: String,
+        surfaceId: String
+    ) {
+        var trace: [String] = [
+            "socket=\(socketPath)",
+            "workspace=\(workspaceId)",
+            "surface=\(surfaceId)",
+            "baseline.list=\(TerminalController.probeSocketCommand("list_surfaces \(workspaceId)", at: socketPath, timeout: 1.0) ?? "<nil>")",
+        ]
+
+        for iteration in 1...8 {
+            let pingBefore = TerminalController.probeSocketCommand("ping", at: socketPath, timeout: 1.0)
+            let sendResponse = TerminalController.probeSocketCommand(
+                "send_key_surface \(surfaceId) enter",
+                at: socketPath,
+                timeout: 2.0
+            )
+            let pingAfter = TerminalController.probeSocketCommand("ping", at: socketPath, timeout: 1.0)
+            let listResponse = TerminalController.probeSocketCommand(
+                "list_surfaces \(workspaceId)",
+                at: socketPath,
+                timeout: 2.0
+            )
+
+            trace.append(
+                "iteration\(iteration)=pingBefore:\(pingBefore ?? "<nil>"),send:\(sendResponse ?? "<nil>"),pingAfter:\(pingAfter ?? "<nil>"),list:\(listResponse ?? "<nil>")"
+            )
+
+            guard pingBefore == "PONG",
+                  sendResponse == "OK",
+                  pingAfter == "PONG",
+                  automationSocketStressListResponse(listResponse, containsSurface: surfaceId) else {
+                updateUITestDiagnosticsIfNeeded([
+                    "automationSocketStressStatus": "failed",
+                    "automationSocketStressDone": "1",
+                    "automationSocketStressIterationsCompleted": String(iteration - 1),
+                    "automationSocketStressTrace": trace.joined(separator: " | "),
+                ])
+                return
+            }
+        }
+
+        updateUITestDiagnosticsIfNeeded([
+            "automationSocketStressStatus": "passed",
+            "automationSocketStressDone": "1",
+            "automationSocketStressIterationsCompleted": "8",
+            "automationSocketStressTrace": trace.joined(separator: " | "),
+        ])
     }
 
     private func automationSocketStressListResponse(_ response: String?, containsSurface surfaceId: String) -> Bool {
