@@ -7699,8 +7699,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
 
             const secondaryRect = secondaryInput.getBoundingClientRect();
+            const primaryRect = input.getBoundingClientRect();
             const viewportWidth = Math.max(Number(window.innerWidth) || 0, 1);
             const viewportHeight = Math.max(Number(window.innerHeight) || 0, 1);
+            const primaryCenterX = Math.min(
+              0.98,
+              Math.max(0.02, (primaryRect.left + (primaryRect.width / 2)) / viewportWidth)
+            );
+            const primaryCenterY = Math.min(
+              0.98,
+              Math.max(0.02, (primaryRect.top + (primaryRect.height / 2)) / viewportHeight)
+            );
             const secondaryCenterX = Math.min(
               0.98,
               Math.max(0.02, (secondaryRect.left + (secondaryRect.width / 2)) / viewportWidth)
@@ -7715,6 +7724,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               focused: active === input,
               id: input.id || "",
               secondaryId: secondaryInput.id || "",
+              primaryCenterX,
+              primaryCenterY,
               secondaryCenterX,
               secondaryCenterY,
               activeId: active && typeof active.id === "string" ? active.id : "",
@@ -7765,6 +7776,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let focused = (payload?["focused"] as? Bool) ?? false
                 let inputId = (payload?["id"] as? String) ?? ""
                 let secondaryInputId = (payload?["secondaryId"] as? String) ?? ""
+                let primaryCenterX = (payload?["primaryCenterX"] as? NSNumber)?.doubleValue ?? -1
+                let primaryCenterY = (payload?["primaryCenterY"] as? NSNumber)?.doubleValue ?? -1
                 let secondaryCenterX = (payload?["secondaryCenterX"] as? NSNumber)?.doubleValue ?? -1
                 let secondaryCenterY = (payload?["secondaryCenterY"] as? NSNumber)?.doubleValue ?? -1
                 let activeId = (payload?["activeId"] as? String) ?? ""
@@ -7775,6 +7788,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let arrowUp = (payload?["arrowUp"] as? NSNumber)?.intValue ?? 0
                 let selectionStart = (payload?["selectionStart"] as? NSNumber)?.intValue
                 let selectionEnd = (payload?["selectionEnd"] as? NSNumber)?.intValue
+                var primaryClickOffsetX = -1.0
+                var primaryClickOffsetY = -1.0
                 var secondaryClickOffsetX = -1.0
                 var secondaryClickOffsetY = -1.0
                 let windowAvailable = panel.webView.window != nil
@@ -7785,17 +7800,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     if webFrame.width > 1,
                        webFrame.height > 1,
                        contentHeight > 1,
+                       primaryCenterX > 0,
+                       primaryCenterX < 1,
+                       primaryCenterY > 0,
+                       primaryCenterY < 1,
                        secondaryCenterX > 0,
                        secondaryCenterX < 1,
                        secondaryCenterY > 0,
                        secondaryCenterY < 1 {
-                        let xInContent = Double(webFrame.minX) + (secondaryCenterX * Double(webFrame.width))
-                        let yFromTopInWeb = secondaryCenterY * Double(webFrame.height)
-                        let yInContent = Double(webFrame.maxY) - yFromTopInWeb
-                        let yFromTopInContent = contentHeight - yInContent
+                        let primaryXInContent = Double(webFrame.minX) + (primaryCenterX * Double(webFrame.width))
+                        let primaryYFromTopInWeb = primaryCenterY * Double(webFrame.height)
+                        let primaryYInContent = Double(webFrame.maxY) - primaryYFromTopInWeb
+                        let yFromTopInContent = contentHeight - primaryYInContent
                         let titlebarHeight = max(0, Double(window.frame.height) - contentHeight)
-                        secondaryClickOffsetX = xInContent
-                        secondaryClickOffsetY = titlebarHeight + yFromTopInContent
+                        primaryClickOffsetX = primaryXInContent
+                        primaryClickOffsetY = titlebarHeight + yFromTopInContent
+
+                        let secondaryXInContent = Double(webFrame.minX) + (secondaryCenterX * Double(webFrame.width))
+                        let secondaryYFromTopInWeb = secondaryCenterY * Double(webFrame.height)
+                        let secondaryYInContent = Double(webFrame.maxY) - secondaryYFromTopInWeb
+                        secondaryClickOffsetX = secondaryXInContent
+                        secondaryClickOffsetY = titlebarHeight + (contentHeight - secondaryYInContent)
                     }
                 }
 
@@ -7805,16 +7830,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                    inputId == activeId,
                    trackerInstalled,
                    !trackedStateId.isEmpty,
+                   primaryCenterX > 0,
+                   primaryCenterX < 1,
+                   primaryCenterY > 0,
+                   primaryCenterY < 1,
                    secondaryCenterX > 0,
                    secondaryCenterX < 1,
                    secondaryCenterY > 0,
                    secondaryCenterY < 1,
+                   primaryClickOffsetX > 0,
+                   primaryClickOffsetY > 0,
                    secondaryClickOffsetX > 0,
                    secondaryClickOffsetY > 0 {
                     self.writeGotoSplitTestData([
                         "webInputFocusSeeded": "true",
                         "webInputFocusElementId": inputId,
                         "webInputFocusSecondaryElementId": secondaryInputId,
+                        "webInputFocusPrimaryCenterX": "\(primaryCenterX)",
+                        "webInputFocusPrimaryCenterY": "\(primaryCenterY)",
+                        "webInputFocusPrimaryClickOffsetX": "\(primaryClickOffsetX)",
+                        "webInputFocusPrimaryClickOffsetY": "\(primaryClickOffsetY)",
                         "webInputFocusSecondaryCenterX": "\(secondaryCenterX)",
                         "webInputFocusSecondaryCenterY": "\(secondaryCenterY)",
                         "webInputFocusSecondaryClickOffsetX": "\(secondaryClickOffsetX)",
@@ -7843,13 +7878,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     return
                 }
 
-                self.writeGotoSplitTestData([
-                    "webInputFocusSeeded": "false",
-                    "webInputFocusElementId": inputId,
-                    "webInputFocusSecondaryElementId": secondaryInputId,
-                    "webInputFocusSecondaryCenterX": "\(secondaryCenterX)",
-                    "webInputFocusSecondaryCenterY": "\(secondaryCenterY)",
-                    "webInputFocusSecondaryClickOffsetX": "\(secondaryClickOffsetX)",
+                    self.writeGotoSplitTestData([
+                        "webInputFocusSeeded": "false",
+                        "webInputFocusElementId": inputId,
+                        "webInputFocusSecondaryElementId": secondaryInputId,
+                        "webInputFocusPrimaryCenterX": "\(primaryCenterX)",
+                        "webInputFocusPrimaryCenterY": "\(primaryCenterY)",
+                        "webInputFocusPrimaryClickOffsetX": "\(primaryClickOffsetX)",
+                        "webInputFocusPrimaryClickOffsetY": "\(primaryClickOffsetY)",
+                        "webInputFocusSecondaryCenterX": "\(secondaryCenterX)",
+                        "webInputFocusSecondaryCenterY": "\(secondaryCenterY)",
+                        "webInputFocusSecondaryClickOffsetX": "\(secondaryClickOffsetX)",
                     "webInputFocusSecondaryClickOffsetY": "\(secondaryClickOffsetY)",
                     "webInputFocusActiveElementId": activeId,
                     "webInputFocusTrackerInstalled": trackerInstalled ? "true" : "false",
@@ -7859,11 +7898,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     "webInputFocusArrowUpCount": "\(arrowUp)",
                     "webInputFocusSelectionStart": selectionStart.map(String.init) ?? "",
                     "webInputFocusSelectionEnd": selectionEnd.map(String.init) ?? "",
-                    "setupError":
+                        "setupError":
                         "Timed out focusing page input for omnibar restore test " +
                         "focused=\(focused) inputId=\(inputId) secondaryInputId=\(secondaryInputId) " +
                         "activeId=\(activeId) trackerInstalled=\(trackerInstalled) trackedStateId=\(trackedStateId) " +
                         "readyState=\(readyState) windowAvailable=\(windowAvailable) " +
+                        "primaryCenterX=\(primaryCenterX) primaryCenterY=\(primaryCenterY) " +
+                        "primaryClickOffsetX=\(primaryClickOffsetX) primaryClickOffsetY=\(primaryClickOffsetY) " +
                         "secondaryCenterX=\(secondaryCenterX) secondaryCenterY=\(secondaryCenterY) " +
                         "secondaryClickOffsetX=\(secondaryClickOffsetX) secondaryClickOffsetY=\(secondaryClickOffsetY)"
                 ])

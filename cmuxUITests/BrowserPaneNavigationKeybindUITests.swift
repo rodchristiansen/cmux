@@ -360,6 +360,8 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
                     "webInputFocusSeeded",
                     "webInputFocusElementId",
                     "webInputFocusSecondaryElementId",
+                    "webInputFocusPrimaryClickOffsetX",
+                    "webInputFocusPrimaryClickOffsetY",
                     "webInputFocusSecondaryClickOffsetX",
                     "webInputFocusSecondaryClickOffsetY"
                 ],
@@ -383,6 +385,17 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             XCTFail("Missing webInputFocusSecondaryElementId in setup data")
             return
         }
+        guard let primaryClickOffsetXRaw = setup["webInputFocusPrimaryClickOffsetX"],
+              let primaryClickOffsetYRaw = setup["webInputFocusPrimaryClickOffsetY"],
+              let primaryClickOffsetX = Double(primaryClickOffsetXRaw),
+              let primaryClickOffsetY = Double(primaryClickOffsetYRaw) else {
+            XCTFail(
+                "Missing or invalid primary input click offsets in setup data. " +
+                "webInputFocusPrimaryClickOffsetX=\(setup["webInputFocusPrimaryClickOffsetX"] ?? "nil") " +
+                "webInputFocusPrimaryClickOffsetY=\(setup["webInputFocusPrimaryClickOffsetY"] ?? "nil")"
+            )
+            return
+        }
         guard let secondaryClickOffsetXRaw = setup["webInputFocusSecondaryClickOffsetX"],
               let secondaryClickOffsetYRaw = setup["webInputFocusSecondaryClickOffsetY"],
               let secondaryClickOffsetX = Double(secondaryClickOffsetXRaw),
@@ -397,6 +410,11 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window before arrow-key regression check")
+
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: primaryClickOffsetX, dy: primaryClickOffsetY))
+            .click()
 
         guard let initialArrowSnapshot = waitForDataSnapshot(
             timeout: 8.0,
