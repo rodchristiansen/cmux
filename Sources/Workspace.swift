@@ -5669,6 +5669,9 @@ final class Workspace: Identifiable, ObservableObject {
     func updatePanelGitBranch(panelId: UUID, branch: String, isDirty: Bool) {
         let state = SidebarGitBranchState(branch: branch, isDirty: isDirty)
         let existing = panelGitBranches[panelId]
+        if let existing, existing.branch != branch {
+            clearSidebarNotification(forPanelId: panelId)
+        }
         if existing?.branch != branch || existing?.isDirty != isDirty {
             panelGitBranches[panelId] = state
         }
@@ -5678,7 +5681,11 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     func clearPanelGitBranch(panelId: UUID) {
-        panelGitBranches.removeValue(forKey: panelId)
+        let hadGitBranch = panelGitBranches.removeValue(forKey: panelId) != nil
+        let hadPullRequestContext = panelPullRequests[panelId] != nil
+        if hadGitBranch || hadPullRequestContext {
+            clearSidebarNotification(forPanelId: panelId)
+        }
         if panelId == focusedPanelId {
             gitBranch = nil
         }
@@ -5702,13 +5709,17 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     func clearPanelPullRequest(panelId: UUID) {
-        panelPullRequests.removeValue(forKey: panelId)
+        let hadPullRequest = panelPullRequests.removeValue(forKey: panelId) != nil
+        if hadPullRequest {
+            clearSidebarNotification(forPanelId: panelId)
+        }
         if panelId == focusedPanelId {
             pullRequest = nil
         }
     }
 
     func resetSidebarContext(reason: String = "unspecified") {
+        clearSidebarNotifications()
         statusEntries.removeAll()
         agentPIDs.removeAll()
         logEntries.removeAll()
@@ -5721,6 +5732,14 @@ final class Workspace: Identifiable, ObservableObject {
         listeningPorts.removeAll()
         metadataBlocks.removeAll()
         resetBrowserPanelsForContextChange(reason: reason)
+    }
+
+    private func clearSidebarNotifications() {
+        AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: id)
+    }
+
+    private func clearSidebarNotification(forPanelId panelId: UUID) {
+        AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: id, surfaceId: panelId)
     }
 
     func resetBrowserPanelsForContextChange(reason: String) {

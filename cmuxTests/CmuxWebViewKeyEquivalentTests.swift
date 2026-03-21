@@ -3046,6 +3046,38 @@ final class BrowserSessionHistoryRestoreTests: XCTestCase {
         XCTAssertNotEqual(browser.webViewInstanceID, priorInstanceID)
     }
 
+    func testResetSidebarContextClearsWorkspaceNotifications() throws {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let store = TerminalNotificationStore.shared
+        let workspace = Workspace()
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        let originalNotificationStore = appDelegate.notificationStore
+        store.replaceNotificationsForTesting([])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        appDelegate.notificationStore = store
+
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+            appDelegate.notificationStore = originalNotificationStore
+        }
+
+        store.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: "Claude Code",
+            subtitle: "Done",
+            body: "PR opened"
+        )
+        XCTAssertNotNil(store.latestNotification(forTabId: workspace.id))
+
+        workspace.resetSidebarContext(reason: "test")
+
+        XCTAssertNil(store.latestNotification(forTabId: workspace.id))
+        XCTAssertEqual(store.unreadCount(forTabId: workspace.id), 0)
+    }
+
 }
 
 @MainActor
@@ -6876,6 +6908,173 @@ final class WorkspacePanelGitBranchTests: XCTestCase {
             originalFocusedPanelId,
             "Expected non-focus terminal split to preserve pre-split focus"
         )
+    }
+
+    func testPanelGitBranchChangeClearsPanelNotifications() throws {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let store = TerminalNotificationStore.shared
+        let workspace = Workspace()
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        let originalNotificationStore = appDelegate.notificationStore
+        store.replaceNotificationsForTesting([])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        appDelegate.notificationStore = store
+
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+            appDelegate.notificationStore = originalNotificationStore
+        }
+
+        workspace.updatePanelGitBranch(panelId: panelId, branch: "feature/1642", isDirty: false)
+        store.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: "Claude Code",
+            subtitle: "Done",
+            body: "PR opened"
+        )
+        XCTAssertNotNil(store.latestNotification(forTabId: workspace.id))
+
+        workspace.updatePanelGitBranch(panelId: panelId, branch: "main", isDirty: false)
+
+        XCTAssertNil(store.latestNotification(forTabId: workspace.id))
+        XCTAssertEqual(store.unreadCount(forTabId: workspace.id), 0)
+    }
+
+    func testClearingPanelGitBranchClearsPanelNotifications() throws {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let store = TerminalNotificationStore.shared
+        let workspace = Workspace()
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        let originalNotificationStore = appDelegate.notificationStore
+        store.replaceNotificationsForTesting([])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        appDelegate.notificationStore = store
+
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+            appDelegate.notificationStore = originalNotificationStore
+        }
+
+        workspace.updatePanelGitBranch(panelId: panelId, branch: "feature/1642", isDirty: false)
+        store.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: "Claude Code",
+            subtitle: "Done",
+            body: "PR opened"
+        )
+        XCTAssertNotNil(store.latestNotification(forTabId: workspace.id))
+
+        workspace.clearPanelGitBranch(panelId: panelId)
+
+        XCTAssertNil(store.latestNotification(forTabId: workspace.id))
+        XCTAssertEqual(store.unreadCount(forTabId: workspace.id), 0)
+    }
+
+    func testClearingPanelGitBranchWithoutExistingBranchPreservesPanelNotifications() throws {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let store = TerminalNotificationStore.shared
+        let workspace = Workspace()
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        let originalNotificationStore = appDelegate.notificationStore
+        store.replaceNotificationsForTesting([])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        appDelegate.notificationStore = store
+
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+            appDelegate.notificationStore = originalNotificationStore
+        }
+
+        store.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: "Claude Code",
+            subtitle: "Done",
+            body: "PR opened"
+        )
+
+        workspace.clearPanelGitBranch(panelId: panelId)
+
+        XCTAssertNotNil(store.latestNotification(forTabId: workspace.id))
+        XCTAssertEqual(store.unreadCount(forTabId: workspace.id), 1)
+    }
+
+    func testClearingPanelPullRequestClearsPanelNotifications() throws {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let store = TerminalNotificationStore.shared
+        let workspace = Workspace()
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        let originalNotificationStore = appDelegate.notificationStore
+        store.replaceNotificationsForTesting([])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        appDelegate.notificationStore = store
+
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+            appDelegate.notificationStore = originalNotificationStore
+        }
+
+        workspace.updatePanelPullRequest(
+            panelId: panelId,
+            number: 1642,
+            label: "PR",
+            url: try XCTUnwrap(URL(string: "https://example.com/pull/1642")),
+            status: .open
+        )
+        store.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: "Claude Code",
+            subtitle: "Done",
+            body: "PR opened"
+        )
+        XCTAssertNotNil(store.latestNotification(forTabId: workspace.id))
+
+        workspace.clearPanelPullRequest(panelId: panelId)
+
+        XCTAssertNil(store.latestNotification(forTabId: workspace.id))
+        XCTAssertEqual(store.unreadCount(forTabId: workspace.id), 0)
+    }
+
+    func testClearingPanelPullRequestWithoutExistingPullRequestPreservesPanelNotifications() throws {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let store = TerminalNotificationStore.shared
+        let workspace = Workspace()
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        let originalNotificationStore = appDelegate.notificationStore
+        store.replaceNotificationsForTesting([])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        appDelegate.notificationStore = store
+
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+            appDelegate.notificationStore = originalNotificationStore
+        }
+
+        store.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: "Claude Code",
+            subtitle: "Done",
+            body: "PR opened"
+        )
+
+        workspace.clearPanelPullRequest(panelId: panelId)
+
+        XCTAssertNotNil(store.latestNotification(forTabId: workspace.id))
+        XCTAssertEqual(store.unreadCount(forTabId: workspace.id), 1)
     }
 
     func testDetachLastSurfaceLeavesWorkspaceTemporarilyEmptyForMoveFlow() {
