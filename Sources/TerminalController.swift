@@ -1782,6 +1782,10 @@ class TerminalController {
             return v2Result(id: id, self.v2SurfaceRefresh(params: params))
         case "surface.health":
             return v2Result(id: id, self.v2SurfaceHealth(params: params))
+#if DEBUG
+        case "debug.terminals":
+            return v2Result(id: id, self.v2DebugTerminals(params: params))
+#endif
         case "surface.send_text":
             return v2Result(id: id, self.v2SurfaceSendText(params: params))
         case "surface.send_key":
@@ -2249,6 +2253,7 @@ class TerminalController {
             "debug.terminal.is_focused",
             "debug.terminal.read_text",
             "debug.terminal.render_stats",
+            "debug.terminals",
             "debug.layout",
             "debug.portal.stats",
             "debug.bonsplit_underflow.count",
@@ -4604,6 +4609,63 @@ class TerminalController {
         }
         return .ok(payload)
     }
+
+#if DEBUG
+    private func v2DebugTerminals(params _: [String: Any]) -> V2CallResult {
+        var payload: [String: Any]?
+
+        v2MainSync {
+            guard let app = AppDelegate.shared else { return }
+
+            var terminals: [[String: Any]] = []
+            terminals.reserveCapacity(16)
+
+            for (windowIndex, state) in app.scriptableMainWindows().enumerated() {
+                let tabManager = state.tabManager
+                for (workspaceIndex, workspace) in tabManager.tabs.enumerated() {
+                    for (surfaceIndex, panel) in orderedPanels(in: workspace).enumerated() {
+                        guard let terminalPanel = panel as? TerminalPanel else { continue }
+                        let hostedView = terminalPanel.hostedView
+
+                        terminals.append([
+                            "index": terminals.count,
+                            "window_index": windowIndex,
+                            "window_id": state.windowId.uuidString,
+                            "window_ref": v2Ref(kind: .window, uuid: state.windowId),
+                            "workspace_index": workspaceIndex,
+                            "workspace_id": workspace.id.uuidString,
+                            "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                            "workspace_title": workspace.title,
+                            "workspace_selected": workspace.id == tabManager.selectedTabId,
+                            "surface_index": surfaceIndex,
+                            "surface_id": terminalPanel.id.uuidString,
+                            "surface_ref": v2Ref(kind: .surface, uuid: terminalPanel.id),
+                            "surface_title": workspace.panelTitle(panelId: terminalPanel.id) ?? terminalPanel.displayTitle,
+                            "runtime_surface_ready": terminalPanel.surface.surface != nil,
+                            "hosted_view_in_window": hostedView.window != nil,
+                            "hosted_view_has_superview": hostedView.superview != nil,
+                            "hosted_view_hidden": hostedView.isHidden,
+                            "hosted_view_hidden_or_ancestor_hidden": hostedView.isHiddenOrHasHiddenAncestor,
+                            "hosted_view_visible_in_ui": hostedView.debugPortalVisibleInUI,
+                            "pane_id": v2OrNull(workspace.paneId(forPanelId: terminalPanel.id)?.id.uuidString),
+                            "pane_ref": v2Ref(kind: .pane, uuid: workspace.paneId(forPanelId: terminalPanel.id)?.id)
+                        ])
+                    }
+                }
+            }
+
+            payload = [
+                "count": terminals.count,
+                "terminals": terminals
+            ]
+        }
+
+        guard let payload else {
+            return .err(code: "unavailable", message: "AppDelegate not available", data: nil)
+        }
+        return .ok(payload)
+    }
+#endif
 
     private func v2SurfaceSendText(params: [String: Any]) -> V2CallResult {
         guard let tabManager = v2ResolveTabManager(params: params) else {

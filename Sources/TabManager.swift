@@ -830,12 +830,15 @@ class TabManager: ObservableObject {
         )
         wireClosedBrowserTracking(for: newWorkspace)
         let insertIndex = newTabInsertIndex(placementOverride: placementOverride)
+        if eagerLoadTerminal && !select {
+            requestBackgroundWorkspaceLoad(for: newWorkspace.id)
+        }
         if insertIndex >= 0 && insertIndex <= tabs.count {
             tabs.insert(newWorkspace, at: insertIndex)
         } else {
             tabs.append(newWorkspace)
         }
-        if eagerLoadTerminal {
+        if eagerLoadTerminal && select {
             newWorkspace.focusedTerminalPanel?.surface.requestBackgroundSurfaceStartIfNeeded()
         }
         if select {
