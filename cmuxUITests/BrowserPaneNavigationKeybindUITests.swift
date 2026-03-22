@@ -532,6 +532,221 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         XCTAssertEqual(postCmdLUpSnapshot["browserArrowActiveElementId"], secondaryInputId, "Expected the clicked secondary page input to remain focused")
     }
 
+    func testArrowKeysReachClickedContentEditableAfterCmdL() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_INPUT_SETUP"] = "1"
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(
+                keys: [
+                    "browserPanelId",
+                    "webInputFocusSeeded",
+                    "webInputFocusSecondaryClickOffsetX",
+                    "webInputFocusSecondaryClickOffsetY"
+                ],
+                timeout: 20.0
+            ),
+            "Expected focused page input setup data before contenteditable regression check. data=\(String(describing: loadData()))"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        XCTAssertEqual(setup["webInputFocusSeeded"], "true", "Expected test page inputs to be seeded before contenteditable regression check")
+
+        guard let surfaceId = setup["browserPanelId"], !surfaceId.isEmpty else {
+            XCTFail("Missing browserPanelId in setup data")
+            return
+        }
+        guard let secondaryClickOffsetXRaw = setup["webInputFocusSecondaryClickOffsetX"],
+              let secondaryClickOffsetYRaw = setup["webInputFocusSecondaryClickOffsetY"],
+              let secondaryClickOffsetX = Double(secondaryClickOffsetXRaw),
+              let secondaryClickOffsetY = Double(secondaryClickOffsetYRaw) else {
+            XCTFail(
+                "Missing or invalid secondary input click offsets in setup data. " +
+                "webInputFocusSecondaryClickOffsetX=\(setup["webInputFocusSecondaryClickOffsetX"] ?? "nil") " +
+                "webInputFocusSecondaryClickOffsetY=\(setup["webInputFocusSecondaryClickOffsetY"] ?? "nil")"
+            )
+            return
+        }
+        guard let fixture = installBrowserContentEditableFixture(
+            surfaceId: surfaceId,
+            secondaryClickOffsetX: secondaryClickOffsetX,
+            secondaryClickOffsetY: secondaryClickOffsetY
+        ) else {
+            XCTFail("Expected contenteditable fixture installation to succeed")
+            return
+        }
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window before contenteditable regression check")
+
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: fixture.clickOffsetX, dy: fixture.clickOffsetY))
+            .click()
+
+        guard let initialSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.downCount == 0 &&
+                    snapshot.upCount == 0 &&
+                    snapshot.commandShiftDownCount == 0 &&
+                    snapshot.commandShiftUpCount == 0
+            }
+        ) else {
+            XCTFail("Expected contenteditable fixture to be focused before baseline arrows")
+            return
+        }
+
+        simulateShortcut("down", app: app)
+        guard let baselineDownSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.downCount == initialSnapshot.downCount + 1 &&
+                    snapshot.upCount == initialSnapshot.upCount
+            }
+        ) else {
+            XCTFail("Expected baseline Down Arrow to reach the contenteditable fixture")
+            return
+        }
+
+        simulateShortcut("up", app: app)
+        guard let baselineUpSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.downCount == baselineDownSnapshot.downCount &&
+                    snapshot.upCount == baselineDownSnapshot.upCount + 1
+            }
+        ) else {
+            XCTFail("Expected baseline Up Arrow to reach the contenteditable fixture")
+            return
+        }
+
+        simulateShortcut("cmdShiftDown", app: app)
+        guard let baselineCommandShiftDownSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.commandShiftDownCount == baselineUpSnapshot.commandShiftDownCount + 1 &&
+                    snapshot.commandShiftUpCount == baselineUpSnapshot.commandShiftUpCount
+            }
+        ) else {
+            XCTFail("Expected baseline Cmd+Shift+Down to reach the contenteditable fixture")
+            return
+        }
+
+        simulateShortcut("cmdShiftUp", app: app)
+        guard let baselineCommandShiftUpSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.commandShiftDownCount == baselineCommandShiftDownSnapshot.commandShiftDownCount &&
+                    snapshot.commandShiftUpCount == baselineCommandShiftDownSnapshot.commandShiftUpCount + 1
+            }
+        ) else {
+            XCTFail("Expected baseline Cmd+Shift+Up to reach the contenteditable fixture")
+            return
+        }
+
+        app.typeKey("l", modifierFlags: [.command])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                data["webViewFocusedAfterAddressBarFocus"] == "false"
+            },
+            "Expected Cmd+L to focus omnibar before the contenteditable click path"
+        )
+
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: fixture.clickOffsetX, dy: fixture.clickOffsetY))
+            .click()
+
+        guard waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId
+            }
+        ) != nil else {
+            XCTFail("Expected clicking the page to re-focus the contenteditable fixture after Cmd+L")
+            return
+        }
+
+        simulateShortcut("down", app: app)
+        guard let postCmdLDownSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.downCount == baselineCommandShiftUpSnapshot.downCount + 1 &&
+                    snapshot.upCount == baselineCommandShiftUpSnapshot.upCount
+            }
+        ) else {
+            XCTFail("Expected Down Arrow after Cmd+L to reach the contenteditable fixture")
+            return
+        }
+
+        simulateShortcut("up", app: app)
+        guard let postCmdLUpSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.downCount == postCmdLDownSnapshot.downCount &&
+                    snapshot.upCount == postCmdLDownSnapshot.upCount + 1
+            }
+        ) else {
+            XCTFail("Expected Up Arrow after Cmd+L to reach the contenteditable fixture")
+            return
+        }
+
+        simulateShortcut("cmdShiftDown", app: app)
+        guard let postCmdLCommandShiftDownSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.commandShiftDownCount == postCmdLUpSnapshot.commandShiftDownCount + 1 &&
+                    snapshot.commandShiftUpCount == postCmdLUpSnapshot.commandShiftUpCount
+            }
+        ) else {
+            XCTFail("Expected Cmd+Shift+Down after Cmd+L to reach the contenteditable fixture")
+            return
+        }
+
+        simulateShortcut("cmdShiftUp", app: app)
+        guard let postCmdLCommandShiftUpSnapshot = waitForBrowserContentEditableSnapshot(
+            surfaceId: surfaceId,
+            timeout: 5.0,
+            predicate: { snapshot in
+                snapshot.activeId == fixture.editorId &&
+                    snapshot.commandShiftDownCount == postCmdLCommandShiftDownSnapshot.commandShiftDownCount &&
+                    snapshot.commandShiftUpCount == postCmdLCommandShiftDownSnapshot.commandShiftUpCount + 1
+            }
+        ) else {
+            XCTFail("Expected Cmd+Shift+Up after Cmd+L to reach the contenteditable fixture")
+            return
+        }
+
+        XCTAssertEqual(postCmdLCommandShiftUpSnapshot.activeId, fixture.editorId, "Expected the clicked contenteditable fixture to remain focused after Cmd+Shift+arrows")
+    }
+
     func testCmdLOpensBrowserWhenTerminalFocused() {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
@@ -1253,6 +1468,194 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         }
     }
 
+    private func installBrowserContentEditableFixture(
+        surfaceId: String,
+        secondaryClickOffsetX: Double,
+        secondaryClickOffsetY: Double
+    ) -> BrowserContentEditableFixture? {
+        let script = """
+        (() => {
+          const secondary = document.getElementById("cmux-ui-test-focus-input-secondary");
+          if (!secondary || !document.body) {
+            return { ok: false, error: "missing_secondary_input" };
+          }
+
+          const parent = secondary.parentElement || document.body;
+          let editor = document.getElementById("cmux-ui-test-contenteditable");
+          if (!editor || String(editor.tagName || "").toLowerCase() !== "div") {
+            editor = document.createElement("div");
+            editor.id = "cmux-ui-test-contenteditable";
+          }
+
+          editor.setAttribute("contenteditable", "true");
+          editor.setAttribute("role", "textbox");
+          editor.setAttribute("aria-label", "cmux-ui-test-contenteditable");
+          editor.spellcheck = false;
+          editor.tabIndex = 0;
+          editor.innerHTML = "alpha<br>beta<br>gamma";
+          editor.style.display = "block";
+          editor.style.minHeight = "84px";
+          editor.style.padding = "8px 10px";
+          editor.style.border = "1px solid #5f6368";
+          editor.style.borderRadius = "6px";
+          editor.style.boxSizing = "border-box";
+          editor.style.fontSize = "14px";
+          editor.style.fontFamily = "system-ui, -apple-system, sans-serif";
+          editor.style.background = "white";
+          editor.style.color = "black";
+          editor.style.whiteSpace = "pre-wrap";
+          editor.style.outline = "none";
+
+          if (editor.parentElement !== parent) {
+            parent.appendChild(editor);
+          }
+
+          if (!window.__cmuxContentEditableArrowReport || typeof window.__cmuxContentEditableArrowReport !== "object") {
+            window.__cmuxContentEditableArrowReport = {
+              down: 0,
+              up: 0,
+              commandShiftDown: 0,
+              commandShiftUp: 0
+            };
+          }
+
+          if (!editor.__cmuxContentEditableArrowReportInstalled) {
+            editor.__cmuxContentEditableArrowReportInstalled = true;
+            editor.addEventListener("keydown", (event) => {
+              if (event.key === "ArrowDown") window.__cmuxContentEditableArrowReport.down += 1;
+              if (event.key === "ArrowUp") window.__cmuxContentEditableArrowReport.up += 1;
+              if (event.key === "ArrowDown" && event.metaKey && event.shiftKey) {
+                window.__cmuxContentEditableArrowReport.commandShiftDown += 1;
+              }
+              if (event.key === "ArrowUp" && event.metaKey && event.shiftKey) {
+                window.__cmuxContentEditableArrowReport.commandShiftUp += 1;
+              }
+            }, true);
+          }
+
+          editor.focus({ preventScroll: true });
+          const selection = window.getSelection();
+          if (selection) {
+            const range = document.createRange();
+            range.selectNodeContents(editor);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+
+          const secondaryRect = secondary.getBoundingClientRect();
+          const editorRect = editor.getBoundingClientRect();
+          const active = document.activeElement;
+          return {
+            ok: true,
+            editorId: editor.id || "",
+            activeId: active && typeof active.id === "string" ? active.id : "",
+            secondaryCenterX: secondaryRect.left + (secondaryRect.width / 2),
+            secondaryCenterY: secondaryRect.top + (secondaryRect.height / 2),
+            editorCenterX: editorRect.left + (editorRect.width / 2),
+            editorCenterY: editorRect.top + (editorRect.height / 2)
+          };
+        })();
+        """
+
+        guard let payload = browserEvalDict(surfaceId: surfaceId, script: script),
+              (payload["ok"] as? Bool) == true,
+              let editorId = payload["editorId"] as? String,
+              !editorId.isEmpty,
+              let activeId = payload["activeId"] as? String,
+              activeId == editorId,
+              let secondaryCenterX = (payload["secondaryCenterX"] as? NSNumber)?.doubleValue,
+              let secondaryCenterY = (payload["secondaryCenterY"] as? NSNumber)?.doubleValue,
+              let editorCenterX = (payload["editorCenterX"] as? NSNumber)?.doubleValue,
+              let editorCenterY = (payload["editorCenterY"] as? NSNumber)?.doubleValue else {
+            return nil
+        }
+
+        return BrowserContentEditableFixture(
+            editorId: editorId,
+            clickOffsetX: secondaryClickOffsetX + (editorCenterX - secondaryCenterX),
+            clickOffsetY: secondaryClickOffsetY + (editorCenterY - secondaryCenterY)
+        )
+    }
+
+    private func waitForBrowserContentEditableSnapshot(
+        surfaceId: String,
+        timeout: TimeInterval,
+        predicate: @escaping (BrowserContentEditableSnapshot) -> Bool
+    ) -> BrowserContentEditableSnapshot? {
+        var matched: BrowserContentEditableSnapshot?
+        let didMatch = waitForCondition(timeout: timeout) {
+            guard let snapshot = self.browserContentEditableSnapshot(surfaceId: surfaceId),
+                  predicate(snapshot) else {
+                return false
+            }
+            matched = snapshot
+            return true
+        }
+        return didMatch ? matched : nil
+    }
+
+    private func browserContentEditableSnapshot(surfaceId: String) -> BrowserContentEditableSnapshot? {
+        let script = """
+        (() => {
+          const report = window.__cmuxContentEditableArrowReport || {
+            down: 0,
+            up: 0,
+            commandShiftDown: 0,
+            commandShiftUp: 0
+          };
+          const active = document.activeElement;
+          return {
+            activeId: active && typeof active.id === "string" ? active.id : "",
+            down: Number(report.down || 0),
+            up: Number(report.up || 0),
+            commandShiftDown: Number(report.commandShiftDown || 0),
+            commandShiftUp: Number(report.commandShiftUp || 0)
+          };
+        })();
+        """
+
+        guard let payload = browserEvalDict(surfaceId: surfaceId, script: script),
+              let activeId = payload["activeId"] as? String,
+              let downCount = (payload["down"] as? NSNumber)?.intValue,
+              let upCount = (payload["up"] as? NSNumber)?.intValue,
+              let commandShiftDownCount = (payload["commandShiftDown"] as? NSNumber)?.intValue,
+              let commandShiftUpCount = (payload["commandShiftUp"] as? NSNumber)?.intValue else {
+            return nil
+        }
+
+        return BrowserContentEditableSnapshot(
+            activeId: activeId,
+            downCount: downCount,
+            upCount: upCount,
+            commandShiftDownCount: commandShiftDownCount,
+            commandShiftUpCount: commandShiftUpCount
+        )
+    }
+
+    private func browserEvalDict(surfaceId: String, script: String) -> [String: Any]? {
+        browserEvalValue(surfaceId: surfaceId, script: script) as? [String: Any]
+    }
+
+    private func browserEvalValue(surfaceId: String, script: String) -> Any? {
+        let client = ControlSocketClient(path: socketPath, responseTimeout: 10.0)
+        let request: [String: Any] = [
+            "id": UUID().uuidString,
+            "method": "browser.eval",
+            "params": [
+                "surface_id": surfaceId,
+                "script": script
+            ]
+        ]
+        guard let response = client.sendJSON(request),
+              let ok = response["ok"] as? Bool,
+              ok,
+              let result = response["result"] as? [String: Any] else {
+            return nil
+        }
+        return result["value"]
+    }
+
     private func loadData() -> [String: String]? {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: dataPath)) else {
             return nil
@@ -1720,5 +2123,19 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             }
             return raw.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+    }
+
+    private struct BrowserContentEditableFixture {
+        let editorId: String
+        let clickOffsetX: Double
+        let clickOffsetY: Double
+    }
+
+    private struct BrowserContentEditableSnapshot {
+        let activeId: String
+        let downCount: Int
+        let upCount: Int
+        let commandShiftDownCount: Int
+        let commandShiftUpCount: Int
     }
 }
