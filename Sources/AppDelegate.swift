@@ -7555,11 +7555,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let script = """
         (() => {
           const readArrowState = () => {
-            const report = window.__cmuxArrowKeyReport || { down: 0, up: 0 };
+            const report = window.__cmuxArrowKeyReport || {
+              down: 0,
+              up: 0,
+              commandShiftDown: 0,
+              commandShiftUp: 0
+            };
             const active = document.activeElement;
             return {
               arrowDown: Number(report.down || 0),
               arrowUp: Number(report.up || 0),
+              commandShiftDown: Number(report.commandShiftDown || 0),
+              commandShiftUp: Number(report.commandShiftUp || 0),
               selectionStart: active && typeof active.selectionStart === "number" ? active.selectionStart : null,
               selectionEnd: active && typeof active.selectionEnd === "number" ? active.selectionEnd : null
             };
@@ -7584,6 +7591,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               readyState: String(document.readyState || ""),
               arrowDown: arrowState.arrowDown,
               arrowUp: arrowState.arrowUp,
+              commandShiftDown: arrowState.commandShiftDown,
+              commandShiftUp: arrowState.commandShiftUp,
               selectionStart: arrowState.selectionStart,
               selectionEnd: arrowState.selectionEnd
             };
@@ -7649,7 +7658,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
 
             if (!window.__cmuxArrowKeyReport || typeof window.__cmuxArrowKeyReport !== "object") {
-              window.__cmuxArrowKeyReport = { down: 0, up: 0 };
+              window.__cmuxArrowKeyReport = {
+                down: 0,
+                up: 0,
+                commandShiftDown: 0,
+                commandShiftUp: 0
+              };
+            }
+            if (typeof window.__cmuxArrowKeyReport.commandShiftDown !== "number") {
+              window.__cmuxArrowKeyReport.commandShiftDown = 0;
+            }
+            if (typeof window.__cmuxArrowKeyReport.commandShiftUp !== "number") {
+              window.__cmuxArrowKeyReport.commandShiftUp = 0;
             }
             const installArrowTracker = (element) => {
               if (!element || element.__cmuxArrowKeyReportInstalled) return;
@@ -7657,6 +7677,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               element.addEventListener("keydown", (event) => {
                 if (event.key === "ArrowDown") window.__cmuxArrowKeyReport.down += 1;
                 if (event.key === "ArrowUp") window.__cmuxArrowKeyReport.up += 1;
+                if (event.key === "ArrowDown" && event.metaKey && event.shiftKey) {
+                  window.__cmuxArrowKeyReport.commandShiftDown += 1;
+                }
+                if (event.key === "ArrowUp" && event.metaKey && event.shiftKey) {
+                  window.__cmuxArrowKeyReport.commandShiftUp += 1;
+                }
               }, true);
             };
             installArrowTracker(input);
@@ -7724,6 +7750,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               readyState: String(document.readyState || ""),
               arrowDown: arrowState.arrowDown,
               arrowUp: arrowState.arrowUp,
+              commandShiftDown: arrowState.commandShiftDown,
+              commandShiftUp: arrowState.commandShiftUp,
               selectionStart: arrowState.selectionStart,
               selectionEnd: arrowState.selectionEnd
             };
@@ -7771,6 +7799,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let readyState = (payload?["readyState"] as? String) ?? ""
                 let arrowDown = (payload?["arrowDown"] as? NSNumber)?.intValue ?? 0
                 let arrowUp = (payload?["arrowUp"] as? NSNumber)?.intValue ?? 0
+                let commandShiftDown = (payload?["commandShiftDown"] as? NSNumber)?.intValue ?? 0
+                let commandShiftUp = (payload?["commandShiftUp"] as? NSNumber)?.intValue ?? 0
                 let selectionStart = (payload?["selectionStart"] as? NSNumber)?.intValue
                 let selectionEnd = (payload?["selectionEnd"] as? NSNumber)?.intValue
                 var primaryClickOffsetX = -1.0
@@ -7845,6 +7875,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         "webInputFocusReadyState": readyState,
                         "webInputFocusArrowDownCount": "\(arrowDown)",
                         "webInputFocusArrowUpCount": "\(arrowUp)",
+                        "webInputFocusCommandShiftDownCount": "\(commandShiftDown)",
+                        "webInputFocusCommandShiftUpCount": "\(commandShiftUp)",
                         "webInputFocusSelectionStart": selectionStart.map(String.init) ?? "",
                         "webInputFocusSelectionEnd": selectionEnd.map(String.init) ?? ""
                     ])
@@ -7881,6 +7913,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     "webInputFocusReadyState": readyState,
                     "webInputFocusArrowDownCount": "\(arrowDown)",
                     "webInputFocusArrowUpCount": "\(arrowUp)",
+                    "webInputFocusCommandShiftDownCount": "\(commandShiftDown)",
+                    "webInputFocusCommandShiftUpCount": "\(commandShiftUp)",
                     "webInputFocusSelectionStart": selectionStart.map(String.init) ?? "",
                     "webInputFocusSelectionEnd": selectionEnd.map(String.init) ?? "",
                         "setupError":
@@ -7924,12 +7958,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let script = """
         (() => {
-          const report = window.__cmuxArrowKeyReport || { down: 0, up: 0 };
+          const report = window.__cmuxArrowKeyReport || {
+            down: 0,
+            up: 0,
+            commandShiftDown: 0,
+            commandShiftUp: 0
+          };
           const active = document.activeElement;
           return {
             installed: !!window.__cmuxArrowKeyReport,
             down: Number(report.down || 0),
             up: Number(report.up || 0),
+            commandShiftDown: Number(report.commandShiftDown || 0),
+            commandShiftUp: Number(report.commandShiftUp || 0),
             activeId: active && typeof active.id === "string" ? active.id : "",
             selectionStart: active && typeof active.selectionStart === "number" ? active.selectionStart : null,
             selectionEnd: active && typeof active.selectionEnd === "number" ? active.selectionEnd : null,
@@ -7951,6 +7992,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let focusedAddressBarPanelId = self.focusedBrowserAddressBarPanelId()?.uuidString ?? ""
             let down = (payload["down"] as? NSNumber)?.intValue ?? 0
             let up = (payload["up"] as? NSNumber)?.intValue ?? 0
+            let commandShiftDown = (payload["commandShiftDown"] as? NSNumber)?.intValue ?? 0
+            let commandShiftUp = (payload["commandShiftUp"] as? NSNumber)?.intValue ?? 0
             let activeId = (payload["activeId"] as? String) ?? ""
             let selectionStart = (payload["selectionStart"] as? NSNumber)?.intValue
             let selectionEnd = (payload["selectionEnd"] as? NSNumber)?.intValue
@@ -7962,6 +8005,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 "browserArrowInstalled": installed ? "true" : "false",
                 "browserArrowDownCount": "\(down)",
                 "browserArrowUpCount": "\(up)",
+                "browserArrowCommandShiftDownCount": "\(commandShiftDown)",
+                "browserArrowCommandShiftUpCount": "\(commandShiftUp)",
                 "browserArrowActiveElementId": activeId,
                 "browserArrowSelectionStart": selectionStart.map(String.init) ?? "",
                 "browserArrowSelectionEnd": selectionEnd.map(String.init) ?? "",

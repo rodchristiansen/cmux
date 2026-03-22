@@ -376,16 +376,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         }
 
         XCTAssertEqual(setup["webInputFocusSeeded"], "true", "Expected test page input to be focused before arrow-key checks")
-        guard let browserPanelId = setup["browserPanelId"], !browserPanelId.isEmpty else {
-            XCTFail("Missing browserPanelId in setup data")
-            return
-        }
-        let browserArrowHarnessResult = installBrowserArrowHarness(surfaceId: browserPanelId)
-        guard browserArrowHarnessResult.harness != nil else {
-            XCTFail("Expected browser arrow harness to install. diagnostic=\(browserArrowHarnessResult.diagnostic)")
-            return
-        }
-
         guard let primaryInputId = setup["webInputFocusElementId"], !primaryInputId.isEmpty else {
             XCTFail("Missing webInputFocusElementId in setup data")
             return
@@ -538,47 +528,59 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return
         }
 
-        guard let baselineReport = browserArrowReport(surfaceId: browserPanelId) else {
-            XCTFail("Expected browser arrow harness report before Cmd+Shift+arrow check")
+        let baselineCommandShiftDownCount = Int(postCmdLUpSnapshot["browserArrowCommandShiftDownCount"] ?? "") ?? -1
+        let baselineCommandShiftUpCount = Int(postCmdLUpSnapshot["browserArrowCommandShiftUpCount"] ?? "") ?? -1
+        guard baselineCommandShiftDownCount >= 0, baselineCommandShiftUpCount >= 0 else {
+            XCTFail(
+                "Expected browser arrow recorder to report Cmd+Shift+arrow counters. " +
+                "data=\(String(describing: loadData()))"
+            )
             return
         }
 
         simulateShortcut("cmdShiftDown", app: app)
-        guard let postCmdLCommandShiftDownReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard let postCmdLCommandShiftDownSnapshot = waitForDataSnapshot(
             timeout: 5.0,
-            predicate: { report in
-                report.active == secondaryInputId &&
-                    report.commandShiftDown == baselineReport.commandShiftDown + 1 &&
-                    report.commandShiftUp == baselineReport.commandShiftUp
+            predicate: { data in
+                data["browserArrowActiveElementId"] == secondaryInputId &&
+                    data["browserArrowCommandShiftDownCount"] == "\(baselineCommandShiftDownCount + 1)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(baselineCommandShiftUpCount)"
             }
         ) else {
             XCTFail(
                 "Expected Cmd+Shift+Down after Cmd+L and page click to reach the secondary page input. " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "data=\(String(describing: loadData()))"
+            )
+            return
+        }
+        let postCmdLCommandShiftDownCount = Int(postCmdLCommandShiftDownSnapshot["browserArrowCommandShiftDownCount"] ?? "") ?? -1
+        let postCmdLCommandShiftUpCount = Int(postCmdLCommandShiftDownSnapshot["browserArrowCommandShiftUpCount"] ?? "") ?? -1
+        guard postCmdLCommandShiftDownCount >= 0, postCmdLCommandShiftUpCount >= 0 else {
+            XCTFail(
+                "Expected browser arrow recorder to report Cmd+Shift+Down counters. " +
+                "data=\(String(describing: loadData()))"
             )
             return
         }
 
         simulateShortcut("cmdShiftUp", app: app)
-        guard let postCmdLCommandShiftUpReport = waitForBrowserArrowReport(
-            surfaceId: browserPanelId,
+        guard let postCmdLCommandShiftUpSnapshot = waitForDataSnapshot(
             timeout: 5.0,
-            predicate: { report in
-                report.active == secondaryInputId &&
-                    report.commandShiftDown == postCmdLCommandShiftDownReport.commandShiftDown &&
-                    report.commandShiftUp == postCmdLCommandShiftDownReport.commandShiftUp + 1
+            predicate: { data in
+                data["browserArrowActiveElementId"] == secondaryInputId &&
+                    data["browserArrowCommandShiftDownCount"] == "\(postCmdLCommandShiftDownCount)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(postCmdLCommandShiftUpCount + 1)"
             }
         ) else {
             XCTFail(
                 "Expected Cmd+Shift+Up after Cmd+L and page click to reach the secondary page input. " +
-                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+                "data=\(String(describing: loadData()))"
             )
             return
         }
 
         XCTAssertEqual(postCmdLUpSnapshot["browserArrowActiveElementId"], secondaryInputId, "Expected the clicked secondary page input to remain focused")
-        XCTAssertEqual(postCmdLCommandShiftUpReport.active, secondaryInputId, "Expected the clicked secondary page input to remain focused after Cmd+Shift+arrows")
+        XCTAssertEqual(postCmdLCommandShiftUpSnapshot["browserArrowActiveElementId"], secondaryInputId, "Expected the clicked secondary page input to remain focused after Cmd+Shift+arrows")
     }
 
     func testCmdLOpensBrowserWhenTerminalFocused() {
@@ -1311,365 +1313,6 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return nil
         }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
-    }
-
-    private struct BrowserArrowReport: CustomStringConvertible {
-        let down: Int
-        let up: Int
-        let commandShiftDown: Int
-        let commandShiftUp: Int
-        let active: String
-        let selectionStart: Int?
-        let selectionEnd: Int?
-
-        var description: String {
-            "BrowserArrowReport(down: \(down), up: \(up), commandShiftDown: \(commandShiftDown), commandShiftUp: \(commandShiftUp), active: \(active), selectionStart: \(selectionStart.map(String.init) ?? "nil"), selectionEnd: \(selectionEnd.map(String.init) ?? "nil"))"
-        }
-    }
-
-    private struct BrowserArrowHarness {
-        let report: BrowserArrowReport
-        let primaryInputId: String
-        let secondaryInputId: String
-        let secondaryCenterX: Double
-        let secondaryCenterY: Double
-    }
-
-    private struct BrowserArrowHarnessInstallResult {
-        let harness: BrowserArrowHarness?
-        let diagnostic: String
-    }
-
-    private func installBrowserArrowHarness(surfaceId: String) -> BrowserArrowHarnessInstallResult {
-        let readyResult = browserWaitForArrowHarness(surfaceId: surfaceId)
-        guard readyResult.terminationStatus == 0 else {
-            return BrowserArrowHarnessInstallResult(
-                harness: nil,
-                diagnostic: "browser wait failed with status=\(readyResult.terminationStatus) stdout=\(readyResult.stdout) stderr=\(readyResult.stderr)"
-            )
-        }
-
-        let script = """
-        (() => {
-          const root = document.body || document.documentElement;
-          if (!root) {
-            return JSON.stringify({ error: "missing-root" });
-          }
-          const ensureInput = (id, value) => {
-            const existing = document.getElementById(id);
-            const input = (existing && existing.tagName && existing.tagName.toLowerCase() === "input")
-              ? existing
-              : (() => {
-                  const created = document.createElement("input");
-                  created.id = id;
-                  created.type = "text";
-                  created.value = value;
-                  return created;
-                })();
-            input.autocapitalize = "off";
-            input.autocomplete = "off";
-            input.spellcheck = false;
-            input.style.display = "block";
-            input.style.width = "100%";
-            input.style.margin = "0";
-            input.style.padding = "8px 10px";
-            input.style.border = "1px solid #5f6368";
-            input.style.borderRadius = "6px";
-            input.style.boxSizing = "border-box";
-            input.style.fontSize = "14px";
-            input.style.fontFamily = "system-ui, -apple-system, sans-serif";
-            input.style.background = "white";
-            input.style.color = "black";
-            return input;
-          };
-          let container = document.getElementById("cmux-ui-test-arrow-container");
-          if (!container || !container.tagName || container.tagName.toLowerCase() !== "div") {
-            container = document.createElement("div");
-            container.id = "cmux-ui-test-arrow-container";
-            root.appendChild(container);
-          }
-          container.style.position = "fixed";
-          container.style.left = "24px";
-          container.style.top = "24px";
-          container.style.width = "min(520px, calc(100vw - 48px))";
-          container.style.display = "grid";
-          container.style.rowGap = "12px";
-          container.style.padding = "12px";
-          container.style.background = "rgba(255,255,255,0.92)";
-          container.style.border = "1px solid rgba(95,99,104,0.55)";
-          container.style.borderRadius = "8px";
-          container.style.boxShadow = "0 2px 10px rgba(0,0,0,0.2)";
-          container.style.zIndex = "2147483647";
-          const primary = ensureInput("cmux-ui-test-arrow-input-primary", "cmux-ui-arrow-primary");
-          const secondary = ensureInput("cmux-ui-test-arrow-input-secondary", "cmux-ui-arrow-secondary");
-          if (primary.parentElement !== container) {
-            container.appendChild(primary);
-          }
-          if (secondary.parentElement !== container) {
-            container.appendChild(secondary);
-          }
-          if (!window.__cmuxArrowKeyReport) {
-            window.__cmuxArrowKeyReport = { down: 0, up: 0, commandShiftDown: 0, commandShiftUp: 0 };
-          }
-          if (typeof window.__cmuxArrowKeyReport.commandShiftDown !== "number") {
-            window.__cmuxArrowKeyReport.commandShiftDown = 0;
-          }
-          if (typeof window.__cmuxArrowKeyReport.commandShiftUp !== "number") {
-            window.__cmuxArrowKeyReport.commandShiftUp = 0;
-          }
-          const updateSelection = () => {
-            const active = document.activeElement;
-            return {
-              down: window.__cmuxArrowKeyReport.down,
-              up: window.__cmuxArrowKeyReport.up,
-              commandShiftDown: window.__cmuxArrowKeyReport.commandShiftDown,
-              commandShiftUp: window.__cmuxArrowKeyReport.commandShiftUp,
-              active: active && typeof active.id === "string" ? active.id : "",
-              selectionStart: active && typeof active.selectionStart === "number" ? active.selectionStart : null,
-              selectionEnd: active && typeof active.selectionEnd === "number" ? active.selectionEnd : null
-            };
-          };
-          const install = (element) => {
-            if (!element || element.__cmuxArrowKeyReportInstalled) return;
-            element.__cmuxArrowKeyReportInstalled = true;
-            element.addEventListener("keydown", (event) => {
-              if (event.key === "ArrowDown") window.__cmuxArrowKeyReport.down += 1;
-              if (event.key === "ArrowUp") window.__cmuxArrowKeyReport.up += 1;
-              if (event.key === "ArrowDown" && event.metaKey && event.shiftKey) {
-                window.__cmuxArrowKeyReport.commandShiftDown += 1;
-              }
-              if (event.key === "ArrowUp" && event.metaKey && event.shiftKey) {
-                window.__cmuxArrowKeyReport.commandShiftUp += 1;
-              }
-            }, true);
-          };
-          install(primary);
-          install(secondary);
-          primary.focus({ preventScroll: true });
-          if (typeof primary.setSelectionRange === "function") {
-            const end = primary.value.length;
-            primary.setSelectionRange(end, end);
-          }
-          const secondaryRect = secondary.getBoundingClientRect();
-          const viewportWidth = Math.max(Number(window.innerWidth) || 0, 1);
-          const viewportHeight = Math.max(Number(window.innerHeight) || 0, 1);
-          const secondaryCenterX = Math.min(
-            0.98,
-            Math.max(0.02, (secondaryRect.left + (secondaryRect.width / 2)) / viewportWidth)
-          );
-          const secondaryCenterY = Math.min(
-            0.98,
-            Math.max(0.02, (secondaryRect.top + (secondaryRect.height / 2)) / viewportHeight)
-          );
-          const base = updateSelection();
-          window.cmuxArrowReport = () => updateSelection();
-          return JSON.stringify({
-            down: base.down,
-            up: base.up,
-            commandShiftDown: base.commandShiftDown,
-            commandShiftUp: base.commandShiftUp,
-            active: base.active,
-            selectionStart: base.selectionStart,
-            selectionEnd: base.selectionEnd,
-            primaryId: primary.id || "",
-            secondaryId: secondary.id || "",
-            secondaryCenterX,
-            secondaryCenterY
-          });
-        })();
-        """
-        guard let evalOutput = browserEval(surfaceId: surfaceId, script: script) else {
-            return BrowserArrowHarnessInstallResult(
-                harness: nil,
-                diagnostic: "browser eval failed via control socket"
-            )
-        }
-        guard !evalOutput.isEmpty else {
-            return BrowserArrowHarnessInstallResult(
-                harness: nil,
-                diagnostic: "browser eval returned empty payload"
-            )
-        }
-        guard let data = evalOutput.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return BrowserArrowHarnessInstallResult(
-                harness: nil,
-                diagnostic: "browser eval returned non-JSON payload=\(evalOutput)"
-            )
-        }
-
-        let primaryInputId = (payload["primaryId"] as? String) ?? ""
-        let secondaryInputId = (payload["secondaryId"] as? String) ?? ""
-        let secondaryCenterX = (payload["secondaryCenterX"] as? NSNumber)?.doubleValue ?? -1
-        let secondaryCenterY = (payload["secondaryCenterY"] as? NSNumber)?.doubleValue ?? -1
-        guard !primaryInputId.isEmpty,
-              !secondaryInputId.isEmpty,
-              secondaryCenterX > 0,
-              secondaryCenterX < 1,
-              secondaryCenterY > 0,
-              secondaryCenterY < 1 else {
-            return BrowserArrowHarnessInstallResult(
-                harness: nil,
-                diagnostic: "browser eval returned incomplete payload=\(payload)"
-            )
-        }
-
-        return BrowserArrowHarnessInstallResult(
-            harness: BrowserArrowHarness(
-                report: BrowserArrowReport(
-                    down: (payload["down"] as? NSNumber)?.intValue ?? 0,
-                    up: (payload["up"] as? NSNumber)?.intValue ?? 0,
-                    commandShiftDown: (payload["commandShiftDown"] as? NSNumber)?.intValue ?? 0,
-                    commandShiftUp: (payload["commandShiftUp"] as? NSNumber)?.intValue ?? 0,
-                    active: (payload["active"] as? String) ?? "",
-                    selectionStart: (payload["selectionStart"] as? NSNumber)?.intValue,
-                    selectionEnd: (payload["selectionEnd"] as? NSNumber)?.intValue
-                ),
-                primaryInputId: primaryInputId,
-                secondaryInputId: secondaryInputId,
-                secondaryCenterX: secondaryCenterX,
-                secondaryCenterY: secondaryCenterY
-            ),
-            diagnostic: "ok"
-        )
-    }
-
-    private func browserWaitForArrowHarness(surfaceId: String) -> (terminationStatus: Int32, stdout: String, stderr: String) {
-        var lastValue = "nil"
-        let didBecomeReady = waitForCondition(timeout: 8.0) {
-            guard let value = self.browserEval(
-                surfaceId: surfaceId,
-                script: """
-                (() => {
-                  const ready = String(document.readyState || '') === 'complete';
-                  const hasRoot = !!(document.body || document.documentElement);
-                  return ready && hasRoot ? '1' : '0';
-                })()
-                """
-            ) else {
-                lastValue = "nil"
-                return false
-            }
-            lastValue = value
-            return value == "1"
-        }
-        if didBecomeReady {
-            return (terminationStatus: 0, stdout: lastValue, stderr: "")
-        }
-        return (terminationStatus: 1, stdout: lastValue, stderr: "DOM readiness check did not pass")
-    }
-
-    private func waitForBrowserArrowReport(
-        surfaceId: String,
-        timeout: TimeInterval,
-        predicate: @escaping (BrowserArrowReport) -> Bool
-    ) -> BrowserArrowReport? {
-        var matchedReport: BrowserArrowReport?
-        let didMatch = waitForCondition(timeout: timeout) {
-            guard let report = self.browserArrowReport(surfaceId: surfaceId) else {
-                return false
-            }
-            guard predicate(report) else { return false }
-            matchedReport = report
-            return true
-        }
-        return didMatch ? matchedReport : nil
-    }
-
-    private func browserArrowReport(surfaceId: String, script: String? = nil) -> BrowserArrowReport? {
-        let reportScript = script ?? "JSON.stringify(window.cmuxArrowReport ? window.cmuxArrowReport() : null)"
-        guard let raw = browserEval(surfaceId: surfaceId, script: reportScript),
-              let data = raw.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-
-        return BrowserArrowReport(
-            down: (payload["down"] as? NSNumber)?.intValue ?? 0,
-            up: (payload["up"] as? NSNumber)?.intValue ?? 0,
-            commandShiftDown: (payload["commandShiftDown"] as? NSNumber)?.intValue ?? 0,
-            commandShiftUp: (payload["commandShiftUp"] as? NSNumber)?.intValue ?? 0,
-            active: (payload["active"] as? String) ?? "",
-            selectionStart: (payload["selectionStart"] as? NSNumber)?.intValue,
-            selectionEnd: (payload["selectionEnd"] as? NSNumber)?.intValue
-        )
-    }
-
-    private func browserEval(surfaceId: String, script: String) -> String? {
-        guard let response = browserSocketJSON(
-            method: "browser.eval",
-            params: [
-                "surface_id": surfaceId,
-                "script": script
-            ]
-        )
-        else {
-            return nil
-        }
-        guard (response["ok"] as? Bool) == true,
-              let result = response["result"] as? [String: Any],
-              let value = result["value"] else {
-            return nil
-        }
-        if value is NSNull {
-            return "null"
-        }
-        if let stringValue = value as? String {
-            return stringValue
-        }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value),
-              let json = String(data: data, encoding: .utf8) else {
-            return String(describing: value)
-        }
-        return json
-    }
-
-    private func browserSocketJSON(
-        method: String,
-        params: [String: Any],
-        responseTimeout: TimeInterval = 8.0
-    ) -> [String: Any]? {
-        let request: [String: Any] = [
-            "id": UUID().uuidString,
-            "method": method,
-            "params": params
-        ]
-        return ControlSocketClient(path: socketPath, responseTimeout: responseTimeout).sendJSON(request)
-    }
-
-    private func browserSocketErrorDescription(_ response: [String: Any]) -> String {
-        guard let error = response["error"] as? [String: Any] else {
-            return "Unknown error"
-        }
-        let code = (error["code"] as? String) ?? "unknown"
-        let message = (error["message"] as? String) ?? "missing message"
-        if let data = error["data"],
-           JSONSerialization.isValidJSONObject(data),
-           let encoded = try? JSONSerialization.data(withJSONObject: data),
-           let json = String(data: encoded, encoding: .utf8) {
-            return "\(code): \(message) data=\(json)"
-        }
-        return "\(code): \(message)"
-    }
-
-    private func browserSocketResultDescription(_ response: [String: Any]) -> String? {
-        guard let result = response["result"] else { return nil }
-        guard JSONSerialization.isValidJSONObject(result),
-              let data = try? JSONSerialization.data(withJSONObject: result),
-              let json = String(data: data, encoding: .utf8) else {
-            return String(describing: result)
-        }
-        return json
-    }
-
-    private func javaScriptLiteral(_ value: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: [value]),
-              let arrayLiteral = String(data: data, encoding: .utf8),
-              arrayLiteral.count >= 2 else {
-            return "null"
-        }
-        return String(arrayLiteral.dropFirst().dropLast())
     }
 
     private func waitForCondition(timeout: TimeInterval, predicate: @escaping () -> Bool) -> Bool {
