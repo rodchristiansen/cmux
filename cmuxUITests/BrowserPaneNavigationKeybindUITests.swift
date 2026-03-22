@@ -376,6 +376,15 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         }
 
         XCTAssertEqual(setup["webInputFocusSeeded"], "true", "Expected test page input to be focused before arrow-key checks")
+        guard let browserPanelId = setup["browserPanelId"], !browserPanelId.isEmpty else {
+            XCTFail("Missing browserPanelId in setup data")
+            return
+        }
+        let browserArrowHarnessResult = installBrowserArrowHarness(surfaceId: browserPanelId)
+        guard browserArrowHarnessResult.harness != nil else {
+            XCTFail("Expected browser arrow harness to install. diagnostic=\(browserArrowHarnessResult.diagnostic)")
+            return
+        }
 
         guard let primaryInputId = setup["webInputFocusElementId"], !primaryInputId.isEmpty else {
             XCTFail("Missing webInputFocusElementId in setup data")
@@ -529,7 +538,47 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return
         }
 
+        guard let baselineReport = browserArrowReport(surfaceId: browserPanelId) else {
+            XCTFail("Expected browser arrow harness report before Cmd+Shift+arrow check")
+            return
+        }
+
+        simulateShortcut("cmdShiftDown", app: app)
+        guard let postCmdLCommandShiftDownReport = waitForBrowserArrowReport(
+            surfaceId: browserPanelId,
+            timeout: 5.0,
+            predicate: { report in
+                report.active == secondaryInputId &&
+                    report.commandShiftDown == baselineReport.commandShiftDown + 1 &&
+                    report.commandShiftUp == baselineReport.commandShiftUp
+            }
+        ) else {
+            XCTFail(
+                "Expected Cmd+Shift+Down after Cmd+L and page click to reach the secondary page input. " +
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+            )
+            return
+        }
+
+        simulateShortcut("cmdShiftUp", app: app)
+        guard let postCmdLCommandShiftUpReport = waitForBrowserArrowReport(
+            surfaceId: browserPanelId,
+            timeout: 5.0,
+            predicate: { report in
+                report.active == secondaryInputId &&
+                    report.commandShiftDown == postCmdLCommandShiftDownReport.commandShiftDown &&
+                    report.commandShiftUp == postCmdLCommandShiftDownReport.commandShiftUp + 1
+            }
+        ) else {
+            XCTFail(
+                "Expected Cmd+Shift+Up after Cmd+L and page click to reach the secondary page input. " +
+                "report=\(String(describing: browserArrowReport(surfaceId: browserPanelId)))"
+            )
+            return
+        }
+
         XCTAssertEqual(postCmdLUpSnapshot["browserArrowActiveElementId"], secondaryInputId, "Expected the clicked secondary page input to remain focused")
+        XCTAssertEqual(postCmdLCommandShiftUpReport.active, secondaryInputId, "Expected the clicked secondary page input to remain focused after Cmd+Shift+arrows")
     }
 
     func testCmdLOpensBrowserWhenTerminalFocused() {
@@ -1248,6 +1297,10 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
         case "up":
             app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
+        case "cmdShiftDown":
+            app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [.command, .shift])
+        case "cmdShiftUp":
+            app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [.command, .shift])
         default:
             XCTFail("Unsupported test shortcut combo \(combo)")
         }
@@ -1263,12 +1316,14 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     private struct BrowserArrowReport: CustomStringConvertible {
         let down: Int
         let up: Int
+        let commandShiftDown: Int
+        let commandShiftUp: Int
         let active: String
         let selectionStart: Int?
         let selectionEnd: Int?
 
         var description: String {
-            "BrowserArrowReport(down: \(down), up: \(up), active: \(active), selectionStart: \(selectionStart.map(String.init) ?? "nil"), selectionEnd: \(selectionEnd.map(String.init) ?? "nil"))"
+            "BrowserArrowReport(down: \(down), up: \(up), commandShiftDown: \(commandShiftDown), commandShiftUp: \(commandShiftUp), active: \(active), selectionStart: \(selectionStart.map(String.init) ?? "nil"), selectionEnd: \(selectionEnd.map(String.init) ?? "nil"))"
         }
     }
 
@@ -1354,13 +1409,21 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             container.appendChild(secondary);
           }
           if (!window.__cmuxArrowKeyReport) {
-            window.__cmuxArrowKeyReport = { down: 0, up: 0 };
+            window.__cmuxArrowKeyReport = { down: 0, up: 0, commandShiftDown: 0, commandShiftUp: 0 };
+          }
+          if (typeof window.__cmuxArrowKeyReport.commandShiftDown !== "number") {
+            window.__cmuxArrowKeyReport.commandShiftDown = 0;
+          }
+          if (typeof window.__cmuxArrowKeyReport.commandShiftUp !== "number") {
+            window.__cmuxArrowKeyReport.commandShiftUp = 0;
           }
           const updateSelection = () => {
             const active = document.activeElement;
             return {
               down: window.__cmuxArrowKeyReport.down,
               up: window.__cmuxArrowKeyReport.up,
+              commandShiftDown: window.__cmuxArrowKeyReport.commandShiftDown,
+              commandShiftUp: window.__cmuxArrowKeyReport.commandShiftUp,
               active: active && typeof active.id === "string" ? active.id : "",
               selectionStart: active && typeof active.selectionStart === "number" ? active.selectionStart : null,
               selectionEnd: active && typeof active.selectionEnd === "number" ? active.selectionEnd : null
@@ -1372,6 +1435,12 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             element.addEventListener("keydown", (event) => {
               if (event.key === "ArrowDown") window.__cmuxArrowKeyReport.down += 1;
               if (event.key === "ArrowUp") window.__cmuxArrowKeyReport.up += 1;
+              if (event.key === "ArrowDown" && event.metaKey && event.shiftKey) {
+                window.__cmuxArrowKeyReport.commandShiftDown += 1;
+              }
+              if (event.key === "ArrowUp" && event.metaKey && event.shiftKey) {
+                window.__cmuxArrowKeyReport.commandShiftUp += 1;
+              }
             }, true);
           };
           install(primary);
@@ -1397,6 +1466,8 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
           return JSON.stringify({
             down: base.down,
             up: base.up,
+            commandShiftDown: base.commandShiftDown,
+            commandShiftUp: base.commandShiftUp,
             active: base.active,
             selectionStart: base.selectionStart,
             selectionEnd: base.selectionEnd,
@@ -1448,6 +1519,8 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
                 report: BrowserArrowReport(
                     down: (payload["down"] as? NSNumber)?.intValue ?? 0,
                     up: (payload["up"] as? NSNumber)?.intValue ?? 0,
+                    commandShiftDown: (payload["commandShiftDown"] as? NSNumber)?.intValue ?? 0,
+                    commandShiftUp: (payload["commandShiftUp"] as? NSNumber)?.intValue ?? 0,
                     active: (payload["active"] as? String) ?? "",
                     selectionStart: (payload["selectionStart"] as? NSNumber)?.intValue,
                     selectionEnd: (payload["selectionEnd"] as? NSNumber)?.intValue
@@ -1514,6 +1587,8 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         return BrowserArrowReport(
             down: (payload["down"] as? NSNumber)?.intValue ?? 0,
             up: (payload["up"] as? NSNumber)?.intValue ?? 0,
+            commandShiftDown: (payload["commandShiftDown"] as? NSNumber)?.intValue ?? 0,
+            commandShiftUp: (payload["commandShiftUp"] as? NSNumber)?.intValue ?? 0,
             active: (payload["active"] as? String) ?? "",
             selectionStart: (payload["selectionStart"] as? NSNumber)?.intValue,
             selectionEnd: (payload["selectionEnd"] as? NSNumber)?.intValue

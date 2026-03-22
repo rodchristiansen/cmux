@@ -2463,32 +2463,28 @@ final class BrowserReturnKeyDownRoutingTests: XCTestCase {
     }
 }
 
-final class BrowserArrowKeyDownRoutingTests: XCTestCase {
-    func testRoutesForDownArrowWhenBrowserWebViewIsFirstResponder() {
+final class BrowserDirectKeyDownRoutingTests: XCTestCase {
+    func testRoutesWhenBrowserWebViewIsFirstResponder() {
         let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
 
         XCTAssertTrue(
-            shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-                keyCode: 125,
+            shouldDirectRouteBrowserFirstResponderKeyDown(
                 firstResponder: webView,
                 firstResponderIsBrowser: true,
-                focusedBrowserAddressBarPanelId: nil,
-                flags: []
+                focusedBrowserAddressBarPanelId: nil
             )
         )
     }
 
-    func testRoutesForUpArrowWhenBrowserFieldEditorIsFirstResponder() {
+    func testRoutesWhenBrowserFieldEditorIsFirstResponder() {
         let fieldEditor = NSTextView(frame: .zero)
         fieldEditor.isFieldEditor = true
 
         XCTAssertTrue(
-            shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-                keyCode: 126,
+            shouldDirectRouteBrowserFirstResponderKeyDown(
                 firstResponder: fieldEditor,
                 firstResponderIsBrowser: true,
-                focusedBrowserAddressBarPanelId: nil,
-                flags: []
+                focusedBrowserAddressBarPanelId: nil
             )
         )
     }
@@ -2497,26 +2493,22 @@ final class BrowserArrowKeyDownRoutingTests: XCTestCase {
         let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
 
         XCTAssertFalse(
-            shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-                keyCode: 125,
+            shouldDirectRouteBrowserFirstResponderKeyDown(
                 firstResponder: webView,
                 firstResponderIsBrowser: true,
-                focusedBrowserAddressBarPanelId: UUID(),
-                flags: []
+                focusedBrowserAddressBarPanelId: UUID()
             )
         )
     }
 
-    func testDoesNotRouteForCommandModifiedArrow() {
-        let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
+    func testDoesNotRouteWhenFirstResponderIsNotBrowser() {
+        let view = NSView(frame: .zero)
 
         XCTAssertFalse(
-            shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-                keyCode: 125,
-                firstResponder: webView,
-                firstResponderIsBrowser: true,
-                focusedBrowserAddressBarPanelId: nil,
-                flags: [.command]
+            shouldDirectRouteBrowserFirstResponderKeyDown(
+                firstResponder: view,
+                firstResponderIsBrowser: false,
+                focusedBrowserAddressBarPanelId: nil
             )
         )
     }

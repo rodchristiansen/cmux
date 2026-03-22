@@ -1504,24 +1504,16 @@ func shouldDispatchBrowserReturnViaFirstResponderKeyDown(
 ) -> Bool {
     guard firstResponderIsBrowser else { return false }
     guard keyCode == 36 || keyCode == 76 else { return false }
-    // Keep browser Return forwarding narrow: only plain/Shift Return should be
-    // treated as submit-intent. Command-modified Return is reserved for app shortcuts
-    // like Toggle Pane Zoom (Cmd+Shift+Enter).
     return browserOmnibarShouldSubmitOnReturn(flags: flags)
 }
 
-func shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-    keyCode: UInt16,
+func shouldDirectRouteBrowserFirstResponderKeyDown(
     firstResponder: NSResponder?,
     firstResponderIsBrowser: Bool,
-    focusedBrowserAddressBarPanelId: UUID?,
-    flags: NSEvent.ModifierFlags
+    focusedBrowserAddressBarPanelId: UUID?
 ) -> Bool {
     guard firstResponderIsBrowser else { return false }
     guard focusedBrowserAddressBarPanelId == nil else { return false }
-    let normalizedFlags = browserOmnibarNormalizedModifierFlags(flags)
-    guard normalizedFlags == [] else { return false }
-    guard keyCode == 125 || keyCode == 126 else { return false }
     return firstResponder != nil
 }
 
@@ -12295,7 +12287,7 @@ private var cmuxFirstResponderGuardHitViewOverride: NSView?
 private var cmuxFirstResponderGuardCurrentEventContext: NSEvent?
 private var cmuxFirstResponderGuardHitViewContext: NSView?
 private var cmuxFirstResponderGuardContextWindowNumber: Int?
-private var cmuxBrowserReturnForwardingDepth = 0
+private var cmuxBrowserKeyDownForwardingDepth = 0
 private var cmuxWindowFirstResponderBypassDepth = 0
 private var cmuxFieldEditorOwningWebViewAssociationKey: UInt8 = 0
 
@@ -12318,6 +12310,11 @@ private final class CmuxFieldEditorOwningWebViewBox: NSObject {
     init(webView: CmuxWebView?) {
         self.webView = webView
     }
+}
+
+private struct CmuxBrowserFirstResponderKeyRoute {
+    let webView: CmuxWebView
+    let keyDownTarget: NSResponder
 }
 
 private extension NSApplication {
@@ -12359,6 +12356,87 @@ private extension AppDelegate {
 }
 
 private extension NSWindow {
+    static func cmuxBrowserFirstResponderKeyRoute(
+        for firstResponder: NSResponder?,
+        in window: NSWindow,
+        event: NSEvent?
+    ) -> CmuxBrowserFirstResponderKeyRoute? {
+        guard let firstResponder else { return nil }
+        guard let webView = cmuxOwningWebView(for: firstResponder, in: window, event: event) else {
+            return nil
+        }
+
+        let keyDownTarget: NSResponder
+        if let textView = firstResponder as? NSTextView, textView.isFieldEditor {
+            keyDownTarget = textView
+        } else {
+            keyDownTarget = webView
+        }
+
+        return CmuxBrowserFirstResponderKeyRoute(
+            webView: webView,
+            keyDownTarget: keyDownTarget
+        )
+    }
+
+    func cmuxDirectlyHandleBrowserFirstResponderKeyDown(
+        _ event: NSEvent,
+        invokedFromPerformKeyEquivalent: Bool = false
+    ) -> Bool {
+        guard event.type == .keyDown else { return false }
+        guard let browserRoute = Self.cmuxBrowserFirstResponderKeyRoute(
+            for: self.firstResponder,
+            in: self,
+            event: event
+        ) else {
+            return false
+        }
+        guard shouldDirectRouteBrowserFirstResponderKeyDown(
+            firstResponder: self.firstResponder,
+            firstResponderIsBrowser: true,
+            focusedBrowserAddressBarPanelId: AppDelegate.shared?.focusedBrowserAddressBarPanelId()
+        ) else {
+            return false
+        }
+
+        if browserRoute.webView.performKeyEquivalent(with: event) {
+#if DEBUG
+            let targetType = String(describing: type(of: browserRoute.webView))
+            dlog("window.browserKeyDirect route=performKeyEquivalent target=\(targetType)")
+#endif
+            return true
+        }
+
+        if invokedFromPerformKeyEquivalent {
+            if cmuxBrowserKeyDownForwardingDepth > 0 {
+#if DEBUG
+                dlog("window.browserKeyDirect route=performKeyEquivalentReentry")
+#endif
+                return false
+            }
+            do {
+                cmuxBrowserKeyDownForwardingDepth += 1
+                defer {
+                    cmuxBrowserKeyDownForwardingDepth = max(0, cmuxBrowserKeyDownForwardingDepth - 1)
+                }
+
+#if DEBUG
+                let targetType = String(describing: type(of: browserRoute.keyDownTarget))
+                dlog("window.browserKeyDirect route=keyDown target=\(targetType)")
+#endif
+                browserRoute.keyDownTarget.keyDown(with: event)
+                return true
+            }
+        }
+
+#if DEBUG
+        let targetType = String(describing: type(of: browserRoute.keyDownTarget))
+        dlog("window.browserKeyDirect route=keyDown target=\(targetType)")
+#endif
+        browserRoute.keyDownTarget.keyDown(with: event)
+        return true
+    }
+
     @objc func cmux_makeFirstResponder(_ responder: NSResponder?) -> Bool {
         if cmuxIsWindowFirstResponderBypassActive() {
 #if DEBUG
@@ -12533,30 +12611,8 @@ private extension NSWindow {
             cmuxFirstResponderGuardContextWindowNumber = previousContextWindowNumber
         }
 
-        if event.type == .keyDown {
-            let firstResponderWebView = self.firstResponder.flatMap {
-                Self.cmuxOwningWebView(for: $0, in: self, event: event)
-            }
-            if shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-                keyCode: event.keyCode,
-                firstResponder: self.firstResponder,
-                firstResponderIsBrowser: firstResponderWebView != nil,
-                focusedBrowserAddressBarPanelId: AppDelegate.shared?.focusedBrowserAddressBarPanelId(),
-                flags: event.modifierFlags
-            ) {
-                let browserArrowTarget: NSResponder?
-                if let textView = self.firstResponder as? NSTextView, textView.isFieldEditor {
-                    browserArrowTarget = textView
-                } else {
-                    browserArrowTarget = firstResponderWebView
-                }
-#if DEBUG
-                let targetType = browserArrowTarget.map { String(describing: type(of: $0)) } ?? "nil"
-                dlog("window.sendEvent browser arrow routed to keyDown target=\(targetType)")
-#endif
-                browserArrowTarget?.keyDown(with: event)
-                return
-            }
+        if cmuxDirectlyHandleBrowserFirstResponderKeyDown(event) {
+            return
         }
 
         guard shouldSuppressWindowMoveForFolderDrag(window: self, event: event),
@@ -12638,9 +12694,6 @@ private extension NSWindow {
         // (handleCustomShortcut) already handles app-level shortcuts, and anything
         // remaining should be menu items.
         let firstResponderGhosttyView = cmuxOwningGhosttyView(for: self.firstResponder)
-        let firstResponderWebView = self.firstResponder.flatMap {
-            Self.cmuxOwningWebView(for: $0, in: self, event: event)
-        }
         if let ghosttyView = firstResponderGhosttyView {
             // If the IME is composing and the key has no Cmd modifier, don't intercept —
             // let it flow through normal AppKit event dispatch so the input method can
@@ -12677,57 +12730,10 @@ private extension NSWindow {
             }
         }
 
-        // Web forms rely on Return/Enter flowing through keyDown. If the original
-        // NSWindow.performKeyEquivalent consumes Enter first, submission never reaches
-        // WebKit. Route Return/Enter directly to the current first responder and
-        // mark handled to avoid the AppKit alert sound path.
-        if shouldDispatchBrowserReturnViaFirstResponderKeyDown(
-            keyCode: event.keyCode,
-            firstResponderIsBrowser: firstResponderWebView != nil,
-            flags: event.modifierFlags
+        if cmuxDirectlyHandleBrowserFirstResponderKeyDown(
+            event,
+            invokedFromPerformKeyEquivalent: true
         ) {
-            // Forwarding keyDown can re-enter performKeyEquivalent in WebKit/AppKit internals.
-            // On re-entry, fall back to normal dispatch to avoid an infinite loop.
-            if cmuxBrowserReturnForwardingDepth > 0 {
-#if DEBUG
-                dlog("  → browser Return/Enter reentry; using normal dispatch")
-#endif
-                return false
-            }
-            cmuxBrowserReturnForwardingDepth += 1
-            defer { cmuxBrowserReturnForwardingDepth = max(0, cmuxBrowserReturnForwardingDepth - 1) }
-#if DEBUG
-            dlog("  → browser Return/Enter routed to firstResponder.keyDown")
-#endif
-            self.firstResponder?.keyDown(with: event)
-            return true
-        }
-
-        if AppDelegate.shared?.handleBrowserSurfaceKeyEquivalent(event) == true {
-#if DEBUG
-            dlog("  → consumed by handleBrowserSurfaceKeyEquivalent")
-#endif
-            return true
-        }
-
-        if shouldDispatchBrowserArrowViaFirstResponderKeyDown(
-            keyCode: event.keyCode,
-            firstResponder: self.firstResponder,
-            firstResponderIsBrowser: firstResponderWebView != nil,
-            focusedBrowserAddressBarPanelId: AppDelegate.shared?.focusedBrowserAddressBarPanelId(),
-            flags: event.modifierFlags
-        ) {
-            let browserArrowTarget: NSResponder?
-            if let textView = self.firstResponder as? NSTextView, textView.isFieldEditor {
-                browserArrowTarget = textView
-            } else {
-                browserArrowTarget = firstResponderWebView
-            }
-#if DEBUG
-            let targetType = browserArrowTarget.map { String(describing: type(of: $0)) } ?? "nil"
-            dlog("  → browser arrow routed to keyDown target=\(targetType)")
-#endif
-            browserArrowTarget?.keyDown(with: event)
             return true
         }
 
