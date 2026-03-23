@@ -68,6 +68,8 @@ pub fn dispatch(service: *session_service.Service, req: *const json_rpc.Request)
     if (std.mem.eql(u8, req.method, "session.resize")) return handleSessionResize(service, req);
     if (std.mem.eql(u8, req.method, "session.detach")) return handleSessionDetach(service, req);
     if (std.mem.eql(u8, req.method, "session.status")) return handleSessionStatus(service, req);
+    if (std.mem.eql(u8, req.method, "session.list")) return handleSessionList(service, req);
+    if (std.mem.eql(u8, req.method, "session.history")) return handleSessionHistory(service, req);
     if (std.mem.eql(u8, req.method, "terminal.open")) return handleTerminalOpen(service, req);
     if (std.mem.eql(u8, req.method, "terminal.read")) return handleTerminalRead(service, req);
     if (std.mem.eql(u8, req.method, "terminal.write")) return handleTerminalWrite(service, req);
@@ -223,6 +225,40 @@ fn handleSessionStatus(service: *session_service.Service, req: *const json_rpc.R
     var status = service.sessionStatus(session_id) catch |err| return sessionErrorResponse(service.alloc, req.id, err);
     defer status.deinit(service.alloc);
     return encodeStatusResponse(service.alloc, req.id, status, null, null);
+}
+
+fn handleSessionList(service: *session_service.Service, req: *const json_rpc.Request) ![]u8 {
+    const sessions = try service.listSessions();
+    defer {
+        for (sessions) |*entry| entry.deinit(service.alloc);
+        service.alloc.free(sessions);
+    }
+
+    return try json_rpc.encodeResponse(service.alloc, .{
+        .id = req.id,
+        .ok = true,
+        .result = .{ .sessions = sessions },
+    });
+}
+
+fn handleSessionHistory(service: *session_service.Service, req: *const json_rpc.Request) ![]u8 {
+    const params = getParamsObject(req) orelse return invalidParams(service.alloc, req.id, "session.history requires params");
+    const session_id = getRequiredStringParam(params, "session_id", "session.history requires session_id") catch |err| return paramError(service.alloc, req.id, err);
+
+    const history = service.history(session_id, .plain) catch |err| switch (err) {
+        error.TerminalSessionNotFound => return terminalNotFound(service.alloc, req.id),
+        else => return internalError(service.alloc, req.id, err),
+    };
+    defer service.alloc.free(history);
+
+    return try json_rpc.encodeResponse(service.alloc, .{
+        .id = req.id,
+        .ok = true,
+        .result = .{
+            .session_id = session_id,
+            .history = history,
+        },
+    });
 }
 
 fn handleTerminalOpen(service: *session_service.Service, req: *const json_rpc.Request) ![]u8 {

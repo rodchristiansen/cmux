@@ -1,6 +1,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 const cli_relay = @import("cli_relay.zig");
+const cli_session = @import("cli_session.zig");
 const serve_tls = @import("serve_tls.zig");
 const serve_unix = @import("serve_unix.zig");
 const ticket_auth = @import("ticket_auth.zig");
@@ -54,6 +55,9 @@ fn run(args: []const []const u8) !u8 {
     if (std.mem.eql(u8, command, "cli")) {
         return cli_relay.run(if (args.len > 2) args[2..] else &.{}, stderr);
     }
+    if (std.mem.eql(u8, command, "session")) {
+        return cli_session.run(if (args.len > 2) args[2..] else &.{}, stderr, stdout);
+    }
     if (std.mem.eql(u8, command, "serve")) {
         if (args.len == 3 and std.mem.eql(u8, args[2], "--stdio")) {
             try serve_stdio.serve();
@@ -85,6 +89,7 @@ fn usage(stderr: anytype) !void {
     try stderr.print("  cmuxd-remote serve --unix --socket <path>\n", .{});
     try stderr.print("  cmuxd-remote serve --tls --listen <addr> --server-id <id> --ticket-secret <secret> --cert-file <path> --key-file <path>\n", .{});
     try stderr.print("  cmuxd-remote cli <command> [args...]\n", .{});
+    try stderr.print("  cmuxd-remote session <command> [args...]\n", .{});
     try stderr.flush();
 }
 

@@ -7,7 +7,7 @@ pub const HistoryFormat = enum(u8) {
     html = 2,
 };
 
-pub fn serializeTerminalState(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]const u8 {
+pub fn serializeTerminalState(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]u8 {
     var builder: std.Io.Writer.Allocating = .init(alloc);
     defer builder.deinit();
 
@@ -36,7 +36,7 @@ pub fn serializeTerminalState(alloc: std.mem.Allocator, term: *ghostty_vt.Termin
     return alloc.dupe(u8, output) catch null;
 }
 
-pub fn serializeTerminal(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal, format: HistoryFormat) ?[]const u8 {
+pub fn serializeTerminal(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal, format: HistoryFormat) ?[]u8 {
     var builder: std.Io.Writer.Allocating = .init(alloc);
     defer builder.deinit();
 

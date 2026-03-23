@@ -176,6 +176,10 @@ pub const Service = struct {
         return self.registry.status(session_id);
     }
 
+    pub fn listSessions(self: *Service) ![]session_registry.SessionListEntry {
+        return self.registry.list();
+    }
+
     pub fn openTerminal(self: *Service, maybe_session_id: ?[]const u8, command: []const u8, cols: u16, rows: u16) !OpenTerminalResult {
         const opened = try self.registry.open(maybe_session_id, cols, rows);
         errdefer {

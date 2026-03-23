@@ -274,6 +274,16 @@ func (c *unixJSONRPCClient) Call(t *testing.T, payload map[string]any) map[strin
 	return writeAndReadJSONWithReader(t, c.conn, c.reader, payload)
 }
 
+func (c *unixJSONRPCClient) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	err := c.conn.Close()
+	c.conn = nil
+	c.reader = nil
+	return err
+}
+
 type tlsDaemonServer struct {
 	Addr         string
 	ServerID     string

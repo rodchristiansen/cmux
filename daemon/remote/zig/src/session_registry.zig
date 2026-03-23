@@ -20,6 +20,17 @@ pub const SessionStatus = struct {
     }
 };
 
+pub const SessionListEntry = struct {
+    session_id: []const u8,
+    attachment_count: usize,
+    effective_cols: u16,
+    effective_rows: u16,
+
+    pub fn deinit(self: *SessionListEntry, alloc: std.mem.Allocator) void {
+        alloc.free(self.session_id);
+    }
+};
+
 const AttachmentState = struct {
     cols: u16,
     rows: u16,
@@ -168,6 +179,29 @@ pub const Registry = struct {
             .last_known_rows = session.last_known_rows,
         };
     }
+
+    pub fn list(self: *Registry) ![]SessionListEntry {
+        var sessions = std.ArrayList(SessionListEntry).empty;
+        defer sessions.deinit(self.alloc);
+
+        var iter = self.sessions.iterator();
+        while (iter.next()) |entry| {
+            try sessions.append(self.alloc, .{
+                .session_id = try self.alloc.dupe(u8, entry.key_ptr.*),
+                .attachment_count = entry.value_ptr.attachments.count(),
+                .effective_cols = entry.value_ptr.effective_cols,
+                .effective_rows = entry.value_ptr.effective_rows,
+            });
+        }
+
+        std.mem.sort(SessionListEntry, sessions.items, {}, struct {
+            fn lessThan(_: void, a: SessionListEntry, b: SessionListEntry) bool {
+                return std.mem.order(u8, a.session_id, b.session_id) == .lt;
+            }
+        }.lessThan);
+
+        return sessions.toOwnedSlice(self.alloc);
+    }
 };
 
 fn recompute(session: *SessionState) void {
@@ -286,4 +320,27 @@ test "ensure without id leaves session attachable" {
 
     try std.testing.expectEqual(@as(usize, 1), status.attachments.len);
     try std.testing.expectEqualStrings("att-fixture", status.attachments[0].attachment_id);
+}
+
+test "list returns sessions sorted by id" {
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const zebra = try registry.open("zebra", 80, 24);
+    defer std.testing.allocator.free(zebra.session_id);
+    defer std.testing.allocator.free(zebra.attachment_id);
+
+    const alpha = try registry.open("alpha", 90, 30);
+    defer std.testing.allocator.free(alpha.session_id);
+    defer std.testing.allocator.free(alpha.attachment_id);
+
+    const sessions = try registry.list();
+    defer {
+        for (sessions) |*entry| entry.deinit(std.testing.allocator);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    try std.testing.expectEqualStrings("alpha", sessions[0].session_id);
+    try std.testing.expectEqualStrings("zebra", sessions[1].session_id);
 }
