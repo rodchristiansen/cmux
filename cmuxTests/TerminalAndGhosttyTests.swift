@@ -1510,6 +1510,34 @@ final class WindowTerminalHostViewTests: XCTestCase {
 
     private final class BonsplitMockSplitDelegate: NSObject, NSSplitViewDelegate {}
 
+    private func makeHostedTerminalView(frame: NSRect) -> GhosttySurfaceScrollView {
+        let surfaceView = GhosttyNSView(frame: frame)
+        let hostedView = GhosttySurfaceScrollView(surfaceView: surfaceView)
+        hostedView.frame = frame
+        hostedView.autoresizingMask = [.width, .height]
+        return hostedView
+    }
+
+    private func assertHitFallsInsideHostedTerminal(
+        _ hitView: NSView?,
+        hostedView: GhosttySurfaceScrollView,
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let hitView else {
+            XCTFail(message, file: file, line: line)
+            return
+        }
+
+        XCTAssertTrue(
+            hitView === hostedView || hitView.isDescendant(of: hostedView),
+            message,
+            file: file,
+            line: line
+        )
+    }
+
     func testHostViewPassesThroughWhenNoTerminalSubviewIsHit() {
         let host = WindowTerminalHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
 
@@ -1555,9 +1583,8 @@ final class WindowTerminalHostViewTests: XCTestCase {
 
         let host = WindowTerminalHostView(frame: contentView.bounds)
         host.autoresizingMask = [.width, .height]
-        let child = CapturingView(frame: host.bounds)
-        child.autoresizingMask = [.width, .height]
-        host.addSubview(child)
+        let hostedView = makeHostedTerminalView(frame: host.bounds)
+        host.addSubview(hostedView)
         contentView.addSubview(host)
 
         let dividerPointInSplit = NSPoint(
@@ -1575,7 +1602,11 @@ final class WindowTerminalHostViewTests: XCTestCase {
         let contentPointInSplit = NSPoint(x: dividerPointInSplit.x + 40, y: splitView.bounds.midY)
         let contentPointInWindow = splitView.convert(contentPointInSplit, to: nil)
         let contentPointInHost = host.convert(contentPointInWindow, from: nil)
-        XCTAssertTrue(host.hitTest(contentPointInHost) === child)
+        assertHitFallsInsideHostedTerminal(
+            host.hitTest(contentPointInHost),
+            hostedView: hostedView,
+            message: "Terminal content should keep receiving hits after the divider region"
+        )
     }
 
     func testHostViewStopsSidebarPassThroughJustInsideTerminalContent() {
@@ -1609,9 +1640,8 @@ final class WindowTerminalHostViewTests: XCTestCase {
 
         let host = WindowTerminalHostView(frame: contentView.bounds)
         host.autoresizingMask = [.width, .height]
-        let child = CapturingView(frame: host.bounds)
-        child.autoresizingMask = [.width, .height]
-        host.addSubview(child)
+        let hostedView = makeHostedTerminalView(frame: host.bounds)
+        host.addSubview(hostedView)
         contentView.addSubview(host)
 
         let dividerPointInSplit = NSPoint(
@@ -1634,9 +1664,10 @@ final class WindowTerminalHostViewTests: XCTestCase {
             x: dividerPointInHost.x + terminalSideOverlapWidth + 1,
             y: dividerPointInHost.y
         )
-        XCTAssertTrue(
-            host.hitTest(textSelectionPoint) === child,
-            "Once the pointer moves past the reduced terminal-side overlap, terminal content should win hit-testing"
+        assertHitFallsInsideHostedTerminal(
+            host.hitTest(textSelectionPoint),
+            hostedView: hostedView,
+            message: "Once the pointer moves past the reduced terminal-side overlap, terminal content should win hit-testing"
         )
     }
 }
