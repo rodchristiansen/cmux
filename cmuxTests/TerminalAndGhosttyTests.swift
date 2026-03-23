@@ -1792,6 +1792,27 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
             return
         }
 
+        func assertPendingSurfaceWidth(
+            _ expectedWidth: CGFloat,
+            _ message: String,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            guard let pendingSurfaceWidth = hostedView.debugPendingSurfaceSize()?.width else {
+                XCTFail("Expected a pending terminal surface size", file: file, line: line)
+                return
+            }
+
+            XCTAssertEqual(
+                pendingSurfaceWidth,
+                expectedWidth,
+                accuracy: 0.5,
+                message,
+                file: file,
+                line: line
+            )
+        }
+
         let initialContentWidth = scrollView.contentSize.width
         XCTAssertEqual(initialSurfaceSize.width, initialContentWidth, accuracy: 0.5)
 
@@ -1803,10 +1824,8 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
             initialContentWidth,
             "Legacy scrollbars should reserve width in the scroll view content area"
         )
-        XCTAssertEqual(
-            hostedView.debugPendingSurfaceSize()?.width,
+        assertPendingSurfaceWidth(
             initialSurfaceSize.width,
-            accuracy: 0.5,
             "Changing the scroll view style alone should leave the terminal grid stale until the scroller-style observer runs"
         )
 
@@ -1814,10 +1833,8 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
         XCTAssertEqual(scrollView.scrollerStyle, .legacy)
-        XCTAssertEqual(
-            hostedView.debugPendingSurfaceSize()?.width,
+        assertPendingSurfaceWidth(
             legacyContentWidth,
-            accuracy: 0.5,
             "Preferred scroller style changes should recalculate the terminal grid width immediately"
         )
 
@@ -1829,10 +1846,8 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
             legacyContentWidth,
             "Overlay scrollbars should restore the full terminal content width"
         )
-        XCTAssertEqual(
-            hostedView.debugPendingSurfaceSize()?.width,
+        assertPendingSurfaceWidth(
             legacyContentWidth,
-            accuracy: 0.5,
             "Changing the scroll view style alone should leave the terminal grid stale until the scroller-style observer runs"
         )
 
@@ -1840,10 +1855,8 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
         XCTAssertEqual(scrollView.scrollerStyle, .overlay)
-        XCTAssertEqual(
-            hostedView.debugPendingSurfaceSize()?.width,
+        assertPendingSurfaceWidth(
             overlayContentWidth,
-            accuracy: 0.5,
             "Preferred scroller style changes should also restore the wider terminal grid when overlay scrollbars return"
         )
     }
