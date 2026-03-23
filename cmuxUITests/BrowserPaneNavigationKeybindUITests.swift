@@ -5,6 +5,7 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
     private var dataPath = ""
     private var socketPath = ""
     private var launchDiagnosticsPath = ""
+    private var launchTag = ""
 
     override func setUp() {
         super.setUp()
@@ -15,6 +16,7 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         try? FileManager.default.removeItem(atPath: socketPath)
         launchDiagnosticsPath = "/tmp/cmux-ui-test-launch-\(UUID().uuidString).json"
         try? FileManager.default.removeItem(atPath: launchDiagnosticsPath)
+        launchTag = "ui-tests-browser-nav-\(UUID().uuidString.prefix(8))"
 
         let diagnosticsPath = launchDiagnosticsPath
         addTeardownBlock { [weak self] in
@@ -1393,6 +1395,9 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         if app.launchEnvironment["CMUX_UI_TEST_MODE"] == nil {
             app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
         }
+        if app.launchEnvironment["CMUX_TAG"] == nil {
+            app.launchEnvironment["CMUX_TAG"] = launchTag
+        }
         if app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] == nil {
             app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] = launchDiagnosticsPath
         }
@@ -1417,11 +1422,17 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         if app.wait(for: .runningForeground, timeout: timeout) {
             return true
         }
-        if app.state == .runningBackground {
+
+        let activationDeadline = Date().addingTimeInterval(12.0)
+        while app.state == .runningBackground && Date() < activationDeadline {
             app.activate()
-            return app.wait(for: .runningForeground, timeout: 6.0)
+            if app.wait(for: .runningForeground, timeout: 2.0) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        return false
+
+        return app.state == .runningForeground
     }
 
     private func waitForData(keys: [String], timeout: TimeInterval) -> Bool {
