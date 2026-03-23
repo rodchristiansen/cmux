@@ -4,6 +4,8 @@ import SwiftUI
 import Sparkle
 
 class UpdateViewModel: ObservableObject {
+    static let manualDownloadDMGURLString = "https://github.com/manaflow-ai/cmux/releases/latest/download/cmux-macos.dmg"
+
     @Published var state: UpdateState = .idle
     @Published var overrideState: UpdateState?
     @Published var detectedUpdateVersion: String?
@@ -235,8 +237,8 @@ class UpdateViewModel: ObservableObject {
         }
         if nsError.domain == SUSparkleErrorDomain {
             switch nsError.code {
-            case 4005:
-                return String(localized: "update.error.permissionError.title", defaultValue: "Updater Permission Error")
+            case 4000, 4001, 4002, 4003, 4004, 4005, 4010, 4012:
+                return String(localized: "update.error.installationFailed.title", defaultValue: "Update Installation Failed")
             case 2001:
                 return String(localized: "update.error.downloadFailed.title", defaultValue: "Couldn't Download Update")
             case 1000, 1002:
@@ -282,6 +284,8 @@ class UpdateViewModel: ObservableObject {
         }
         if nsError.domain == SUSparkleErrorDomain {
             switch nsError.code {
+            case 4000, 4001, 4002, 4003, 4004, 4005, 4010, 4012:
+                return String(localized: "update.error.installationFailed.message", defaultValue: "cmux couldn't install the downloaded update. Download the latest DMG to update manually.")
             case 2001:
                 return String(localized: "update.error.feedDownload.message", defaultValue: "cmux couldn't download the update feed. Check your connection and try again.")
             case 1000, 1002:
@@ -292,7 +296,7 @@ class UpdateViewModel: ObservableObject {
                 return String(localized: "update.error.insecureFeed.message", defaultValue: "The update feed is insecure. Please contact support.")
             case 1, 2, 3001, 3002:
                 return String(localized: "update.error.signatureError.message", defaultValue: "The update's signature could not be verified. Please try again later.")
-            case 1003, 1005, 4005:
+            case 1003, 1005:
                 return String(localized: "update.error.permissionError.message", defaultValue: "Move cmux into Applications and relaunch to enable updates.")
             default:
                 break
@@ -340,6 +344,12 @@ class UpdateViewModel: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    static func manualDownloadURL(for error: Swift.Error) -> URL? {
+        let nsError = error as NSError
+        guard shouldOfferManualDownload(for: nsError) else { return nil }
+        return URL(string: manualDownloadDMGURLString)
+    }
+
     private static func networkError(from error: NSError) -> NSError? {
         if error.domain == NSURLErrorDomain {
             return error
@@ -367,6 +377,19 @@ class UpdateViewModel: ObservableObject {
         case 3002: return "SUValidationError"
         default:
             return nil
+        }
+    }
+
+    private static func shouldOfferManualDownload(for error: NSError) -> Bool {
+        guard error.domain == SUSparkleErrorDomain else {
+            return false
+        }
+
+        switch error.code {
+        case 4000, 4001, 4002, 4003, 4004, 4005, 4010, 4012:
+            return true
+        default:
+            return false
         }
     }
 
