@@ -345,7 +345,7 @@ fileprivate struct UpdateErrorView: View {
             technicalDetails: error.technicalDetails,
             feedURLString: error.feedURLString
         )
-        let manualDownloadURL = UpdateViewModel.manualDownloadURL(for: error.error)
+        let manualDownloadURL = UpdateViewModel.manualDownloadURL(for: error)
 
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {

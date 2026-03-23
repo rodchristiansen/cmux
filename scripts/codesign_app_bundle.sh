@@ -67,12 +67,9 @@ resolve_sparkle_version_dir() {
 
 code_paths_by_depth() {
   local root="$1"
-  find "$root" -mindepth 1 \
-    \( -name '*.framework' -o -name '*.xpc' -o -name '*.app' -o -name '*.dylib' \) \
-    -print |
-    awk -F/ '{print NF ":" $0}' |
-    LC_ALL=C sort -t: -k1,1nr -k2,2 |
-    cut -d: -f2-
+  find "$root" -depth -mindepth 1 \
+    \( -name '*.framework' -o -name '*.xpc' -o -name '*.app' -o -name '*.bundle' -o -name '*.dylib' \) \
+    -print
 }
 
 FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
@@ -85,16 +82,9 @@ fi
 
 if [ -n "$SPARKLE_VERSION_DIR" ]; then
   sign_without_entitlements "$SPARKLE_VERSION_DIR/Autoupdate"
-  if [ -d "$SPARKLE_VERSION_DIR/XPCServices" ]; then
-    while IFS= read -r dependency; do
-      sign_without_entitlements "$dependency"
-    done < <(code_paths_by_depth "$SPARKLE_VERSION_DIR/XPCServices")
-  fi
   while IFS= read -r dependency; do
     sign_without_entitlements "$dependency"
-  done < <(
-    find "$SPARKLE_VERSION_DIR" -mindepth 1 -maxdepth 1 -name '*.app' -print | LC_ALL=C sort
-  )
+  done < <(code_paths_by_depth "$SPARKLE_VERSION_DIR")
 fi
 
 sign_without_entitlements "$SPARKLE_FRAMEWORK"
@@ -106,12 +96,6 @@ if [ -d "$FRAMEWORKS_DIR" ]; then
     esac
     sign_without_entitlements "$dependency"
   done < <(code_paths_by_depth "$FRAMEWORKS_DIR")
-  while IFS= read -r dependency; do
-    [ "$dependency" = "$SPARKLE_FRAMEWORK" ] && continue
-    sign_without_entitlements "$dependency"
-  done < <(
-    find "$FRAMEWORKS_DIR" -mindepth 1 -maxdepth 1 -name '*.bundle' -print | LC_ALL=C sort
-  )
 fi
 
 sign_with_entitlements "$APP_PATH/Contents/Resources/bin/cmux"

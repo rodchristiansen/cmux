@@ -118,7 +118,7 @@ class UpdateDriver: NSObject, SPUUserDriver {
         let details = formatErrorForLog(error)
         UpdateLogStore.shared.append("show updater error: \(details)")
         if usesStandardPresentation,
-           let manualDownloadURL = UpdateViewModel.manualDownloadURL(for: error) {
+           let manualDownloadURL = UpdateViewModel.manualDownloadURL(for: error, infoFeedURLString: lastFeedURLString) {
             clearCustomStateForStandardPresentation()
             presentManualDownloadAlert(for: error, manualDownloadURL: manualDownloadURL) { [weak self] shouldRetry in
                 self?.finishUserInitiatedCheckPresentation()

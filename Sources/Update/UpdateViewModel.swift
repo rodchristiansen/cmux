@@ -353,6 +353,10 @@ class UpdateViewModel: ObservableObject {
         return URL(string: isNightly ? manualDownloadNightlyDMGURLString : manualDownloadDMGURLString)
     }
 
+    static func manualDownloadURL(for updateError: UpdateState.Error) -> URL? {
+        manualDownloadURL(for: updateError.error, infoFeedURLString: updateError.feedURLString)
+    }
+
     private static func networkError(from error: NSError) -> NSError? {
         if error.domain == NSURLErrorDomain {
             return error
