@@ -3502,12 +3502,14 @@ class TabManager: ObservableObject {
         tabId: UUID,
         inPane paneId: PaneID,
         url: URL? = nil,
-        preferredProfileID: UUID? = nil
+        preferredProfileID: UUID? = nil,
+        focus: Bool? = nil
     ) -> UUID? {
         guard let tab = tabs.first(where: { $0.id == tabId }) else { return nil }
         return tab.newBrowserSurface(
             inPane: paneId,
             url: url,
+            focus: focus,
             preferredProfileID: preferredProfileID
         )?.id
     }

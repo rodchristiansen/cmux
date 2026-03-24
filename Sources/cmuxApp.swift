@@ -3801,6 +3801,8 @@ struct SettingsView: View {
     @AppStorage(BrowserSearchSettings.searchEngineKey) private var browserSearchEngine = BrowserSearchSettings.defaultSearchEngine.rawValue
     @AppStorage(BrowserSearchSettings.searchSuggestionsEnabledKey) private var browserSearchSuggestionsEnabled = BrowserSearchSettings.defaultSearchSuggestionsEnabled
     @AppStorage(BrowserThemeSettings.modeKey) private var browserThemeMode = BrowserThemeSettings.defaultMode.rawValue
+    @AppStorage(VSCodeInlineSplitDirectionSettings.key)
+    private var vscodeInlineSplitDirection = VSCodeInlineSplitDirectionSettings.defaultDirection.rawValue
     @AppStorage(BrowserImportHintSettings.variantKey) private var browserImportHintVariantRaw = BrowserImportHintSettings.defaultVariant.rawValue
     @AppStorage(BrowserImportHintSettings.showOnBlankTabsKey) private var showBrowserImportHintOnBlankTabs = BrowserImportHintSettings.defaultShowOnBlankTabs
     @AppStorage(BrowserImportHintSettings.dismissedKey) private var isBrowserImportHintDismissed = BrowserImportHintSettings.defaultDismissed
@@ -3961,6 +3963,22 @@ struct SettingsView: View {
             get: { browserThemeMode },
             set: { newValue in
                 browserThemeMode = BrowserThemeSettings.mode(for: newValue).rawValue
+            }
+        )
+    }
+
+    private var selectedVSCodeInlineSplitDirection: VSCodeInlineSplitDirection {
+        VSCodeInlineSplitDirectionSettings.parse(rawValue: vscodeInlineSplitDirection)
+            ?? VSCodeInlineSplitDirectionSettings.defaultDirection
+    }
+
+    private var vscodeInlineSplitDirectionSelection: Binding<String> {
+        Binding(
+            get: { selectedVSCodeInlineSplitDirection.rawValue },
+            set: { newValue in
+                vscodeInlineSplitDirection =
+                    (VSCodeInlineSplitDirectionSettings.parse(rawValue: newValue)
+                     ?? VSCodeInlineSplitDirectionSettings.defaultDirection).rawValue
             }
         )
     }
@@ -5085,6 +5103,19 @@ struct SettingsView: View {
 
                         SettingsCardDivider()
 
+                        SettingsPickerRow(
+                            String(localized: "settings.browser.vscodeInlineSplitDirection", defaultValue: "Inline VS Code Placement"),
+                            subtitle: String(localized: "settings.browser.vscodeInlineSplitDirection.subtitle", defaultValue: "Choose whether inline VS Code opens as a split or a tab, and where the split appears."),
+                            controlWidth: pickerColumnWidth,
+                            selection: vscodeInlineSplitDirectionSelection
+                        ) {
+                            ForEach(VSCodeInlineSplitDirection.allCases) { direction in
+                                Text(direction.displayName).tag(direction.rawValue)
+                            }
+                        }
+
+                        SettingsCardDivider()
+
                         SettingsCardRow(
                             String(localized: "settings.browser.openTerminalLinks", defaultValue: "Open Terminal Links in cmux Browser"),
                             subtitle: String(localized: "settings.browser.openTerminalLinks.subtitle", defaultValue: "When off, links clicked in terminal output open in your default browser.")
@@ -5432,6 +5463,7 @@ struct SettingsView: View {
             BrowserHistoryStore.shared.loadIfNeeded()
             notificationStore.refreshAuthorizationStatus()
             browserThemeMode = BrowserThemeSettings.mode(defaults: .standard).rawValue
+            vscodeInlineSplitDirection = VSCodeInlineSplitDirectionSettings.current(defaults: .standard).rawValue
             browserImportHintVariantRaw = BrowserImportHintSettings.variant(for: browserImportHintVariantRaw).rawValue
             browserHistoryEntryCount = BrowserHistoryStore.shared.entries.count
             browserInsecureHTTPAllowlistDraft = browserInsecureHTTPAllowlist
@@ -5546,6 +5578,7 @@ struct SettingsView: View {
         browserSearchEngine = BrowserSearchSettings.defaultSearchEngine.rawValue
         browserSearchSuggestionsEnabled = BrowserSearchSettings.defaultSearchSuggestionsEnabled
         browserThemeMode = BrowserThemeSettings.defaultMode.rawValue
+        vscodeInlineSplitDirection = VSCodeInlineSplitDirectionSettings.defaultDirection.rawValue
         browserImportHintVariantRaw = BrowserImportHintSettings.defaultVariant.rawValue
         showBrowserImportHintOnBlankTabs = BrowserImportHintSettings.defaultShowOnBlankTabs
         isBrowserImportHintDismissed = BrowserImportHintSettings.defaultDismissed

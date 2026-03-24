@@ -1612,6 +1612,8 @@ struct ContentView: View {
     private var commandPaletteRenameSelectAllOnFocus = CommandPaletteRenameSelectionSettings.defaultSelectAllOnFocus
     @AppStorage(CommandPaletteSwitcherSearchSettings.searchAllSurfacesKey)
     private var commandPaletteSearchAllSurfaces = CommandPaletteSwitcherSearchSettings.defaultSearchAllSurfaces
+    @AppStorage(VSCodeInlineSplitDirectionSettings.key)
+    private var vscodeInlineSplitDirectionRaw = VSCodeInlineSplitDirectionSettings.defaultDirection.rawValue
     @AppStorage(BrowserLinkOpenSettings.openSidebarPullRequestLinksInCmuxBrowserKey)
     private var openSidebarPullRequestLinksInCmuxBrowser = BrowserLinkOpenSettings.defaultOpenSidebarPullRequestLinksInCmuxBrowser
     @FocusState private var isCommandPaletteSearchFocused: Bool
@@ -7337,6 +7339,11 @@ struct ContentView: View {
         return openFocusedDirectory(directoryURL, in: target)
     }
 
+    private var vscodeInlineSplitDirection: VSCodeInlineSplitDirection {
+        VSCodeInlineSplitDirectionSettings.parse(rawValue: vscodeInlineSplitDirectionRaw)
+            ?? VSCodeInlineSplitDirectionSettings.defaultDirection
+    }
+
     private func openFocusedDirectory(_ directoryURL: URL, in target: TerminalDirectoryOpenTarget) -> Bool {
         switch target {
         case .finder:
@@ -7355,10 +7362,12 @@ struct ContentView: View {
     private func openFocusedDirectoryInInlineVSCode(_ directoryURL: URL) -> Bool {
         guard let vscodeApplicationURL = TerminalDirectoryOpenTarget.vscodeInline.applicationURL(),
               let workspace = tabManager.selectedWorkspace,
-              let sourcePanelId = workspace.focusedPanelId else {
+              let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
             return false
         }
         let sourceTabId = workspace.id
+        let openDirection = vscodeInlineSplitDirection
         let tabManager = tabManager
         VSCodeServeWebController.shared.ensureServeWebURL(vscodeApplicationURL: vscodeApplicationURL) { serveWebURL in
             guard let serveWebURL,
@@ -7369,14 +7378,25 @@ struct ContentView: View {
                 NSSound.beep()
                 return
             }
-            guard tabManager.newBrowserSplit(
-                tabId: sourceTabId,
-                fromPanelId: sourcePanelId,
-                orientation: SplitDirection.right.orientation,
-                insertFirst: SplitDirection.right.insertFirst,
-                url: openFolderURL,
-                focus: true
-            ) != nil else {
+            let createdPanelId: UUID? = {
+                if let splitDirection = openDirection.splitDirection {
+                    return tabManager.newBrowserSplit(
+                        tabId: sourceTabId,
+                        fromPanelId: sourcePanelId,
+                        orientation: splitDirection.orientation,
+                        insertFirst: splitDirection.insertFirst,
+                        url: openFolderURL,
+                        focus: true
+                    )
+                }
+                return tabManager.newBrowserSurface(
+                    tabId: sourceTabId,
+                    inPane: sourcePaneId,
+                    url: openFolderURL,
+                    focus: true
+                )
+            }()
+            guard createdPanelId != nil else {
                 NSSound.beep()
                 return
             }
