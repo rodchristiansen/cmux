@@ -698,6 +698,7 @@ class TabManager: ObservableObject {
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).
     private static var nextPortOrdinal: Int = 0
     private static let initialWorkspaceGitProbeDelays: [TimeInterval] = [0, 0.5, 1.5, 3.0, 6.0, 10.0]
+    private static let workspaceGitMetadataPollInterval: TimeInterval = 30
     private nonisolated static let workspacePullRequestProbeTimeout: TimeInterval = 5.0
     @Published var selectedTabId: UUID? {
         willSet {
@@ -809,6 +810,7 @@ class TabManager: ObservableObject {
         }
     }
     private var agentPIDSweepTimer: DispatchSourceTimer?
+    private var workspaceGitMetadataPollTimer: DispatchSourceTimer?
 #if DEBUG
     private var debugWorkspaceSwitchCounter: UInt64 = 0
     private var debugWorkspaceSwitchId: UInt64 = 0
@@ -855,6 +857,7 @@ class TabManager: ObservableObject {
         })
 
         startAgentPIDSweepTimer()
+        startWorkspaceGitMetadataPollTimer()
 #if DEBUG
         setupUITestFocusShortcutsIfNeeded()
         setupSplitCloseRightUITestIfNeeded()
@@ -866,6 +869,7 @@ class TabManager: ObservableObject {
     deinit {
         workspaceCycleCooldownTask?.cancel()
         agentPIDSweepTimer?.cancel()
+        workspaceGitMetadataPollTimer?.cancel()
     }
 
     // MARK: - Agent PID Sweep
@@ -887,9 +891,51 @@ class TabManager: ObservableObject {
         agentPIDSweepTimer = timer
     }
 
+    /// Periodically refreshes git/PR metadata for tracked workspace branches so
+    /// remote GitHub state changes (e.g. PR open -> merged) reach sidebar state
+    /// even when the local branch/directory does not change.
+    private func startWorkspaceGitMetadataPollTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        let interval = Self.workspaceGitMetadataPollInterval
+        timer.schedule(deadline: .now() + interval, repeating: interval)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.refreshTrackedWorkspaceGitMetadata()
+            }
+        }
+        timer.resume()
+        workspaceGitMetadataPollTimer = timer
+    }
+
+    private func refreshTrackedWorkspaceGitMetadata() {
+        let activeProbeKeys = Set(workspaceGitProbeGenerationByKey.keys)
+
+        for workspace in tabs {
+            var candidatePanelIds = Set(workspace.panelGitBranches.keys)
+            candidatePanelIds.formUnion(workspace.panelPullRequests.keys)
+
+            if candidatePanelIds.isEmpty,
+               let focusedPanelId = workspace.focusedPanelId,
+               workspace.gitBranch != nil || workspace.pullRequest != nil {
+                candidatePanelIds.insert(focusedPanelId)
+            }
+
+            for panelId in candidatePanelIds {
+                let probeKey = WorkspaceGitProbeKey(workspaceId: workspace.id, panelId: panelId)
+                guard !activeProbeKeys.contains(probeKey) else { continue }
+                scheduleWorkspaceGitMetadataRefreshIfPossible(
+                    workspaceId: workspace.id,
+                    panelId: panelId,
+                    reason: "periodicPoll"
+                )
+            }
+        }
+    }
+
     func refreshTrackedWorkspaceGitMetadataForTesting() {
-        // Test seam used by the regression test. The real refresh behavior lands
-        // in the follow-up fix commit so this test demonstrates the failure first.
+        refreshTrackedWorkspaceGitMetadata()
     }
 
     private func sweepStaleAgentPIDs() {
