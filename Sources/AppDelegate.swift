@@ -2028,6 +2028,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var browserOmnibarRepeatDelta: Int = 0
     private var browserAddressBarFocusObserver: NSObjectProtocol?
     private var browserAddressBarBlurObserver: NSObjectProtocol?
+    private var browserWebViewClickObserver: NSObjectProtocol?
     private var browserWebViewFocusObserver: NSObjectProtocol?
     private let updateController = UpdateController()
     private lazy var titlebarAccessoryController = UpdateTitlebarAccessoryController(viewModel: updateViewModel)
@@ -11583,6 +11584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func installBrowserAddressBarFocusObservers() {
         guard browserAddressBarFocusObserver == nil,
               browserAddressBarBlurObserver == nil,
+              browserWebViewClickObserver == nil,
               browserWebViewFocusObserver == nil else { return }
 
         browserAddressBarFocusObserver = NotificationCenter.default.addObserver(
@@ -11632,6 +11634,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     dlog("addressBar BLUR panelId=\(panelId.uuidString.prefix(8))")
 #endif
                 }
+            }
+        }
+
+        browserWebViewClickObserver = NotificationCenter.default.addObserver(
+            forName: .webViewDidReceiveClick,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard let panelId = self.browserAddressBarFocusedPanelId else { return }
+
+                NotificationCenter.default.post(name: .browserDidBlurAddressBar, object: panelId)
+#if DEBUG
+                dlog(
+                    "addressBar STALE_CLEAR panelId=\(panelId.uuidString.prefix(8)) " +
+                    "reason=webViewClick"
+                )
+#endif
             }
         }
 
