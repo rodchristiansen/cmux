@@ -585,6 +585,371 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         XCTAssertEqual(postCmdLCommandShiftUpSnapshot["browserArrowActiveElementId"], secondaryInputId, "Expected the clicked secondary page input to remain focused after Cmd+Shift+arrows")
     }
 
+    func testArrowKeysDoNotLeakToPageWhileOmnibarFocused() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_INPUT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_ARROW_SETUP"] = "1"
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(
+                keys: [
+                    "browserPanelId",
+                    "webInputFocusSeeded",
+                    "webInputFocusElementId",
+                    "webInputFocusPrimaryClickOffsetX",
+                    "webInputFocusPrimaryClickOffsetY"
+                ],
+                timeout: 20.0
+            ),
+            "Expected focused page input setup data before omnibar leak check. data=\(String(describing: loadData()))"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        guard let browserPanelId = setup["browserPanelId"], !browserPanelId.isEmpty else {
+            XCTFail("Missing browserPanelId in setup data")
+            return
+        }
+        guard let primaryInputId = setup["webInputFocusElementId"], !primaryInputId.isEmpty else {
+            XCTFail("Missing webInputFocusElementId in setup data")
+            return
+        }
+        guard let primaryClickOffsetXRaw = setup["webInputFocusPrimaryClickOffsetX"],
+              let primaryClickOffsetYRaw = setup["webInputFocusPrimaryClickOffsetY"],
+              let primaryClickOffsetX = Double(primaryClickOffsetXRaw),
+              let primaryClickOffsetY = Double(primaryClickOffsetYRaw) else {
+            XCTFail(
+                "Missing or invalid primary input click offsets in setup data. " +
+                "webInputFocusPrimaryClickOffsetX=\(setup["webInputFocusPrimaryClickOffsetX"] ?? "nil") " +
+                "webInputFocusPrimaryClickOffsetY=\(setup["webInputFocusPrimaryClickOffsetY"] ?? "nil")"
+            )
+            return
+        }
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window before omnibar leak check")
+
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: primaryClickOffsetX, dy: primaryClickOffsetY))
+            .click()
+
+        guard let initialSnapshot = waitForDataSnapshot(
+            timeout: 8.0,
+            predicate: { data in
+                data["browserArrowInstalled"] == "true" &&
+                    data["browserArrowActiveElementId"] == primaryInputId &&
+                    data["browserArrowDownCount"] == "0" &&
+                    data["browserArrowUpCount"] == "0" &&
+                    data["browserArrowCommandShiftDownCount"] == "0" &&
+                    data["browserArrowCommandShiftUpCount"] == "0"
+            }
+        ) else {
+            XCTFail("Expected page input to be focused before omnibar leak check. data=\(String(describing: loadData()))")
+            return
+        }
+
+        let baselineDownCount = Int(initialSnapshot["browserArrowDownCount"] ?? "") ?? -1
+        let baselineUpCount = Int(initialSnapshot["browserArrowUpCount"] ?? "") ?? -1
+        let baselineCommandShiftDownCount = Int(initialSnapshot["browserArrowCommandShiftDownCount"] ?? "") ?? -1
+        let baselineCommandShiftUpCount = Int(initialSnapshot["browserArrowCommandShiftUpCount"] ?? "") ?? -1
+        guard baselineDownCount == 0,
+              baselineUpCount == 0,
+              baselineCommandShiftDownCount == 0,
+              baselineCommandShiftUpCount == 0 else {
+            XCTFail("Expected zeroed arrow counters before omnibar leak check. data=\(initialSnapshot)")
+            return
+        }
+
+        app.typeKey("l", modifierFlags: [.command])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                data["webViewFocusedAfterAddressBarFocus"] == "false" &&
+                    data["webViewFocusedAfterAddressBarFocusPanelId"] == browserPanelId &&
+                    data["browserArrowFocusedAddressBarPanelId"] == browserPanelId
+            },
+            "Expected Cmd+L to keep omnibar focused before leak check. data=\(String(describing: loadData()))"
+        )
+
+        simulateShortcut("down", app: app)
+        XCTAssertTrue(
+            browserArrowCountersRemainUnchanged(
+                down: baselineDownCount,
+                up: baselineUpCount,
+                commandShiftDown: baselineCommandShiftDownCount,
+                commandShiftUp: baselineCommandShiftUpCount,
+                timeout: 1.0
+            ),
+            "Expected Down Arrow to stay out of the page while omnibar remained focused. data=\(String(describing: loadData()))"
+        )
+
+        simulateShortcut("up", app: app)
+        XCTAssertTrue(
+            browserArrowCountersRemainUnchanged(
+                down: baselineDownCount,
+                up: baselineUpCount,
+                commandShiftDown: baselineCommandShiftDownCount,
+                commandShiftUp: baselineCommandShiftUpCount,
+                timeout: 1.0
+            ),
+            "Expected Up Arrow to stay out of the page while omnibar remained focused. data=\(String(describing: loadData()))"
+        )
+
+        simulateShortcut("cmdShiftDown", app: app)
+        XCTAssertTrue(
+            browserArrowCountersRemainUnchanged(
+                down: baselineDownCount,
+                up: baselineUpCount,
+                commandShiftDown: baselineCommandShiftDownCount,
+                commandShiftUp: baselineCommandShiftUpCount,
+                timeout: 1.0
+            ),
+            "Expected Cmd+Shift+Down to stay out of the page while omnibar remained focused. data=\(String(describing: loadData()))"
+        )
+
+        simulateShortcut("cmdShiftUp", app: app)
+        XCTAssertTrue(
+            browserArrowCountersRemainUnchanged(
+                down: baselineDownCount,
+                up: baselineUpCount,
+                commandShiftDown: baselineCommandShiftDownCount,
+                commandShiftUp: baselineCommandShiftUpCount,
+                timeout: 1.0
+            ),
+            "Expected Cmd+Shift+Up to stay out of the page while omnibar remained focused. data=\(String(describing: loadData()))"
+        )
+    }
+
+    func testArrowKeysReachClickedTextareaAfterCmdL() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
+        app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_INPUT_SETUP"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_ARROW_SETUP"] = "1"
+        launchAndEnsureForeground(app)
+
+        XCTAssertTrue(
+            waitForData(
+                keys: [
+                    "browserPanelId",
+                    "webViewFocused",
+                    "webInputFocusSeeded",
+                    "webInputFocusTextareaElementId",
+                    "webInputFocusTextareaClickOffsetX",
+                    "webInputFocusTextareaClickOffsetY"
+                ],
+                timeout: 20.0
+            ),
+            "Expected textarea setup data to be written. data=\(String(describing: loadData()))"
+        )
+
+        guard let setup = loadData() else {
+            XCTFail("Missing goto_split setup data")
+            return
+        }
+
+        XCTAssertEqual(setup["webInputFocusSeeded"], "true", "Expected page input harness to be seeded before textarea check")
+        guard let textareaId = setup["webInputFocusTextareaElementId"], !textareaId.isEmpty else {
+            XCTFail("Missing webInputFocusTextareaElementId in setup data")
+            return
+        }
+        guard let textareaClickOffsetXRaw = setup["webInputFocusTextareaClickOffsetX"],
+              let textareaClickOffsetYRaw = setup["webInputFocusTextareaClickOffsetY"],
+              let textareaClickOffsetX = Double(textareaClickOffsetXRaw),
+              let textareaClickOffsetY = Double(textareaClickOffsetYRaw) else {
+            XCTFail(
+                "Missing or invalid textarea click offsets in setup data. " +
+                "webInputFocusTextareaClickOffsetX=\(setup["webInputFocusTextareaClickOffsetX"] ?? "nil") " +
+                "webInputFocusTextareaClickOffsetY=\(setup["webInputFocusTextareaClickOffsetY"] ?? "nil")"
+            )
+            return
+        }
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5.0), "Expected main window before textarea regression check")
+
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: textareaClickOffsetX, dy: textareaClickOffsetY))
+            .click()
+
+        guard let initialSnapshot = waitForDataSnapshot(
+            timeout: 8.0,
+            predicate: { data in
+                data["browserArrowInstalled"] == "true" &&
+                    data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "0" &&
+                    data["browserArrowUpCount"] == "0" &&
+                    data["browserArrowCommandShiftDownCount"] == "0" &&
+                    data["browserArrowCommandShiftUpCount"] == "0"
+            }
+        ) else {
+            XCTFail("Expected textarea to be focused before baseline arrows. data=\(String(describing: loadData()))")
+            return
+        }
+
+        let initialDownCount = Int(initialSnapshot["browserArrowDownCount"] ?? "") ?? -1
+        let initialUpCount = Int(initialSnapshot["browserArrowUpCount"] ?? "") ?? -1
+        let initialCommandShiftDownCount = Int(initialSnapshot["browserArrowCommandShiftDownCount"] ?? "") ?? -1
+        let initialCommandShiftUpCount = Int(initialSnapshot["browserArrowCommandShiftUpCount"] ?? "") ?? -1
+
+        simulateShortcut("down", app: app)
+        guard let baselineDownSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "\(initialDownCount + 1)" &&
+                    data["browserArrowUpCount"] == "\(initialUpCount)"
+            }
+        ) else {
+            XCTFail("Expected baseline Down Arrow to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let baselineDownCount = Int(baselineDownSnapshot["browserArrowDownCount"] ?? "") ?? -1
+
+        simulateShortcut("up", app: app)
+        guard let baselineUpSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "\(baselineDownCount)" &&
+                    data["browserArrowUpCount"] == "\(initialUpCount + 1)"
+            }
+        ) else {
+            XCTFail("Expected baseline Up Arrow to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let baselineUpCount = Int(baselineUpSnapshot["browserArrowUpCount"] ?? "") ?? -1
+
+        simulateShortcut("cmdShiftDown", app: app)
+        guard let baselineCommandShiftDownSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowCommandShiftDownCount"] == "\(initialCommandShiftDownCount + 1)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(initialCommandShiftUpCount)"
+            }
+        ) else {
+            XCTFail("Expected baseline Cmd+Shift+Down to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let baselineCommandShiftDownCount = Int(baselineCommandShiftDownSnapshot["browserArrowCommandShiftDownCount"] ?? "") ?? -1
+
+        simulateShortcut("cmdShiftUp", app: app)
+        guard let baselineCommandShiftUpSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowCommandShiftDownCount"] == "\(baselineCommandShiftDownCount)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(initialCommandShiftUpCount + 1)"
+            }
+        ) else {
+            XCTFail("Expected baseline Cmd+Shift+Up to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let baselineCommandShiftUpCount = Int(baselineCommandShiftUpSnapshot["browserArrowCommandShiftUpCount"] ?? "") ?? -1
+
+        app.typeKey("l", modifierFlags: [.command])
+        XCTAssertTrue(
+            waitForDataMatch(timeout: 5.0) { data in
+                data["webViewFocusedAfterAddressBarFocus"] == "false"
+            },
+            "Expected Cmd+L to focus omnibar before the textarea click path"
+        )
+
+        window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.0))
+            .withOffset(CGVector(dx: textareaClickOffsetX, dy: textareaClickOffsetY))
+            .click()
+
+        guard waitForDataMatch(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId
+            }
+        ) else {
+            XCTFail("Expected clicking the page to re-focus the textarea after Cmd+L. data=\(String(describing: loadData()))")
+            return
+        }
+
+        simulateShortcut("down", app: app)
+        guard let postCmdLDownSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "\(baselineDownCount + 1)" &&
+                    data["browserArrowUpCount"] == "\(baselineUpCount)" &&
+                    data["browserArrowCommandShiftDownCount"] == "\(baselineCommandShiftDownCount)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(baselineCommandShiftUpCount)"
+            }
+        ) else {
+            XCTFail("Expected Down Arrow after Cmd+L to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let postCmdLDownCount = Int(postCmdLDownSnapshot["browserArrowDownCount"] ?? "") ?? -1
+
+        simulateShortcut("up", app: app)
+        guard let postCmdLUpSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "\(postCmdLDownCount)" &&
+                    data["browserArrowUpCount"] == "\(baselineUpCount + 1)"
+            }
+        ) else {
+            XCTFail("Expected Up Arrow after Cmd+L to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let postCmdLUpCount = Int(postCmdLUpSnapshot["browserArrowUpCount"] ?? "") ?? -1
+
+        simulateShortcut("cmdShiftDown", app: app)
+        guard let postCmdLCommandShiftDownSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "\(postCmdLDownCount)" &&
+                    data["browserArrowUpCount"] == "\(postCmdLUpCount)" &&
+                    data["browserArrowCommandShiftDownCount"] == "\(baselineCommandShiftDownCount + 1)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(baselineCommandShiftUpCount)"
+            }
+        ) else {
+            XCTFail("Expected Cmd+Shift+Down after Cmd+L to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+        let postCmdLCommandShiftDownCount = Int(postCmdLCommandShiftDownSnapshot["browserArrowCommandShiftDownCount"] ?? "") ?? -1
+
+        simulateShortcut("cmdShiftUp", app: app)
+        guard let postCmdLCommandShiftUpSnapshot = waitForDataSnapshot(
+            timeout: 5.0,
+            predicate: { data in
+                data["browserArrowActiveElementId"] == textareaId &&
+                    data["browserArrowDownCount"] == "\(postCmdLDownCount)" &&
+                    data["browserArrowUpCount"] == "\(postCmdLUpCount)" &&
+                    data["browserArrowCommandShiftDownCount"] == "\(postCmdLCommandShiftDownCount)" &&
+                    data["browserArrowCommandShiftUpCount"] == "\(baselineCommandShiftUpCount + 1)"
+            }
+        ) else {
+            XCTFail("Expected Cmd+Shift+Up after Cmd+L to reach the textarea. data=\(String(describing: loadData()))")
+            return
+        }
+
+        XCTAssertEqual(
+            postCmdLCommandShiftUpSnapshot["browserArrowActiveElementId"],
+            textareaId,
+            "Expected the clicked textarea to remain focused after Cmd+Shift+arrows"
+        )
+    }
+
     func testArrowKeysReachClickedContentEditableAfterCmdL() {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
@@ -1597,6 +1962,28 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return true
         }
         return didMatch ? matched : nil
+    }
+
+    private func browserArrowCountersRemainUnchanged(
+        down: Int,
+        up: Int,
+        commandShiftDown: Int,
+        commandShiftUp: Int,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let data = loadData() {
+                if data["browserArrowDownCount"] != "\(down)" ||
+                    data["browserArrowUpCount"] != "\(up)" ||
+                    data["browserArrowCommandShiftDownCount"] != "\(commandShiftDown)" ||
+                    data["browserArrowCommandShiftUpCount"] != "\(commandShiftUp)" {
+                    return false
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return true
     }
 
     private func waitForNonExistence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {

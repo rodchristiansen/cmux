@@ -7588,8 +7588,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               focused: false,
               id: "",
               secondaryId: "",
+              textareaId: "",
               secondaryCenterX: -1,
               secondaryCenterY: -1,
+              textareaCenterX: -1,
+              textareaCenterY: -1,
               activeId: active && typeof active.id === "string" ? active.id : "",
               activeTag: active && active.tagName ? active.tagName.toLowerCase() : "",
               trackerInstalled: window.__cmuxAddressBarFocusTrackerInstalled === true,
@@ -7638,6 +7641,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               input.style.color = "black";
               return input;
             };
+            const ensureTextarea = (id, value) => {
+              const existing = document.getElementById(id);
+              const textarea = (existing && existing.tagName && existing.tagName.toLowerCase() === "textarea")
+                ? existing
+                : (() => {
+                    const created = document.createElement("textarea");
+                    created.id = id;
+                    created.value = value;
+                    return created;
+                  })();
+              textarea.autocapitalize = "off";
+              textarea.autocomplete = "off";
+              textarea.spellcheck = false;
+              textarea.rows = 4;
+              textarea.wrap = "soft";
+              textarea.style.display = "block";
+              textarea.style.width = "100%";
+              textarea.style.minHeight = "96px";
+              textarea.style.margin = "0";
+              textarea.style.padding = "8px 10px";
+              textarea.style.border = "1px solid #5f6368";
+              textarea.style.borderRadius = "6px";
+              textarea.style.boxSizing = "border-box";
+              textarea.style.fontSize = "14px";
+              textarea.style.fontFamily = "system-ui, -apple-system, sans-serif";
+              textarea.style.background = "white";
+              textarea.style.color = "black";
+              textarea.style.lineHeight = "1.4";
+              textarea.style.resize = "none";
+              return textarea;
+            };
 
             let container = document.getElementById("cmux-ui-test-focus-container");
             if (!container || !container.tagName || container.tagName.toLowerCase() !== "div") {
@@ -7660,11 +7694,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
             const input = ensureInput("cmux-ui-test-focus-input", "cmux-ui-focus-primary");
             const secondaryInput = ensureInput("cmux-ui-test-focus-input-secondary", "cmux-ui-focus-secondary");
+            const textarea = ensureTextarea(
+              "cmux-ui-test-focus-textarea",
+              "cmux-ui-focus-textarea line 1\\ncmux-ui-focus-textarea line 2\\ncmux-ui-focus-textarea line 3"
+            );
             if (input.parentElement !== container) {
               container.appendChild(input);
             }
             if (secondaryInput.parentElement !== container) {
               container.appendChild(secondaryInput);
+            }
+            if (textarea.parentElement !== container) {
+              container.appendChild(textarea);
             }
 
             if (!window.__cmuxArrowKeyReport || typeof window.__cmuxArrowKeyReport !== "object") {
@@ -7697,6 +7738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             };
             installArrowTracker(input);
             installArrowTracker(secondaryInput);
+            installArrowTracker(textarea);
 
             input.focus({ preventScroll: true });
             if (typeof input.setSelectionRange === "function") {
@@ -7720,6 +7762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
 
             const secondaryRect = secondaryInput.getBoundingClientRect();
+            const textareaRect = textarea.getBoundingClientRect();
             const primaryRect = input.getBoundingClientRect();
             const viewportWidth = Math.max(Number(window.innerWidth) || 0, 1);
             const viewportHeight = Math.max(Number(window.innerHeight) || 0, 1);
@@ -7739,16 +7782,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               0.98,
               Math.max(0.02, (secondaryRect.top + (secondaryRect.height / 2)) / viewportHeight)
             );
+            const textareaCenterX = Math.min(
+              0.98,
+              Math.max(0.02, (textareaRect.left + (textareaRect.width / 2)) / viewportWidth)
+            );
+            const textareaCenterY = Math.min(
+              0.98,
+              Math.max(0.02, (textareaRect.top + (textareaRect.height / 2)) / viewportHeight)
+            );
             const active = document.activeElement;
             const arrowState = readArrowState();
             return {
               focused: active === input,
               id: input.id || "",
               secondaryId: secondaryInput.id || "",
+              textareaId: textarea.id || "",
               primaryCenterX,
               primaryCenterY,
               secondaryCenterX,
               secondaryCenterY,
+              textareaCenterX,
+              textareaCenterY,
               activeId: active && typeof active.id === "string" ? active.id : "",
               activeTag: active && active.tagName ? active.tagName.toLowerCase() : "",
               trackerInstalled: window.__cmuxAddressBarFocusTrackerInstalled === true,
@@ -7799,10 +7853,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let focused = (payload?["focused"] as? Bool) ?? false
                 let inputId = (payload?["id"] as? String) ?? ""
                 let secondaryInputId = (payload?["secondaryId"] as? String) ?? ""
+                let textareaId = (payload?["textareaId"] as? String) ?? ""
                 let primaryCenterX = (payload?["primaryCenterX"] as? NSNumber)?.doubleValue ?? -1
                 let primaryCenterY = (payload?["primaryCenterY"] as? NSNumber)?.doubleValue ?? -1
                 let secondaryCenterX = (payload?["secondaryCenterX"] as? NSNumber)?.doubleValue ?? -1
                 let secondaryCenterY = (payload?["secondaryCenterY"] as? NSNumber)?.doubleValue ?? -1
+                let textareaCenterX = (payload?["textareaCenterX"] as? NSNumber)?.doubleValue ?? -1
+                let textareaCenterY = (payload?["textareaCenterY"] as? NSNumber)?.doubleValue ?? -1
                 let activeId = (payload?["activeId"] as? String) ?? ""
                 let trackerInstalled = (payload?["trackerInstalled"] as? Bool) ?? false
                 let trackedStateId = (payload?["trackedStateId"] as? String) ?? ""
@@ -7817,6 +7874,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 var primaryClickOffsetY = -1.0
                 var secondaryClickOffsetX = -1.0
                 var secondaryClickOffsetY = -1.0
+                var textareaClickOffsetX = -1.0
+                var textareaClickOffsetY = -1.0
                 let windowAvailable = panel.webView.window != nil
 
                 if let window = panel.webView.window {
@@ -7832,7 +7891,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                        secondaryCenterX > 0,
                        secondaryCenterX < 1,
                        secondaryCenterY > 0,
-                       secondaryCenterY < 1 {
+                       secondaryCenterY < 1,
+                       textareaCenterX > 0,
+                       textareaCenterX < 1,
+                       textareaCenterY > 0,
+                       textareaCenterY < 1 {
                         let primaryXInContent = Double(webFrame.minX) + (primaryCenterX * Double(webFrame.width))
                         let primaryYFromTopInWeb = primaryCenterY * Double(webFrame.height)
                         let primaryYInContent = Double(webFrame.maxY) - primaryYFromTopInWeb
@@ -7846,12 +7909,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         let secondaryYInContent = Double(webFrame.maxY) - secondaryYFromTopInWeb
                         secondaryClickOffsetX = secondaryXInContent
                         secondaryClickOffsetY = titlebarHeight + (contentHeight - secondaryYInContent)
+
+                        let textareaXInContent = Double(webFrame.minX) + (textareaCenterX * Double(webFrame.width))
+                        let textareaYFromTopInWeb = textareaCenterY * Double(webFrame.height)
+                        let textareaYInContent = Double(webFrame.maxY) - textareaYFromTopInWeb
+                        textareaClickOffsetX = textareaXInContent
+                        textareaClickOffsetY = titlebarHeight + (contentHeight - textareaYInContent)
                     }
                 }
 
                 if focused,
                    !inputId.isEmpty,
                    !secondaryInputId.isEmpty,
+                   !textareaId.isEmpty,
                    inputId == activeId,
                    trackerInstalled,
                    !trackedStateId.isEmpty,
@@ -7863,14 +7933,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                    secondaryCenterX < 1,
                    secondaryCenterY > 0,
                    secondaryCenterY < 1,
+                   textareaCenterX > 0,
+                   textareaCenterX < 1,
+                   textareaCenterY > 0,
+                   textareaCenterY < 1,
                    primaryClickOffsetX > 0,
                    primaryClickOffsetY > 0,
                    secondaryClickOffsetX > 0,
-                   secondaryClickOffsetY > 0 {
+                   secondaryClickOffsetY > 0,
+                   textareaClickOffsetX > 0,
+                   textareaClickOffsetY > 0 {
                     self.writeGotoSplitTestData([
                         "webInputFocusSeeded": "true",
                         "webInputFocusElementId": inputId,
                         "webInputFocusSecondaryElementId": secondaryInputId,
+                        "webInputFocusTextareaElementId": textareaId,
                         "webInputFocusPrimaryCenterX": "\(primaryCenterX)",
                         "webInputFocusPrimaryCenterY": "\(primaryCenterY)",
                         "webInputFocusPrimaryClickOffsetX": "\(primaryClickOffsetX)",
@@ -7879,6 +7956,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         "webInputFocusSecondaryCenterY": "\(secondaryCenterY)",
                         "webInputFocusSecondaryClickOffsetX": "\(secondaryClickOffsetX)",
                         "webInputFocusSecondaryClickOffsetY": "\(secondaryClickOffsetY)",
+                        "webInputFocusTextareaCenterX": "\(textareaCenterX)",
+                        "webInputFocusTextareaCenterY": "\(textareaCenterY)",
+                        "webInputFocusTextareaClickOffsetX": "\(textareaClickOffsetX)",
+                        "webInputFocusTextareaClickOffsetY": "\(textareaClickOffsetY)",
                         "webInputFocusActiveElementId": activeId,
                         "webInputFocusTrackerInstalled": trackerInstalled ? "true" : "false",
                         "webInputFocusTrackedStateId": trackedStateId,
@@ -7912,6 +7993,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         "webInputFocusSeeded": "false",
                         "webInputFocusElementId": inputId,
                         "webInputFocusSecondaryElementId": secondaryInputId,
+                        "webInputFocusTextareaElementId": textareaId,
                         "webInputFocusPrimaryCenterX": "\(primaryCenterX)",
                         "webInputFocusPrimaryCenterY": "\(primaryCenterY)",
                         "webInputFocusPrimaryClickOffsetX": "\(primaryClickOffsetX)",
@@ -7919,26 +8001,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         "webInputFocusSecondaryCenterX": "\(secondaryCenterX)",
                         "webInputFocusSecondaryCenterY": "\(secondaryCenterY)",
                         "webInputFocusSecondaryClickOffsetX": "\(secondaryClickOffsetX)",
-                    "webInputFocusSecondaryClickOffsetY": "\(secondaryClickOffsetY)",
-                    "webInputFocusActiveElementId": activeId,
-                    "webInputFocusTrackerInstalled": trackerInstalled ? "true" : "false",
-                    "webInputFocusTrackedStateId": trackedStateId,
-                    "webInputFocusReadyState": readyState,
-                    "webInputFocusArrowDownCount": "\(arrowDown)",
-                    "webInputFocusArrowUpCount": "\(arrowUp)",
-                    "webInputFocusCommandShiftDownCount": "\(commandShiftDown)",
-                    "webInputFocusCommandShiftUpCount": "\(commandShiftUp)",
-                    "webInputFocusSelectionStart": selectionStart.map(String.init) ?? "",
-                    "webInputFocusSelectionEnd": selectionEnd.map(String.init) ?? "",
+                        "webInputFocusSecondaryClickOffsetY": "\(secondaryClickOffsetY)",
+                        "webInputFocusTextareaCenterX": "\(textareaCenterX)",
+                        "webInputFocusTextareaCenterY": "\(textareaCenterY)",
+                        "webInputFocusTextareaClickOffsetX": "\(textareaClickOffsetX)",
+                        "webInputFocusTextareaClickOffsetY": "\(textareaClickOffsetY)",
+                        "webInputFocusActiveElementId": activeId,
+                        "webInputFocusTrackerInstalled": trackerInstalled ? "true" : "false",
+                        "webInputFocusTrackedStateId": trackedStateId,
+                        "webInputFocusReadyState": readyState,
+                        "webInputFocusArrowDownCount": "\(arrowDown)",
+                        "webInputFocusArrowUpCount": "\(arrowUp)",
+                        "webInputFocusCommandShiftDownCount": "\(commandShiftDown)",
+                        "webInputFocusCommandShiftUpCount": "\(commandShiftUp)",
+                        "webInputFocusSelectionStart": selectionStart.map(String.init) ?? "",
+                        "webInputFocusSelectionEnd": selectionEnd.map(String.init) ?? "",
                         "setupError":
                         "Timed out focusing page input for omnibar restore test " +
-                        "focused=\(focused) inputId=\(inputId) secondaryInputId=\(secondaryInputId) " +
+                        "focused=\(focused) inputId=\(inputId) secondaryInputId=\(secondaryInputId) textareaId=\(textareaId) " +
                         "activeId=\(activeId) trackerInstalled=\(trackerInstalled) trackedStateId=\(trackedStateId) " +
                         "readyState=\(readyState) windowAvailable=\(windowAvailable) " +
                         "primaryCenterX=\(primaryCenterX) primaryCenterY=\(primaryCenterY) " +
                         "primaryClickOffsetX=\(primaryClickOffsetX) primaryClickOffsetY=\(primaryClickOffsetY) " +
                         "secondaryCenterX=\(secondaryCenterX) secondaryCenterY=\(secondaryCenterY) " +
-                        "secondaryClickOffsetX=\(secondaryClickOffsetX) secondaryClickOffsetY=\(secondaryClickOffsetY)"
+                        "secondaryClickOffsetX=\(secondaryClickOffsetX) secondaryClickOffsetY=\(secondaryClickOffsetY) " +
+                        "textareaCenterX=\(textareaCenterX) textareaCenterY=\(textareaCenterY) " +
+                        "textareaClickOffsetX=\(textareaClickOffsetX) textareaClickOffsetY=\(textareaClickOffsetY)"
                 ])
             }
         }
