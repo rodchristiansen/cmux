@@ -171,6 +171,17 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$APP_PLIST"
           /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$APP_PLIST"
 
+      - name: Rename app for branch canary runs
+        if: steps.guard_release_assets.outputs.skip_all != 'true' && github.ref_type != 'tag'
+        run: |
+          set -euo pipefail
+          APP_DIR="build/Build/Products/Release"
+          APP_PATH="${APP_DIR}/cmux.app"
+          APP_PLIST="${APP_PATH}/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName cmux PASSKEY CANARY" "$APP_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName cmux PASSKEY CANARY" "$APP_PLIST"
+          mv "$APP_PATH" "${APP_DIR}/cmux PASSKEY CANARY.app"
+
       - name: Import signing cert
         if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
@@ -204,11 +215,15 @@ jobs:
             echo "Missing APPLE_SIGNING_IDENTITY secret" >&2
             exit 1
           fi
-          APP_PATH="build/Build/Products/Release/cmux.app"
+          APP_PATH="$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -n 1)"
           ENTITLEMENTS="cmux.entitlements"
           CLI_PATH="$APP_PATH/Contents/Resources/bin/cmux"
+          HELPER_PATH="$APP_PATH/Contents/Resources/bin/ghostty"
           if [ -f "$CLI_PATH" ]; then
             /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" "$CLI_PATH"
+          fi
+          if [ -f "$HELPER_PATH" ]; then
+            /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" "$HELPER_PATH"
           fi
           /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" --deep "$APP_PATH"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -225,7 +240,7 @@ jobs:
             echo "Missing notarization secrets (APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID)" >&2
             exit 1
           fi
-          APP_PATH="build/Build/Products/Release/cmux.app"
+          APP_PATH="$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -n 1)"
           ZIP_SUBMIT="cmux-notary.zip"
           DMG_RELEASE="cmux-macos.dmg"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_SUBMIT"
@@ -241,25 +256,46 @@ jobs:
           xcrun stapler validate "$APP_PATH"
           spctl -a -vv --type execute "$APP_PATH"
           rm -f "$ZIP_SUBMIT"
-          # create-dmg generates a styled drag-to-install DMG
-          create-dmg \
-            --identity="$APPLE_SIGNING_IDENTITY" \
-            "$APP_PATH" \
-            ./
-          mv ./cmux*.dmg "$DMG_RELEASE"
-          DMG_SUBMIT_JSON="$(xcrun notarytool submit "$DMG_RELEASE" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait --output-format json)"
-          DMG_SUBMIT_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$DMG_SUBMIT_JSON")"
-          DMG_STATUS="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' <<<"$DMG_SUBMIT_JSON")"
-          if [ "$DMG_STATUS" != "Accepted" ]; then
-            echo "DMG notarization failed with status: $DMG_STATUS" >&2
-            xcrun notarytool log "$DMG_SUBMIT_ID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" || true
-            exit 1
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # create-dmg generates a styled drag-to-install DMG
+            create-dmg \
+              --identity="$APPLE_SIGNING_IDENTITY" \
+              "$APP_PATH" \
+              ./
+            mv ./cmux*.dmg "$DMG_RELEASE"
+            DMG_SUBMIT_JSON="$(xcrun notarytool submit "$DMG_RELEASE" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait --output-format json)"
+            DMG_SUBMIT_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$DMG_SUBMIT_JSON")"
+            DMG_STATUS="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' <<<"$DMG_SUBMIT_JSON")"
+            if [ "$DMG_STATUS" != "Accepted" ]; then
+              echo "DMG notarization failed with status: $DMG_STATUS" >&2
+              xcrun notarytool log "$DMG_SUBMIT_ID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" || true
+              exit 1
+            fi
+            xcrun stapler staple "$DMG_RELEASE"
+            xcrun stapler validate "$DMG_RELEASE"
           fi
-          xcrun stapler staple "$DMG_RELEASE"
-          xcrun stapler validate "$DMG_RELEASE"
+
+      - name: Collect branch canary artifact
+        if: steps.guard_release_assets.outputs.skip_all != 'true' && github.ref_type != 'tag'
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          APP_PLIST="${APP_PATH}/Contents/Info.plist"
+          /usr/bin/codesign -d --entitlements :- "$APP_PATH" > passkey-canary-entitlements.plist
+          {
+            echo "Bundle identifier:"
+            /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PLIST"
+            echo
+            echo "Bundle name:"
+            /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$APP_PLIST"
+            echo
+            echo "Code signing details:"
+            /usr/bin/codesign -dv "$APP_PATH" 2>&1
+          } > passkey-canary-metadata.txt
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" cmux-passkey-canary.zip
 
       - name: Upload dSYMs to Sentry
-        if: steps.guard_release_assets.outputs.skip_all != 'true'
+        if: steps.guard_release_assets.outputs.skip_all != 'true' && github.ref_type == 'tag'
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: manaflow
@@ -272,8 +308,19 @@ jobs:
           brew install getsentry/tools/sentry-cli || true
           sentry-cli debug-files upload --include-sources build/Build/Products/Release/
 
+      - name: Upload branch canary artifact
+        if: steps.guard_release_assets.outputs.skip_all != 'true' && github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: passkey-stable-id-canary
+          path: |
+            cmux-passkey-canary.zip
+            passkey-canary-entitlements.plist
+            passkey-canary-metadata.txt
+          retention-days: 3
+
       - name: Generate Sparkle appcast
-        if: steps.guard_release_assets.outputs.skip_all != 'true'
+        if: steps.guard_release_assets.outputs.skip_all != 'true' && github.ref_type == 'tag'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -284,7 +331,7 @@ jobs:
           ./scripts/sparkle_generate_appcast.sh cmux-macos.dmg "$GITHUB_REF_NAME" appcast.xml
 
       - name: Upload release asset
-        if: steps.guard_release_assets.outputs.skip_upload != 'true'
+        if: steps.guard_release_assets.outputs.skip_upload != 'true' && github.ref_type == 'tag'
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           files: |
