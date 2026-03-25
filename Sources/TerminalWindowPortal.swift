@@ -720,10 +720,20 @@ final class WindowTerminalPortal: NSObject {
             frameInContainer.size.height.isFinite
         guard hasFiniteFrame else { return false }
 
-        if !Self.rectApproximatelyEqual(hostView.frame, frameInContainer) {
+        // Offset the host view to start at the sidebar boundary so
+        // masksToBounds clips terminals at the sidebar edge.
+        let sidebarW = PaperLayoutController.sidebarWidth
+        let adjustedFrame = NSRect(
+            x: frameInContainer.origin.x + sidebarW,
+            y: frameInContainer.origin.y,
+            width: max(0, frameInContainer.width - sidebarW),
+            height: frameInContainer.height
+        )
+
+        if !Self.rectApproximatelyEqual(hostView.frame, adjustedFrame) {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            hostView.frame = frameInContainer
+            hostView.frame = adjustedFrame
             CATransaction.commit()
 #if DEBUG
             dlog(
@@ -1461,40 +1471,26 @@ final class WindowTerminalPortal: NSObject {
         }
 
         if hasFiniteFrame {
-            // The terminal's BOUNDS stay at the full pane size (stable PTY
-            // columns). The FRAME is clipped to the visible area (sidebar
-            // to viewport right edge) using the clamped targetFrame. The
-            // bounds origin is offset so the visible content within the
-            // frame aligns with the pane's scroll position.
-            let fullSize = unclampedFrameInHost.size
-            let clippedFrame = targetFrame
-            let boundsOffsetX = clippedFrame.origin.x - unclampedFrameInHost.origin.x
-
-            // PTY resize only when the pane's actual size changes, not
-            // when the visible clip region changes during scrolling.
-            let paneResized = abs(oldFrame.width - fullSize.width) > 1 ||
-                              abs(oldFrame.height - fullSize.height) > 1
-
-            // Check if the visible frame changed (position or clip)
-            let visibleFrameChanged = !Self.rectApproximatelyEqual(hostedView.frame, clippedFrame)
-
+            // Use the unclamped frame for both position and size. The host
+            // view itself is offset to start at the sidebar boundary, so its
+            // masksToBounds clips terminals at the sidebar edge. Terminal
+            // coordinates are in host-view space (0 = sidebar edge).
+            let stableFrame = unclampedFrameInHost
+            let sizeChanged = abs(oldFrame.width - stableFrame.width) > 1 ||
+                              abs(oldFrame.height - stableFrame.height) > 1
+            let positionChanged = abs(oldFrame.origin.x - stableFrame.origin.x) > 0.5 ||
+                                  abs(oldFrame.origin.y - stableFrame.origin.y) > 0.5
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            if visibleFrameChanged {
-                hostedView.frame = clippedFrame
-            }
-            // Always keep bounds at the full pane size with scroll offset
-            let expectedBounds = NSRect(
-                x: boundsOffsetX,
-                y: 0,
-                width: fullSize.width,
-                height: fullSize.height
-            )
-            if !Self.rectApproximatelyEqual(hostedView.bounds, expectedBounds) {
+            if sizeChanged {
+                hostedView.frame = stableFrame
+                let expectedBounds = NSRect(origin: .zero, size: stableFrame.size)
                 hostedView.bounds = expectedBounds
+            } else if positionChanged {
+                hostedView.setFrameOrigin(stableFrame.origin)
             }
             CATransaction.commit()
-            if paneResized {
+            if sizeChanged {
                 hostedView.reconcileGeometryNow()
                 hostedView.refreshSurfaceNow(reason: "portal.frameChange")
             }

@@ -150,10 +150,11 @@ public final class PaperLayoutController {
     /// Current horizontal scroll offset of the viewport. This is the value used
     /// for SwiftUI .offset() and portal compensation. Updated every frame during
     /// animated scrolls so the portal stays in sync with the visual position.
-    /// Current horizontal scroll offset. Geometry notifications are suppressed
-    /// during animated scrolls to prevent per-frame terminal resize. The
-    /// animation completion fires a single final notification.
     var viewportOffset: CGFloat = 0
+
+    /// Current sidebar width, set by ContentView. Used by the portal system
+    /// to clip the host view at the sidebar boundary.
+    @MainActor static var sidebarWidth: CGFloat = 200
 
     private var targetViewportOffset: CGFloat = 0
     private var animationStartOffset: CGFloat = 0

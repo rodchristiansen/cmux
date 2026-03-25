@@ -2068,6 +2068,7 @@ struct ContentView: View {
         withTransaction(Transaction(animation: nil)) {
             sidebarWidth = nextWidth
         }
+        PaperLayoutController.sidebarWidth = nextWidth
     }
 
     private func normalizedSidebarWidth(_ candidate: CGFloat) -> CGFloat {
