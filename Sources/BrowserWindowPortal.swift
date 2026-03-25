@@ -2139,6 +2139,16 @@ final class WindowBrowserPortal: NSObject {
                 self.scheduleExternalGeometrySynchronize()
             }
         })
+        // Paper layout viewport scroll: re-sync browser portal positions
+        geometryObservers.append(center.addObserver(
+            forName: PaperLayoutController.viewportDidScrollNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.synchronizeAllEntriesFromExternalGeometryChange()
+            }
+        })
     }
 
     private func removeGeometryObservers() {
@@ -2311,29 +2321,11 @@ final class WindowBrowserPortal: NSObject {
     /// visible split pane during rearrangement; intersecting through ancestor bounds keeps the
     /// portal locked to the pane the user can actually see.
     private func effectiveAnchorFrameInWindow(for anchorView: NSView) -> NSRect {
-        let frameInWindow = anchorView.convert(anchorView.bounds, to: nil)
-        // Clamp X to visible ancestors (sidebar boundary) but keep original width/height.
-        var clampedX = frameInWindow.origin.x
-        var current = anchorView.superview
-        while let ancestor = current {
-            let ancestorBoundsInWindow = ancestor.convert(ancestor.bounds, to: nil)
-            let finiteAncestorBounds =
-                ancestorBoundsInWindow.origin.x.isFinite &&
-                ancestorBoundsInWindow.origin.y.isFinite &&
-                ancestorBoundsInWindow.size.width.isFinite &&
-                ancestorBoundsInWindow.size.height.isFinite
-            if finiteAncestorBounds {
-                clampedX = max(clampedX, ancestorBoundsInWindow.origin.x)
-            }
-            if ancestor === installedReferenceView { break }
-            current = ancestor.superview
-        }
-        return NSRect(
-            x: clampedX,
-            y: frameInWindow.origin.y,
-            width: frameInWindow.width,
-            height: frameInWindow.height
-        )
+        // Return raw anchor frame without ancestor clipping. The host
+        // view's masksToBounds and sidebar offset handle visual clipping.
+        // Ancestor intersection prevented browser views from going to
+        // negative X during viewport scrolling.
+        return anchorView.convert(anchorView.bounds, to: nil)
     }
 
     private static func frameExtendsOutsideBounds(_ frame: NSRect, bounds: NSRect, epsilon: CGFloat = 0.5) -> Bool {
