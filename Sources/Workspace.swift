@@ -7153,9 +7153,7 @@ final class Workspace: Identifiable, ObservableObject {
         layoutController.focusPane(newPaneId)
 
         // Animate viewport to show the new pane
-        withAnimation(.easeInOut(duration: 0.175)) {
-            layoutController.scrollToRevealFocusedPane(comingFrom: .left)
-        }
+        layoutController.scrollToRevealFocusedPane(comingFrom: .left)
 
         focusPanel(newPanel.id)
 

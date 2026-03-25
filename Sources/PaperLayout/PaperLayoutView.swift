@@ -37,17 +37,9 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
                 }
             }
             .offset(x: -controller.viewportOffset)
-            .animation(
-                controller.configuration.appearance.enableAnimations
-                    ? .easeInOut(duration: controller.configuration.appearance.animationDuration)
-                    : nil,
-                value: controller.viewportOffset
-            )
-            // Pass the viewport offset to descendant views so the portal system
-            // can adjust anchor positions. SwiftUI's .offset() uses CALayer
-            // transforms invisible to NSView.convert, so the portal reads this
-            // environment value instead.
-            .environment(\.paperViewportOffset, controller.viewportOffset)
+            // No SwiftUI .animation() here. Viewport animation is driven
+            // manually via CVDisplayLink so that viewportOffset matches the
+            // visual position on every frame, keeping portal positions in sync.
             .clipped()
             .onAppear {
                 controller.viewportWidth = viewportWidth

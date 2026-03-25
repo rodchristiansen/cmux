@@ -147,12 +147,11 @@ public final class PaperLayoutController {
         }
     }
 
-    /// Current horizontal scroll offset of the viewport (pixels from the left edge of the canvas).
+    /// Current horizontal scroll offset of the viewport. This is the value used
+    /// for SwiftUI .offset() and portal compensation. Updated every frame during
+    /// animated scrolls so the portal stays in sync with the visual position.
     var viewportOffset: CGFloat = 0 {
         didSet {
-            // Update the global viewport offset so the terminal portal system
-            // can adjust anchor positions. SwiftUI's .offset() uses CALayer
-            // transforms invisible to NSView.convert(_:to:nil).
             Self.currentViewportOffset = viewportOffset
             if viewportOffset != oldValue {
                 notifyGeometryChange()
@@ -160,10 +159,89 @@ public final class PaperLayoutController {
         }
     }
 
+    /// Target offset for animated scrolling. Set this instead of viewportOffset
+    /// to trigger a smooth animation.
+    private var targetViewportOffset: CGFloat = 0
+    private var animationStartOffset: CGFloat = 0
+    private var animationStartTime: CFTimeInterval = 0
+    private var displayLink: CVDisplayLink?
+    private var isAnimating = false
+
     /// Global viewport offset readable by the portal system.
-    /// Portal-hosted terminal views need to adjust their anchor frame
-    /// X position by this amount since .offset() doesn't change NSView frames.
     @MainActor static var currentViewportOffset: CGFloat = 0
+
+    /// Animate the viewport offset to a target value over the configured duration.
+    /// Each frame updates viewportOffset so the portal stays in sync.
+    func animateViewportOffset(to target: CGFloat) {
+        let duration = configuration.appearance.enableAnimations
+            ? configuration.appearance.animationDuration
+            : 0
+
+        if duration <= 0 || abs(target - viewportOffset) < 1 {
+            viewportOffset = target
+            return
+        }
+
+        targetViewportOffset = target
+        animationStartOffset = viewportOffset
+        animationStartTime = CACurrentMediaTime()
+        isAnimating = true
+
+        startDisplayLinkIfNeeded()
+    }
+
+    private func startDisplayLinkIfNeeded() {
+        guard displayLink == nil else { return }
+        var dl: CVDisplayLink?
+        CVDisplayLinkCreateWithActiveCGDisplays(&dl)
+        guard let dl else { return }
+
+        let controllerPtr = Unmanaged.passUnretained(self).toOpaque()
+        CVDisplayLinkSetOutputCallback(dl, { _, _, _, _, _, userInfo -> CVReturn in
+            guard let userInfo else { return kCVReturnSuccess }
+            let controller = Unmanaged<PaperLayoutController>.fromOpaque(userInfo).takeUnretainedValue()
+            DispatchQueue.main.async {
+                controller.displayLinkFired()
+            }
+            return kCVReturnSuccess
+        }, controllerPtr)
+
+        CVDisplayLinkStart(dl)
+        displayLink = dl
+    }
+
+    private func stopDisplayLink() {
+        if let dl = displayLink {
+            CVDisplayLinkStop(dl)
+        }
+        displayLink = nil
+        isAnimating = false
+    }
+
+    private func displayLinkFired() {
+        guard isAnimating else { return }
+
+        let elapsed = CACurrentMediaTime() - animationStartTime
+        let duration = configuration.appearance.animationDuration
+        let progress = min(elapsed / duration, 1.0)
+
+        // Ease-in-out cubic
+        let t: Double
+        if progress < 0.5 {
+            t = 4 * progress * progress * progress
+        } else {
+            let p = -2 * progress + 2
+            t = 1 - p * p * p / 2
+        }
+
+        let newOffset = animationStartOffset + (targetViewportOffset - animationStartOffset) * t
+        viewportOffset = newOffset
+
+        if progress >= 1.0 {
+            viewportOffset = targetViewportOffset
+            stopDisplayLink()
+        }
+    }
 
     /// Width of the visible viewport (set by GeometryReader on each layout pass).
     var viewportWidth: CGFloat = 0
@@ -682,7 +760,7 @@ public final class PaperLayoutController {
         let maxOffset = max(0, totalCanvasWidth - viewportWidth)
         targetOffset = max(0, min(targetOffset, maxOffset))
 
-        viewportOffset = targetOffset
+        animateViewportOffset(to: targetOffset)
     }
 
     /// Scroll viewport to center a pane (used for new-pane operations).
@@ -695,7 +773,7 @@ public final class PaperLayoutController {
         let maxOffset = max(0, totalCanvasWidth - viewportWidth)
         targetOffset = max(0, min(targetOffset, maxOffset))
 
-        viewportOffset = targetOffset
+        animateViewportOffset(to: targetOffset)
     }
 
     // MARK: - Zoom (V1: disabled)
