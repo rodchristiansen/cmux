@@ -149,12 +149,6 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
                 }
             }
         }
-        .border(
-            isFocused && controller.panes.count > 1
-                ? Color.accentColor.opacity(0.5)
-                : Color(nsColor: .separatorColor).opacity(controller.panes.count > 1 ? 1 : 0),
-            width: controller.panes.count > 1 ? 1 : 0
-        )
         .overlay(alignment: .trailing) {
             // Resize handle on the right edge (except for the last pane)
             if let paneIndex = controller.paneIndex(pane.id),
