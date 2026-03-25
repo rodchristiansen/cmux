@@ -929,12 +929,32 @@ final class WindowTerminalPortal: NSObject {
     /// visible rect that should drive portal geometry.
     private func effectiveAnchorFrameInWindow(for anchorView: NSView) -> NSRect {
         let frameInWindow = anchorView.convert(anchorView.bounds, to: nil)
-        // Paper layout: skip ancestor intersection clipping. The old logic
-        // walked up the ancestor chain and intersected with each ancestor's
-        // bounds, shrinking the frame when a pane was partially off-screen.
-        // With paper layout, we want the full unclamped pane frame and let
-        // the host view's masksToBounds handle visual clipping.
-        return frameInWindow
+        // Clamp X position to visible ancestor bounds (prevents rendering
+        // over sidebar), but preserve the original width/height so terminal
+        // dimensions stay stable during viewport scrolling.
+        var clampedX = frameInWindow.origin.x
+        let originalWidth = frameInWindow.size.width
+        let originalHeight = frameInWindow.size.height
+        var current = anchorView.superview
+        while let ancestor = current {
+            let ancestorBoundsInWindow = ancestor.convert(ancestor.bounds, to: nil)
+            let finiteAncestorBounds =
+                ancestorBoundsInWindow.origin.x.isFinite &&
+                ancestorBoundsInWindow.origin.y.isFinite &&
+                ancestorBoundsInWindow.size.width.isFinite &&
+                ancestorBoundsInWindow.size.height.isFinite
+            if finiteAncestorBounds {
+                clampedX = max(clampedX, ancestorBoundsInWindow.origin.x)
+            }
+            if ancestor === installedReferenceView { break }
+            current = ancestor.superview
+        }
+        return NSRect(
+            x: clampedX,
+            y: frameInWindow.origin.y,
+            width: originalWidth,
+            height: originalHeight
+        )
     }
 
     private func seededFrameInHost(for anchorView: NSView) -> NSRect? {
@@ -949,13 +969,22 @@ final class WindowTerminalPortal: NSObject {
             frameInHost.size.height.isFinite
         guard hasFiniteFrame else { return nil }
 
+        // Clamp X origin to host bounds (prevents sidebar overlap) but
+        // preserve original width/height for stable terminal dimensions.
         let hostBounds = hostView.bounds
         let hasFiniteHostBounds =
             hostBounds.origin.x.isFinite &&
             hostBounds.origin.y.isFinite &&
             hostBounds.size.width.isFinite &&
             hostBounds.size.height.isFinite
-        // Paper layout: return unclamped frame. The host clips visually.
+        if hasFiniteHostBounds {
+            return NSRect(
+                x: max(frameInHost.origin.x, hostBounds.origin.x),
+                y: frameInHost.origin.y,
+                width: frameInHost.width,
+                height: frameInHost.height
+            )
+        }
         return frameInHost
     }
 
@@ -1384,9 +1413,16 @@ final class WindowTerminalPortal: NSObject {
 
         let oldFrame = hostedView.frame
 #if DEBUG
-        // Verbose portal sync logging (uncomment for debugging portal positioning)
-        // let anchorInWin = anchorView.convert(anchorView.bounds, to: nil)
-        // dlog("portal.paper.sync hosted=\(portalDebugToken(hostedView)) anchor=\(Int(anchorInWin.origin.x)),\(Int(anchorInWin.origin.y)) \(Int(anchorInWin.width))x\(Int(anchorInWin.height)) target=\(Int(targetFrame.origin.x)),\(Int(targetFrame.origin.y)) \(Int(targetFrame.width))x\(Int(targetFrame.height)) hide=\(shouldHide ? 1 : 0) out=\(outsideHostBounds ? 1 : 0) vis=\(entry.visibleInUI ? 1 : 0)")
+        // Log anchor (SwiftUI container) vs target (terminal frame) for drift debugging
+        if !shouldHide && entry.visibleInUI {
+            let anchorInWin = anchorView.convert(anchorView.bounds, to: nil)
+            dlog(
+                "portal.pos container=\(Int(anchorInWin.origin.x))x\(Int(anchorInWin.width)) " +
+                "terminal=\(Int(targetFrame.origin.x))x\(Int(targetFrame.width)) " +
+                "host=\(Int(hostBounds.width)) " +
+                "drift=\(Int(targetFrame.width) - Int(anchorInWin.width))"
+            )
+        }
         let frameWasClamped = hasFiniteFrame && !Self.rectApproximatelyEqual(frameInHost, targetFrame)
         if frameWasClamped {
             dlog(

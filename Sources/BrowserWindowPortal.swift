@@ -2304,7 +2304,28 @@ final class WindowBrowserPortal: NSObject {
     /// portal locked to the pane the user can actually see.
     private func effectiveAnchorFrameInWindow(for anchorView: NSView) -> NSRect {
         let frameInWindow = anchorView.convert(anchorView.bounds, to: nil)
-        return frameInWindow
+        // Clamp X to visible ancestors (sidebar boundary) but keep original width/height.
+        var clampedX = frameInWindow.origin.x
+        var current = anchorView.superview
+        while let ancestor = current {
+            let ancestorBoundsInWindow = ancestor.convert(ancestor.bounds, to: nil)
+            let finiteAncestorBounds =
+                ancestorBoundsInWindow.origin.x.isFinite &&
+                ancestorBoundsInWindow.origin.y.isFinite &&
+                ancestorBoundsInWindow.size.width.isFinite &&
+                ancestorBoundsInWindow.size.height.isFinite
+            if finiteAncestorBounds {
+                clampedX = max(clampedX, ancestorBoundsInWindow.origin.x)
+            }
+            if ancestor === installedReferenceView { break }
+            current = ancestor.superview
+        }
+        return NSRect(
+            x: clampedX,
+            y: frameInWindow.origin.y,
+            width: frameInWindow.width,
+            height: frameInWindow.height
+        )
     }
 
     private static func frameExtendsOutsideBounds(_ frame: NSRect, bounds: NSRect, epsilon: CGFloat = 0.5) -> Bool {
