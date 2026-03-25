@@ -130,8 +130,12 @@ final class CEFBrowserView: NSView {
 
         callbacksStorage = callbacks
 
+        // Pass ourselves as the parent view so CEF renders inside
+        // our view hierarchy instead of creating a separate window.
+        let parentPtr = Unmanaged.passUnretained(self).toOpaque()
+
         browserHandle = withUnsafePointer(to: &callbacksStorage!) { ptr in
-            cef_bridge_browser_create(profileHandle, initialURL, ptr)
+            cef_bridge_browser_create(profileHandle, initialURL, parentPtr, ptr)
         }
 
         guard browserHandle != nil else {
@@ -139,13 +143,20 @@ final class CEFBrowserView: NSView {
             return
         }
 
-        // Get the NSView created by CEF and add it as a subview
-        if let nsviewPtr = cef_bridge_browser_get_nsview(browserHandle) {
+        // CEF creates a child NSView inside our view (since we passed parent_view).
+        // Find it and track it for layout.
+        if let firstChild = subviews.first {
+            firstChild.autoresizingMask = [.width, .height]
+            cefChildView = firstChild
+        } else if let nsviewPtr = cef_bridge_browser_get_nsview(browserHandle) {
+            // Fallback: get the view handle directly
             let childView = Unmanaged<NSView>.fromOpaque(nsviewPtr)
                 .takeUnretainedValue()
-            childView.frame = bounds
-            childView.autoresizingMask = [.width, .height]
-            addSubview(childView)
+            if childView !== self && childView.superview !== self {
+                childView.frame = bounds
+                childView.autoresizingMask = [.width, .height]
+                addSubview(childView)
+            }
             cefChildView = childView
         }
     }

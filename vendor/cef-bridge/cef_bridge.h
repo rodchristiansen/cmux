@@ -203,13 +203,13 @@ int cef_bridge_profile_clear_data(cef_bridge_profile_t profile);
 // Browser view
 // -------------------------------------------------------------------
 
-/// Create a new browser view. Returns an opaque handle that wraps
-/// a CefBrowserView. The returned browser's NSView can be retrieved
-/// with cef_bridge_browser_get_nsview(). The browser starts loading
-/// `initial_url` if non-NULL.
+/// Create a new browser view. The browser renders inside `parent_view`
+/// (an NSView*). Pass NULL to create a hidden browser with no view.
+/// The browser starts loading `initial_url` if non-NULL.
 cef_bridge_browser_t cef_bridge_browser_create(
     cef_bridge_profile_t profile,
     const char* initial_url,
+    void* parent_view,
     const cef_bridge_client_callbacks* callbacks
 );
 

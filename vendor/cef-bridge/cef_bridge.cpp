@@ -273,6 +273,10 @@ int cef_bridge_initialize(
     settings.no_sandbox = true;
     settings.external_message_pump = true;
     settings.multi_threaded_message_loop = false;
+    // Don't persist session cookies to avoid keychain access prompts.
+    // Chromium encrypts cookies via macOS Keychain ("Chromium Safe Storage")
+    // which triggers a password prompt for unsigned/dev-signed apps.
+    settings.persist_session_cookies = false;
 
     CefString(&settings.framework_dir_path) =
         std::string(framework_path) + "/Chromium Embedded Framework.framework";
@@ -280,6 +284,12 @@ int cef_bridge_initialize(
     CefString(&settings.cache_path) = cache_root;
 
     CefRefPtr<BridgeApp> app(new BridgeApp());
+
+    // Add command-line switch to use mock keychain for cookie encryption.
+    // This prevents the "wants to use your confidential information"
+    // keychain prompt on launch.
+    CefRefPtr<CefCommandLine> command_line = CefCommandLine::CreateCommandLine();
+    command_line->AppendSwitch("use-mock-keychain");
 
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         return CEF_BRIDGE_ERR_FAILED;
@@ -342,6 +352,7 @@ int cef_bridge_profile_clear_data(cef_bridge_profile_t profile) {
 cef_bridge_browser_t cef_bridge_browser_create(
     cef_bridge_profile_t profile,
     const char* initial_url,
+    void* parent_view,
     const cef_bridge_client_callbacks* callbacks
 ) {
     if (!g_initialized || !callbacks) return nullptr;
@@ -351,9 +362,12 @@ cef_bridge_browser_t cef_bridge_browser_create(
     bb->client->SetOwner(bb);
 
     CefWindowInfo window_info;
-    // For macOS windowed rendering: we pass no parent view initially.
-    // The NSView will be retrieved after creation.
     window_info.size = sizeof(CefWindowInfo);
+    // Set the parent view so CEF renders inside our view hierarchy
+    // instead of creating its own top-level window.
+    if (parent_view) {
+        window_info.parent_view = parent_view;
+    }
 
     CefBrowserSettings browser_settings;
 
@@ -688,7 +702,7 @@ cef_bridge_profile_t cef_bridge_profile_create(const char* p) { return nullptr; 
 void cef_bridge_profile_destroy(cef_bridge_profile_t p) {}
 int cef_bridge_profile_clear_data(cef_bridge_profile_t p) { return CEF_BRIDGE_ERR_NOT_INIT; }
 
-cef_bridge_browser_t cef_bridge_browser_create(cef_bridge_profile_t p, const char* u, const cef_bridge_client_callbacks* c) { return nullptr; }
+cef_bridge_browser_t cef_bridge_browser_create(cef_bridge_profile_t p, const char* u, void* v, const cef_bridge_client_callbacks* c) { return nullptr; }
 void cef_bridge_browser_destroy(cef_bridge_browser_t b) {}
 void* cef_bridge_browser_get_nsview(cef_bridge_browser_t b) { return nullptr; }
 
