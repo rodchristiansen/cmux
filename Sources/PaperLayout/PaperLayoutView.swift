@@ -129,7 +129,8 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
                 )
             }
 
-            // Content area
+            // Content area (1px trailing padding for the separator between panes)
+            let isLastPane = controller.paneIndex(pane.id) == controller.panes.count - 1
             ZStack {
                 if pane.tabs.isEmpty {
                     emptyPaneBuilder(pane.id)
@@ -146,6 +147,14 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
                         let tab = PaperTab(from: selectedItem)
                         contentBuilder(tab, pane.id)
                     }
+                }
+            }
+            .padding(.trailing, isLastPane ? 0 : 1)
+            .background(alignment: .trailing) {
+                if !isLastPane {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(width: 1)
                 }
             }
         }
