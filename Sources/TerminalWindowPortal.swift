@@ -1464,12 +1464,11 @@ final class WindowTerminalPortal: NSObject {
             // Hybrid frame: use the clamped X from ancestor intersection
             // (prevents sidebar overlap) but the unclamped width/height
             // (prevents terminal resize during viewport scrolling).
-            let stableFrame = NSRect(
-                x: targetFrame.origin.x,
-                y: unclampedFrameInHost.origin.y,
-                width: unclampedFrameInHost.width,
-                height: unclampedFrameInHost.height
-            )
+            // Use the full unclamped frame for position AND size.
+            // The host view's masksToBounds clips visually at all edges
+            // (left/sidebar boundary and right/viewport edge). This keeps
+            // both terminal dimensions and position tracking stable.
+            let stableFrame = unclampedFrameInHost
             if entry.visibleInUI && !shouldHide {
                 let anchorInWin = anchorView.convert(anchorView.bounds, to: nil)
                 dlog(
