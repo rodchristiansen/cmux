@@ -159,23 +159,23 @@ public final class PaperLayoutController {
         }
     }
 
-    /// Target offset for animated scrolling. Set this instead of viewportOffset
-    /// to trigger a smooth animation.
     private var targetViewportOffset: CGFloat = 0
     private var animationStartOffset: CGFloat = 0
     private var animationStartTime: CFTimeInterval = 0
-    private var displayLink: CVDisplayLink?
-    private var isAnimating = false
+    private var animationTimer: DispatchSourceTimer?
 
     /// Global viewport offset readable by the portal system.
     @MainActor static var currentViewportOffset: CGFloat = 0
 
     /// Animate the viewport offset to a target value over the configured duration.
-    /// Each frame updates viewportOffset so the portal stays in sync.
     func animateViewportOffset(to target: CGFloat) {
         let duration = configuration.appearance.enableAnimations
             ? configuration.appearance.animationDuration
             : 0
+
+        // Cancel any in-progress animation
+        animationTimer?.cancel()
+        animationTimer = nil
 
         if duration <= 0 || abs(target - viewportOffset) < 1 {
             viewportOffset = target
@@ -185,42 +185,18 @@ public final class PaperLayoutController {
         targetViewportOffset = target
         animationStartOffset = viewportOffset
         animationStartTime = CACurrentMediaTime()
-        isAnimating = true
 
-        startDisplayLinkIfNeeded()
-    }
-
-    private func startDisplayLinkIfNeeded() {
-        guard displayLink == nil else { return }
-        var dl: CVDisplayLink?
-        CVDisplayLinkCreateWithActiveCGDisplays(&dl)
-        guard let dl else { return }
-
-        let controllerPtr = Unmanaged.passUnretained(self).toOpaque()
-        CVDisplayLinkSetOutputCallback(dl, { _, _, _, _, _, userInfo -> CVReturn in
-            guard let userInfo else { return kCVReturnSuccess }
-            let controller = Unmanaged<PaperLayoutController>.fromOpaque(userInfo).takeUnretainedValue()
-            DispatchQueue.main.async {
-                controller.displayLinkFired()
-            }
-            return kCVReturnSuccess
-        }, controllerPtr)
-
-        CVDisplayLinkStart(dl)
-        displayLink = dl
-    }
-
-    private func stopDisplayLink() {
-        if let dl = displayLink {
-            CVDisplayLinkStop(dl)
+        // ~120fps timer on the main queue
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(8))
+        timer.setEventHandler { [weak self] in
+            self?.animationTick()
         }
-        displayLink = nil
-        isAnimating = false
+        animationTimer = timer
+        timer.resume()
     }
 
-    private func displayLinkFired() {
-        guard isAnimating else { return }
-
+    private func animationTick() {
         let elapsed = CACurrentMediaTime() - animationStartTime
         let duration = configuration.appearance.animationDuration
         let progress = min(elapsed / duration, 1.0)
@@ -234,12 +210,12 @@ public final class PaperLayoutController {
             t = 1 - p * p * p / 2
         }
 
-        let newOffset = animationStartOffset + (targetViewportOffset - animationStartOffset) * t
-        viewportOffset = newOffset
+        viewportOffset = animationStartOffset + (targetViewportOffset - animationStartOffset) * t
 
         if progress >= 1.0 {
             viewportOffset = targetViewportOffset
-            stopDisplayLink()
+            animationTimer?.cancel()
+            animationTimer = nil
         }
     }
 
