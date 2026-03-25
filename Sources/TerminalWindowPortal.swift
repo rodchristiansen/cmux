@@ -1412,16 +1412,6 @@ final class WindowTerminalPortal: NSObject {
 
         let oldFrame = hostedView.frame
 #if DEBUG
-        // Log anchor (SwiftUI container) vs target (terminal frame) for drift debugging
-        if !shouldHide && entry.visibleInUI {
-            let anchorInWin = anchorView.convert(anchorView.bounds, to: nil)
-            dlog(
-                "portal.pos container=\(Int(anchorInWin.origin.x))x\(Int(anchorInWin.width)) " +
-                "terminal=\(Int(targetFrame.origin.x))x\(Int(targetFrame.width)) " +
-                "host=\(Int(hostBounds.width)) " +
-                "drift=\(Int(targetFrame.width) - Int(anchorInWin.width))"
-            )
-        }
         let frameWasClamped = hasFiniteFrame && !Self.rectApproximatelyEqual(frameInHost, targetFrame)
         if frameWasClamped {
             dlog(
@@ -1480,6 +1470,14 @@ final class WindowTerminalPortal: NSObject {
                 width: unclampedFrameInHost.width,
                 height: unclampedFrameInHost.height
             )
+            if entry.visibleInUI && !shouldHide {
+                let anchorInWin = anchorView.convert(anchorView.bounds, to: nil)
+                dlog(
+                    "portal.pos anchor=\(Int(anchorInWin.origin.x))x\(Int(anchorInWin.width)) " +
+                    "stable=\(Int(stableFrame.origin.x))x\(Int(stableFrame.width)) " +
+                    "host=\(Int(hostBounds.width))"
+                )
+            }
             let sizeChanged = abs(oldFrame.width - stableFrame.width) > 1 ||
                               abs(oldFrame.height - stableFrame.height) > 1
             let positionChanged = abs(oldFrame.origin.x - stableFrame.origin.x) > 0.5 ||
