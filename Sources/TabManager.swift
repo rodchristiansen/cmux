@@ -1142,6 +1142,24 @@ class TabManager: ObservableObject {
         focusedBrowserPanel?.hideFind()
     }
 
+    func makeWorkspaceForCreation(
+        title: String,
+        workingDirectory: String?,
+        portOrdinal: Int,
+        configTemplate: ghostty_surface_config_s?,
+        initialTerminalCommand: String?,
+        initialTerminalEnvironment: [String: String]
+    ) -> Workspace {
+        Workspace(
+            title: title,
+            workingDirectory: workingDirectory,
+            portOrdinal: portOrdinal,
+            configTemplate: configTemplate,
+            initialTerminalCommand: initialTerminalCommand,
+            initialTerminalEnvironment: initialTerminalEnvironment
+        )
+    }
+
     @discardableResult
     func addWorkspace(
         workingDirectory overrideWorkingDirectory: String? = nil,
@@ -1166,7 +1184,7 @@ class TabManager: ObservableObject {
         let insertIndex = newTabInsertIndex(snapshot: snapshot, placementOverride: placementOverride)
         let ordinal = Self.nextPortOrdinal
         Self.nextPortOrdinal += 1
-        let newWorkspace = Workspace(
+        let newWorkspace = makeWorkspaceForCreation(
             title: "Terminal \(nextTabCount)",
             workingDirectory: workingDirectory,
             portOrdinal: ordinal,
