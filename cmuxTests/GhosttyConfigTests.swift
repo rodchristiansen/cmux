@@ -1115,7 +1115,7 @@ final class BrowserPanelRemoteStoreTests: XCTestCase {
 
     func testBrowserMoveIntoRemoteWorkspaceRebuildsWebsiteDataStoreScope() throws {
         let source = Workspace()
-        let sourcePaneId = try XCTUnwrap(source.bonsplitController.allPaneIds.first)
+        let sourcePaneId = try XCTUnwrap(source.layoutController.allPaneIds.first)
         let sourceBrowser = try XCTUnwrap(source.newBrowserSurface(inPane: sourcePaneId, focus: false))
         let localStore = sourceBrowser.webView.configuration.websiteDataStore
         XCTAssertTrue(localStore === WKWebsiteDataStore.default())
@@ -1136,7 +1136,7 @@ final class BrowserPanelRemoteStoreTests: XCTestCase {
             ),
             autoConnect: false
         )
-        let destinationPaneId = try XCTUnwrap(destination.bonsplitController.allPaneIds.first)
+        let destinationPaneId = try XCTUnwrap(destination.layoutController.allPaneIds.first)
         let destinationBrowser = try XCTUnwrap(destination.newBrowserSurface(inPane: destinationPaneId, focus: false))
         let destinationStore = destinationBrowser.webView.configuration.websiteDataStore
         XCTAssertFalse(destinationStore === WKWebsiteDataStore.default())
@@ -1168,14 +1168,14 @@ final class BrowserPanelRemoteStoreTests: XCTestCase {
             ),
             autoConnect: false
         )
-        let sourcePaneId = try XCTUnwrap(source.bonsplitController.allPaneIds.first)
+        let sourcePaneId = try XCTUnwrap(source.layoutController.allPaneIds.first)
         let movedBrowser = try XCTUnwrap(source.newBrowserSurface(inPane: sourcePaneId, focus: false))
         let remainingRemoteBrowser = try XCTUnwrap(source.newBrowserSurface(inPane: sourcePaneId, focus: false))
         let remoteStore = remainingRemoteBrowser.webView.configuration.websiteDataStore
         XCTAssertFalse(remoteStore === WKWebsiteDataStore.default())
 
         let destination = Workspace()
-        let destinationPaneId = try XCTUnwrap(destination.bonsplitController.allPaneIds.first)
+        let destinationPaneId = try XCTUnwrap(destination.layoutController.allPaneIds.first)
         let detached = try XCTUnwrap(source.detachSurface(panelId: movedBrowser.id))
         let attachedPanelId = try XCTUnwrap(
             destination.attachDetachedSurface(detached, inPane: destinationPaneId, focus: false)
@@ -1189,7 +1189,7 @@ final class BrowserPanelRemoteStoreTests: XCTestCase {
 
     func testNewTerminalSurfaceStaysRemoteWhileBrowserPanelsKeepWorkspaceRemote() throws {
         let workspace = Workspace()
-        let paneId = try XCTUnwrap(workspace.bonsplitController.allPaneIds.first)
+        let paneId = try XCTUnwrap(workspace.layoutController.allPaneIds.first)
         let initialTerminalId = try XCTUnwrap(workspace.focusedPanelId)
         let configuration = WorkspaceRemoteConfiguration(
             destination: "cmux-macmini",

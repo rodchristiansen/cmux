@@ -304,7 +304,7 @@ final class WorkspaceRemoteConnectionTests: XCTestCase {
 
         let panelID = try XCTUnwrap(source.focusedTerminalPanel?.id)
         let sourcePaneID = try XCTUnwrap(source.paneId(forPanelId: panelID))
-        let destinationPaneID = try XCTUnwrap(destination.bonsplitController.allPaneIds.first)
+        let destinationPaneID = try XCTUnwrap(destination.layoutController.allPaneIds.first)
         source.surfaceTTYNames[panelID] = "/dev/ttys004"
 
         let detached = try XCTUnwrap(source.detachSurface(panelId: panelID))
@@ -318,7 +318,7 @@ final class WorkspaceRemoteConnectionTests: XCTestCase {
 
         XCTAssertEqual(restoredPanelID, panelID)
         XCTAssertEqual(destination.surfaceTTYNames[panelID], "/dev/ttys004")
-        XCTAssertEqual(source.bonsplitController.tabs(inPane: sourcePaneID).count, 0)
+        XCTAssertEqual(source.layoutController.tabs(inPane: sourcePaneID).count, 0)
     }
 
     func testDetectedSSHUploadFailureCleansUpEarlierRemoteUploads() throws {
