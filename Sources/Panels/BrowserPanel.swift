@@ -3,6 +3,8 @@ import Combine
 import WebKit
 import AppKit
 import Bonsplit
+import Network
+import CFNetwork
 import SQLite3
 import CryptoKit
 #if canImport(CommonCrypto)
@@ -22,6 +24,18 @@ fileprivate func dedupedCanonicalURLs(_ urls: [URL]) -> [URL] {
         }
     }
     return result
+}
+
+struct BrowserProxyEndpoint: Equatable {
+    let host: String
+    let port: Int
+}
+
+struct BrowserRemoteWorkspaceStatus: Equatable {
+    let target: String
+    let connectionState: WorkspaceRemoteConnectionState
+    let heartbeatCount: Int
+    let lastHeartbeatAt: Date?
 }
 
 enum GhosttyBackgroundTheme {
@@ -195,6 +209,111 @@ enum BrowserThemeSettings {
         }
 
         return defaultMode
+    }
+}
+
+enum BrowserImportHintVariant: String, CaseIterable, Identifiable {
+    case inlineStrip
+    case floatingCard
+    case toolbarChip
+    case settingsOnly
+
+    var id: String { rawValue }
+}
+
+enum BrowserImportHintBlankTabPlacement: Equatable {
+    case hidden
+    case inlineStrip
+    case floatingCard
+    case toolbarChip
+}
+
+enum BrowserImportHintSettingsStatus: Equatable {
+    case visible
+    case hidden
+    case settingsOnly
+}
+
+struct BrowserImportHintPresentation: Equatable {
+    let blankTabPlacement: BrowserImportHintBlankTabPlacement
+    let settingsStatus: BrowserImportHintSettingsStatus
+
+    init(
+        variant: BrowserImportHintVariant,
+        showOnBlankTabs: Bool,
+        isDismissed: Bool
+    ) {
+        if variant == .settingsOnly {
+            blankTabPlacement = .hidden
+            settingsStatus = .settingsOnly
+            return
+        }
+
+        if !showOnBlankTabs || isDismissed {
+            blankTabPlacement = .hidden
+            settingsStatus = .hidden
+            return
+        }
+
+        switch variant {
+        case .inlineStrip:
+            blankTabPlacement = .inlineStrip
+        case .floatingCard:
+            blankTabPlacement = .floatingCard
+        case .toolbarChip:
+            blankTabPlacement = .toolbarChip
+        case .settingsOnly:
+            blankTabPlacement = .hidden
+        }
+        settingsStatus = .visible
+    }
+}
+
+enum BrowserImportHintSettings {
+    static let variantKey = "browserImportHintVariant"
+    static let showOnBlankTabsKey = "browserImportHintShowOnBlankTabs"
+    static let dismissedKey = "browserImportHintDismissed"
+    static let defaultVariant: BrowserImportHintVariant = .toolbarChip
+    static let defaultShowOnBlankTabs = true
+    static let defaultDismissed = false
+
+    static func variant(for rawValue: String?) -> BrowserImportHintVariant {
+        guard let rawValue, let variant = BrowserImportHintVariant(rawValue: rawValue) else {
+            return defaultVariant
+        }
+        return variant
+    }
+
+    static func variant(defaults: UserDefaults = .standard) -> BrowserImportHintVariant {
+        variant(for: defaults.string(forKey: variantKey))
+    }
+
+    static func showOnBlankTabs(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: showOnBlankTabsKey) == nil {
+            return defaultShowOnBlankTabs
+        }
+        return defaults.bool(forKey: showOnBlankTabsKey)
+    }
+
+    static func isDismissed(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: dismissedKey) == nil {
+            return defaultDismissed
+        }
+        return defaults.bool(forKey: dismissedKey)
+    }
+
+    static func presentation(defaults: UserDefaults = .standard) -> BrowserImportHintPresentation {
+        BrowserImportHintPresentation(
+            variant: variant(defaults: defaults),
+            showOnBlankTabs: showOnBlankTabs(defaults: defaults),
+            isDismissed: isDismissed(defaults: defaults)
+        )
+    }
+
+    static func reset(defaults: UserDefaults = .standard) {
+        defaults.set(defaultVariant.rawValue, forKey: variantKey)
+        defaults.set(defaultShowOnBlankTabs, forKey: showOnBlankTabsKey)
+        defaults.set(defaultDismissed, forKey: dismissedKey)
     }
 }
 
@@ -1590,6 +1709,14 @@ final class BrowserPortalAnchorView: NSView {
 
 @MainActor
 final class BrowserPanel: Panel, ObservableObject {
+    private static let remoteLoopbackProxyAliasHost = "cmux-loopback.localtest.me"
+    private static let remoteLoopbackHosts: Set<String> = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",
+    ]
+
     /// Shared process pool for cookie sharing across all browser panels
     private static let sharedProcessPool = WKProcessPool()
 
@@ -1740,6 +1867,7 @@ final class BrowserPanel: Panel, ObservableObject {
 
     /// The underlying web view
     private(set) var webView: WKWebView
+    private var websiteDataStore: WKWebsiteDataStore
 
     /// Monotonic identity for the current WKWebView instance.
     /// Incremented whenever we replace the underlying WKWebView after a process crash.
@@ -2064,6 +2192,7 @@ final class BrowserPanel: Panel, ObservableObject {
             }
         }
     }
+    @Published private(set) var isElementFullscreenActive: Bool = false
     private var searchNeedleCancellable: AnyCancellable?
     let portalAnchorView = BrowserPortalAnchorView(frame: .zero)
     private struct PortalHostLease {
@@ -2114,12 +2243,25 @@ final class BrowserPanel: Panel, ObservableObject {
     private var developerToolsRestoreRetryAttempt: Int = 0
     private let developerToolsRestoreRetryDelay: TimeInterval = 0.05
     private let developerToolsRestoreRetryMaxAttempts: Int = 40
+    private var remoteProxyEndpoint: BrowserProxyEndpoint?
+    @Published private(set) var remoteWorkspaceStatus: BrowserRemoteWorkspaceStatus?
+    private var usesRemoteWorkspaceProxy: Bool
+    private struct PendingRemoteNavigation {
+        let request: URLRequest
+        let recordTypedNavigation: Bool
+        let preserveRestoredSessionHistory: Bool
+    }
+    private var pendingRemoteNavigation: PendingRemoteNavigation?
     private let developerToolsDetachedOpenGracePeriod: TimeInterval = 0.35
     private var developerToolsDetachedOpenGraceDeadline: Date?
     private var developerToolsTransitionTargetVisible: Bool?
     private var pendingDeveloperToolsTransitionTargetVisible: Bool?
     private var developerToolsTransitionSettleWorkItem: DispatchWorkItem?
+    private var developerToolsVisibilityLossCheckWorkItem: DispatchWorkItem?
     private let developerToolsTransitionSettleDelay: TimeInterval = 0.15
+    private let developerToolsAttachedManualCloseDetectionDelay: TimeInterval = 0.35
+    private var developerToolsLastAttachedHostAt: Date?
+    private var developerToolsLastKnownVisibleAt: Date?
     private var detachedDeveloperToolsWindowCloseObserver: NSObjectProtocol?
     private var preferredAttachedDeveloperToolsWidth: CGFloat?
     private var preferredAttachedDeveloperToolsWidthFraction: CGFloat?
@@ -2301,33 +2443,14 @@ final class BrowserPanel: Panel, ObservableObject {
         false
     }
 
-    private static func makeWebView(profileID: UUID) -> CmuxWebView {
+    private static func makeWebView(
+        profileID: UUID,
+        websiteDataStore: WKWebsiteDataStore? = nil
+    ) -> CmuxWebView {
         let config = WKWebViewConfiguration()
-        config.processPool = BrowserPanel.sharedProcessPool
-        config.mediaTypesRequiringUserActionForPlayback = []
-        config.websiteDataStore = BrowserProfileStore.shared.websiteDataStore(for: profileID)
-
-        // Enable developer extras (DevTools)
-        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-
-        // Enable JavaScript
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Keep browser console/error/dialog telemetry active from document start on every navigation.
-        config.userContentController.addUserScript(
-            WKUserScript(
-                source: Self.telemetryHookBootstrapScriptSource,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            )
-        )
-        // Track the last editable focused element continuously so omnibar exit can
-        // restore page input focus even if capture runs after first-responder handoff.
-        config.userContentController.addUserScript(
-            WKUserScript(
-                source: Self.addressBarFocusTrackingBootstrapScript,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            )
+        configureWebViewConfiguration(
+            config,
+            websiteDataStore: websiteDataStore ?? BrowserProfileStore.shared.websiteDataStore(for: profileID)
         )
 
         let webView = CmuxWebView(frame: .zero, configuration: config)
@@ -2343,6 +2466,46 @@ final class BrowserPanel: Panel, ObservableObject {
         return webView
     }
 
+    static func configureWebViewConfiguration(
+        _ configuration: WKWebViewConfiguration,
+        websiteDataStore: WKWebsiteDataStore,
+        processPool: WKProcessPool = BrowserPanel.sharedProcessPool
+    ) {
+        configuration.processPool = processPool
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        // Ensure browser cookies/storage persist across navigations and launches.
+        // This reduces repeated consent/bot-challenge flows on sites like Google.
+        configuration.websiteDataStore = websiteDataStore
+
+        // Enable developer extras (DevTools)
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        configuration.preferences.isElementFullscreenEnabled = true
+
+        // Enable JavaScript
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Keep browser console/error/dialog telemetry active from document start on every navigation.
+        // Main frame only — injecting into cross-origin iframes causes CAPTCHA providers
+        // (reCAPTCHA, hCaptcha, Cloudflare Turnstile) to detect the overridden console.*
+        // methods and __cmux* globals as environment tampering, failing the challenge.
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.telemetryHookBootstrapScriptSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+        // Track the last editable focused element continuously so omnibar exit can
+        // restore page input focus even if capture runs after first-responder handoff.
+        // Main frame only — same CAPTCHA interference concern as telemetry hooks.
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.addressBarFocusTrackingBootstrapScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+    }
+
     private func bindWebView(_ webView: CmuxWebView) {
         webView.onContextMenuDownloadStateChanged = { [weak self] downloading in
             if downloading {
@@ -2354,9 +2517,40 @@ final class BrowserPanel: Panel, ObservableObject {
         webView.onContextMenuOpenLinkInNewTab = { [weak self] url in
             self?.openLinkInNewTab(url: url)
         }
+        configureNavigationDelegateCallbacks()
         webView.navigationDelegate = navigationDelegate
         webView.uiDelegate = uiDelegate
         setupObservers(for: webView)
+    }
+
+    private func configureNavigationDelegateCallbacks() {
+        guard let navigationDelegate else { return }
+        let boundWebViewInstanceID = webViewInstanceID
+        let boundHistoryStore = historyStore
+
+        navigationDelegate.didFinish = { [weak self] webView in
+            Task { @MainActor [weak self] in
+                guard let self, self.isCurrentWebView(webView, instanceID: boundWebViewInstanceID) else { return }
+                self.realignRestoredSessionHistoryToLiveCurrentIfPossible()
+                boundHistoryStore.recordVisit(url: webView.url, title: webView.title)
+                self.refreshFavicon(from: webView)
+                self.applyBrowserThemeModeIfNeeded()
+                // Keep find-in-page open through load completion and refresh matches for the new DOM.
+                self.restoreFindStateAfterNavigation(replaySearch: true)
+            }
+        }
+        navigationDelegate.didFailNavigation = { [weak self] failedWebView, failedURL in
+            Task { @MainActor in
+                guard let self, self.isCurrentWebView(failedWebView, instanceID: boundWebViewInstanceID) else { return }
+                // Clear stale title/favicon from the previous page so the tab
+                // shows the failed URL instead of the old page's branding.
+                self.pageTitle = failedURL.isEmpty ? "" : failedURL
+                self.faviconPNGData = nil
+                self.lastFaviconURLString = nil
+                // Keep find-in-page open and clear stale counters on failed loads.
+                self.restoreFindStateAfterNavigation(replaySearch: false)
+            }
+        }
     }
 
     private func isCurrentWebView(_ candidate: WKWebView, instanceID: UUID? = nil) -> Bool {
@@ -2369,7 +2563,10 @@ final class BrowserPanel: Panel, ObservableObject {
         workspaceId: UUID,
         profileID: UUID? = nil,
         initialURL: URL? = nil,
-        bypassInsecureHTTPHostOnce: String? = nil
+        bypassInsecureHTTPHostOnce: String? = nil,
+        proxyEndpoint: BrowserProxyEndpoint? = nil,
+        isRemoteWorkspace: Bool = false,
+        remoteWebsiteDataStoreIdentifier: UUID? = nil
     ) {
         self.id = UUID()
         self.workspaceId = workspaceId
@@ -2380,39 +2577,24 @@ final class BrowserPanel: Panel, ObservableObject {
         self.profileID = resolvedProfileID
         self.historyStore = BrowserProfileStore.shared.historyStore(for: resolvedProfileID)
         self.insecureHTTPBypassHostOnce = BrowserInsecureHTTPSettings.normalizeHost(bypassInsecureHTTPHostOnce ?? "")
+        self.remoteProxyEndpoint = proxyEndpoint
+        self.usesRemoteWorkspaceProxy = isRemoteWorkspace
         self.browserThemeMode = BrowserThemeSettings.mode()
+        self.websiteDataStore = isRemoteWorkspace
+            ? WKWebsiteDataStore(forIdentifier: remoteWebsiteDataStoreIdentifier ?? workspaceId)
+            : BrowserProfileStore.shared.websiteDataStore(for: resolvedProfileID)
 
-        let webView = Self.makeWebView(profileID: resolvedProfileID)
+        let webView = Self.makeWebView(
+            profileID: resolvedProfileID,
+            websiteDataStore: websiteDataStore
+        )
         self.webView = webView
         self.insecureHTTPAlertFactory = { NSAlert() }
+        applyRemoteProxyConfigurationIfAvailable()
         BrowserProfileStore.shared.noteUsed(resolvedProfileID)
 
         // Set up navigation delegate
         let navDelegate = BrowserNavigationDelegate()
-        navDelegate.didFinish = { webView in
-            Task { @MainActor [weak self] in
-                self?.historyStore.recordVisit(url: webView.url, title: webView.title)
-            }
-            Task { @MainActor [weak self] in
-                guard let self, self.isCurrentWebView(webView) else { return }
-                self.refreshFavicon(from: webView)
-                self.applyBrowserThemeModeIfNeeded()
-                // Keep find-in-page open through load completion and refresh matches for the new DOM.
-                self.restoreFindStateAfterNavigation(replaySearch: true)
-            }
-        }
-        navDelegate.didFailNavigation = { [weak self] failedWebView, failedURL in
-            Task { @MainActor in
-                guard let self, self.isCurrentWebView(failedWebView) else { return }
-                // Clear stale title/favicon from the previous page so the tab
-                // shows the failed URL instead of the old page's branding.
-                self.pageTitle = failedURL.isEmpty ? "" : failedURL
-                self.faviconPNGData = nil
-                self.lastFaviconURLString = nil
-                // Keep find-in-page open and clear stale counters on failed loads.
-                self.restoreFindStateAfterNavigation(replaySearch: false)
-            }
-        }
         navDelegate.openInNewTab = { [weak self] url in
             self?.openLinkInNewTab(url: url)
         }
@@ -2429,14 +2611,52 @@ final class BrowserPanel: Panel, ObservableObject {
         // Downloads save to a temp file synchronously (no NSSavePanel during WebKit
         // callbacks), then show NSSavePanel after the download completes.
         let dlDelegate = BrowserDownloadDelegate()
-        dlDelegate.onDownloadStarted = { [weak self] _ in
-            self?.beginDownloadActivity()
+        dlDelegate.onDownloadStarted = { [weak self] filename in
+            guard let self else { return }
+            self.beginDownloadActivity()
+            NotificationCenter.default.post(
+                name: .browserDownloadEventDidArrive,
+                object: self,
+                userInfo: [
+                    "surfaceId": self.id,
+                    "workspaceId": self.workspaceId,
+                    "event": [
+                        "type": "started",
+                        "filename": filename
+                    ]
+                ]
+            )
         }
         dlDelegate.onDownloadReadyToSave = { [weak self] in
-            self?.endDownloadActivity()
+            guard let self else { return }
+            self.endDownloadActivity()
+            NotificationCenter.default.post(
+                name: .browserDownloadEventDidArrive,
+                object: self,
+                userInfo: [
+                    "surfaceId": self.id,
+                    "workspaceId": self.workspaceId,
+                    "event": [
+                        "type": "ready_to_save"
+                    ]
+                ]
+            )
         }
-        dlDelegate.onDownloadFailed = { [weak self] _ in
-            self?.endDownloadActivity()
+        dlDelegate.onDownloadFailed = { [weak self] error in
+            guard let self else { return }
+            self.endDownloadActivity()
+            NotificationCenter.default.post(
+                name: .browserDownloadEventDidArrive,
+                object: self,
+                userInfo: [
+                    "surfaceId": self.id,
+                    "workspaceId": self.workspaceId,
+                    "event": [
+                        "type": "failed",
+                        "error": error.localizedDescription
+                    ]
+                ]
+            )
         }
         navDelegate.downloadDelegate = dlDelegate
         self.downloadDelegate = dlDelegate
@@ -2470,6 +2690,41 @@ final class BrowserPanel: Panel, ObservableObject {
         }
     }
 
+    func setRemoteProxyEndpoint(_ endpoint: BrowserProxyEndpoint?) {
+        guard remoteProxyEndpoint != endpoint else { return }
+        remoteProxyEndpoint = endpoint
+        applyRemoteProxyConfigurationIfAvailable()
+        resumePendingRemoteNavigationIfNeeded()
+    }
+
+    func setRemoteWorkspaceStatus(_ status: BrowserRemoteWorkspaceStatus?) {
+        guard remoteWorkspaceStatus != status else { return }
+        remoteWorkspaceStatus = status
+    }
+
+    private func applyRemoteProxyConfigurationIfAvailable() {
+        guard #available(macOS 14.0, *) else { return }
+
+        let store = webView.configuration.websiteDataStore
+        guard let endpoint = remoteProxyEndpoint else {
+            store.proxyConfigurations = []
+            return
+        }
+
+        let host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty,
+              endpoint.port > 0 && endpoint.port <= 65535,
+              let nwPort = NWEndpoint.Port(rawValue: UInt16(endpoint.port)) else {
+            store.proxyConfigurations = []
+            return
+        }
+
+        let nwEndpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: nwPort)
+        let socks = ProxyConfiguration(socksv5Proxy: nwEndpoint)
+        let connect = ProxyConfiguration(httpCONNECTProxy: nwEndpoint)
+        store.proxyConfigurations = [socks, connect]
+    }
+
     private func beginDownloadActivity() {
         let apply = {
             self.activeDownloadCount += 1
@@ -2496,6 +2751,33 @@ final class BrowserPanel: Panel, ObservableObject {
 
     func updateWorkspaceId(_ newWorkspaceId: UUID) {
         workspaceId = newWorkspaceId
+    }
+
+    func reattachToWorkspace(
+        _ newWorkspaceId: UUID,
+        isRemoteWorkspace: Bool,
+        remoteWebsiteDataStoreIdentifier: UUID? = nil,
+        proxyEndpoint: BrowserProxyEndpoint?,
+        remoteStatus: BrowserRemoteWorkspaceStatus?
+    ) {
+        workspaceId = newWorkspaceId
+        usesRemoteWorkspaceProxy = isRemoteWorkspace
+        let targetStore = isRemoteWorkspace
+            ? WKWebsiteDataStore(forIdentifier: remoteWebsiteDataStoreIdentifier ?? newWorkspaceId)
+            : BrowserProfileStore.shared.websiteDataStore(for: profileID)
+        let needsStoreSwap = webView.configuration.websiteDataStore !== targetStore
+        websiteDataStore = targetStore
+        remoteProxyEndpoint = proxyEndpoint
+        remoteWorkspaceStatus = remoteStatus
+        if needsStoreSwap {
+            replaceWebViewPreservingState(
+                from: webView,
+                websiteDataStore: targetStore,
+                reason: "workspace_reattach"
+            )
+        }
+        applyRemoteProxyConfigurationIfAvailable()
+        resumePendingRemoteNavigationIfNeeded()
     }
 
     @discardableResult
@@ -2541,7 +2823,14 @@ final class BrowserPanel: Panel, ObservableObject {
         historyStore = BrowserProfileStore.shared.historyStore(for: resolvedProfileID)
         BrowserProfileStore.shared.noteUsed(resolvedProfileID)
 
-        let replacement = Self.makeWebView(profileID: resolvedProfileID)
+        if !usesRemoteWorkspaceProxy {
+            websiteDataStore = BrowserProfileStore.shared.websiteDataStore(for: resolvedProfileID)
+        }
+
+        let replacement = Self.makeWebView(
+            profileID: resolvedProfileID,
+            websiteDataStore: websiteDataStore
+        )
         replacement.pageZoom = desiredZoom
         webViewInstanceID = UUID()
         webView = replacement
@@ -2576,7 +2865,8 @@ final class BrowserPanel: Panel, ObservableObject {
         return true
     }
 
-    func triggerFlash() {
+    func triggerFlash(reason: WorkspaceAttentionFlashReason) {
+        _ = reason
         guard NotificationPaneFlashSettings.isEnabled() else { return }
         focusFlashToken &+= 1
     }
@@ -2585,20 +2875,109 @@ final class BrowserPanel: Panel, ObservableObject {
         backHistoryURLStrings: [String],
         forwardHistoryURLStrings: [String]
     ) {
+        realignRestoredSessionHistoryToLiveCurrentIfPossible()
+
+        let nativeBack = webView.backForwardList.backList.compactMap {
+            Self.serializableSessionHistoryURLString($0.url)
+        }
+        let nativeForward = webView.backForwardList.forwardList.compactMap {
+            Self.serializableSessionHistoryURLString($0.url)
+        }
+
         if usesRestoredSessionHistory {
             let back = restoredBackHistoryStack.compactMap { Self.serializableSessionHistoryURLString($0) }
             // `restoredForwardHistoryStack` stores nearest-forward entries at the end.
-            let forward = restoredForwardHistoryStack.reversed().compactMap { Self.serializableSessionHistoryURLString($0) }
-            return (back, forward)
+            let restoredForward = restoredForwardHistoryStack.reversed().compactMap {
+                Self.serializableSessionHistoryURLString($0)
+            }
+
+            if isLiveSessionHistoryAlignedWithRestoredCurrent {
+                return (
+                    back,
+                    restoredForward.isEmpty ? nativeForward : restoredForward
+                )
+            }
+
+            return (back + nativeBack, nativeForward)
         }
 
-        let back = webView.backForwardList.backList.compactMap {
-            Self.serializableSessionHistoryURLString($0.url)
+        return (nativeBack, nativeForward)
+    }
+
+    private func resolvedLiveSessionHistoryURL() -> URL? {
+        if let webViewURL = Self.remoteProxyDisplayURL(for: webView.url),
+           Self.serializableSessionHistoryURLString(webViewURL) != nil {
+            return webViewURL
         }
-        let forward = webView.backForwardList.forwardList.compactMap {
-            Self.serializableSessionHistoryURLString($0.url)
+        if let currentURL,
+           Self.serializableSessionHistoryURLString(currentURL) != nil {
+            return currentURL
         }
-        return (back, forward)
+        return nil
+    }
+
+    private var isLiveSessionHistoryAlignedWithRestoredCurrent: Bool {
+        let liveCurrent = Self.serializableSessionHistoryURLString(resolvedLiveSessionHistoryURL())
+        let restoredCurrent = Self.serializableSessionHistoryURLString(restoredHistoryCurrentURL)
+        guard let liveCurrent, let restoredCurrent else { return true }
+        return liveCurrent == restoredCurrent
+    }
+
+    private func realignRestoredSessionHistoryToLiveCurrentIfPossible() {
+        guard usesRestoredSessionHistory else { return }
+        guard let liveCurrent = resolvedLiveSessionHistoryURL(),
+              let liveCurrentString = Self.serializableSessionHistoryURLString(liveCurrent) else {
+            return
+        }
+        guard Self.serializableSessionHistoryURLString(restoredHistoryCurrentURL) != liveCurrentString else {
+            return
+        }
+
+        let restoredBack = restoredBackHistoryStack.compactMap { Self.serializableSessionHistoryURLString($0) }
+        let restoredForward = restoredForwardHistoryStack.reversed().compactMap {
+            Self.serializableSessionHistoryURLString($0)
+        }
+        let restoredCurrent = Self.serializableSessionHistoryURLString(restoredHistoryCurrentURL)
+
+        if let backIndex = restoredBack.lastIndex(of: liveCurrentString) {
+            let newBack = Array(restoredBack[..<backIndex])
+            var newForward = Array(restoredBack[(backIndex + 1)...])
+            if let restoredCurrent {
+                newForward.append(restoredCurrent)
+            }
+            newForward.append(contentsOf: restoredForward)
+
+            restoredBackHistoryStack = Self.sanitizedSessionHistoryURLs(newBack)
+            restoredForwardHistoryStack = Array(Self.sanitizedSessionHistoryURLs(newForward).reversed())
+            restoredHistoryCurrentURL = liveCurrent
+            refreshNavigationAvailability()
+            return
+        }
+
+        if let forwardIndex = restoredForward.firstIndex(of: liveCurrentString) {
+            var newBack = restoredBack
+            if let restoredCurrent {
+                newBack.append(restoredCurrent)
+            }
+            newBack.append(contentsOf: restoredForward[..<forwardIndex])
+            let newForward = Array(restoredForward[(forwardIndex + 1)...])
+
+            restoredBackHistoryStack = Self.sanitizedSessionHistoryURLs(newBack)
+            restoredForwardHistoryStack = Array(Self.sanitizedSessionHistoryURLs(newForward).reversed())
+            restoredHistoryCurrentURL = liveCurrent
+            refreshNavigationAvailability()
+            return
+        }
+
+        guard !restoredForwardHistoryStack.isEmpty else { return }
+#if DEBUG
+        dlog(
+            "browser.history.restore.forward.clear panel=\(id.uuidString.prefix(5)) " +
+            "current=\(liveCurrentString)"
+        )
+#endif
+        restoredForwardHistoryStack.removeAll(keepingCapacity: false)
+        refreshNavigationAvailability()
     }
 
     func restoreSessionNavigationHistory(
@@ -2625,7 +3004,7 @@ final class BrowserPanel: Panel, ObservableObject {
         let urlObserver = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
             Task { @MainActor in
                 guard let self, self.isCurrentWebView(webView, instanceID: observedWebViewInstanceID) else { return }
-                self.currentURL = webView.url
+                self.currentURL = Self.remoteProxyDisplayURL(for: webView.url)
             }
         }
         webViewObservers.append(urlObserver)
@@ -2645,10 +3024,16 @@ final class BrowserPanel: Panel, ObservableObject {
         webViewObservers.append(titleObserver)
 
         // Loading state
-        let loadingObserver = webView.observe(\.isLoading, options: [.new]) { [weak self] webView, _ in
+        // Capture the KVO-provided value at observation time rather than reading
+        // webView.isLoading inside the deferred Task. For fast navigations (e.g.
+        // back-forward cache), isLoading can flip true→false before the first Task
+        // runs, causing handleWebViewLoadingChanged(true) to be missed entirely.
+        // That skips favicon/loading-state cleanup and leaves stale icons visible.
+        let loadingObserver = webView.observe(\.isLoading, options: [.new]) { [weak self] webView, change in
+            let newValue = change.newValue ?? webView.isLoading
             Task { @MainActor in
                 guard let self, self.isCurrentWebView(webView, instanceID: observedWebViewInstanceID) else { return }
-                self.handleWebViewLoadingChanged(webView.isLoading)
+                self.handleWebViewLoadingChanged(newValue)
             }
         }
         webViewObservers.append(loadingObserver)
@@ -2682,6 +3067,27 @@ final class BrowserPanel: Panel, ObservableObject {
         }
         webViewObservers.append(progressObserver)
 
+        let fullscreenObserver = webView.observe(\.fullscreenState, options: [.initial, .new]) { [weak self] webView, _ in
+            let isElementFullscreenActive = webView.cmuxIsElementFullscreenActiveOrTransitioning
+            let fullscreenState = webView.fullscreenState
+            Task { @MainActor in
+                guard let self, self.isCurrentWebView(webView, instanceID: observedWebViewInstanceID) else { return }
+                self.isElementFullscreenActive = isElementFullscreenActive
+                BrowserWindowPortalRegistry.refresh(
+                    webView: webView,
+                    reason: "fullscreenStateChanged"
+                )
+#if DEBUG
+                dlog(
+                    "browser.fullscreen.state panel=\(self.id.uuidString.prefix(5)) " +
+                    "web=\(ObjectIdentifier(webView)) state=\(String(describing: fullscreenState)) " +
+                    "active=\(isElementFullscreenActive ? 1 : 0)"
+                )
+#endif
+            }
+        }
+        webViewObservers.append(fullscreenObserver)
+
         NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)
             .sink { [weak self] notification in
                 guard let self else { return }
@@ -2691,20 +3097,33 @@ final class BrowserPanel: Panel, ObservableObject {
     }
 
     private func replaceWebViewAfterContentProcessTermination(for terminatedWebView: WKWebView) {
-        guard terminatedWebView === webView else { return }
+        replaceWebViewPreservingState(
+            from: terminatedWebView,
+            websiteDataStore: websiteDataStore,
+            reason: "webcontent_process_terminated"
+        )
+    }
+
+    private func replaceWebViewPreservingState(
+        from oldWebView: WKWebView,
+        websiteDataStore: WKWebsiteDataStore,
+        reason: String
+    ) {
+        guard oldWebView === webView else { return }
 
         let wasRenderable = shouldRenderWebView
-        let restoreURL = terminatedWebView.url ?? currentURL
+        let restoreURL = Self.remoteProxyDisplayURL(for: oldWebView.url) ?? currentURL
         let restoreURLString = restoreURL?.absoluteString
         let shouldRestoreURL = wasRenderable && restoreURLString != nil && restoreURLString != blankURLString
         let history = sessionNavigationHistorySnapshot()
         let historyCurrentURL = preferredURLStringForOmnibar()
-        let desiredZoom = max(minPageZoom, min(maxPageZoom, terminatedWebView.pageZoom))
+        let desiredZoom = max(minPageZoom, min(maxPageZoom, oldWebView.pageZoom))
         let restoreDevTools = preferredDeveloperToolsVisible
 
 #if DEBUG
         dlog(
             "browser.webview.replace.begin panel=\(id.uuidString.prefix(5)) " +
+            "reason=\(reason) " +
             "renderable=\(wasRenderable ? 1 : 0) restoreURL=\(restoreURLString ?? "nil") " +
             "restoreHistoryBack=\(history.backHistoryURLStrings.count) " +
             "restoreHistoryForward=\(history.forwardHistoryURLStrings.count)"
@@ -2716,15 +3135,18 @@ final class BrowserPanel: Panel, ObservableObject {
         faviconTask?.cancel()
         faviconTask = nil
         faviconRefreshGeneration &+= 1
-        BrowserWindowPortalRegistry.detach(webView: terminatedWebView)
-        terminatedWebView.stopLoading()
-        terminatedWebView.navigationDelegate = nil
-        terminatedWebView.uiDelegate = nil
-        if let terminatedCmuxWebView = terminatedWebView as? CmuxWebView {
-            terminatedCmuxWebView.onContextMenuDownloadStateChanged = nil
+        BrowserWindowPortalRegistry.detach(webView: oldWebView)
+        oldWebView.stopLoading()
+        oldWebView.navigationDelegate = nil
+        oldWebView.uiDelegate = nil
+        if let oldCmuxWebView = oldWebView as? CmuxWebView {
+            oldCmuxWebView.onContextMenuDownloadStateChanged = nil
         }
 
-        let replacement = Self.makeWebView(profileID: profileID)
+        let replacement = Self.makeWebView(
+            profileID: profileID,
+            websiteDataStore: websiteDataStore
+        )
         replacement.pageZoom = desiredZoom
         webViewInstanceID = UUID()
         webView = replacement
@@ -2752,12 +3174,13 @@ final class BrowserPanel: Panel, ObservableObject {
         }
 
         if restoreDevTools {
-            requestDeveloperToolsRefreshAfterNextAttach(reason: "webcontent_process_terminated")
+            requestDeveloperToolsRefreshAfterNextAttach(reason: reason)
         }
 
 #if DEBUG
         dlog(
             "browser.webview.replace.end panel=\(id.uuidString.prefix(5)) " +
+            "reason=\(reason) " +
             "instance=\(webViewInstanceID.uuidString.prefix(6)) " +
             "restoreURL=\(restoreURLString ?? "nil") shouldRestore=\(shouldRestoreURL ? 1 : 0)"
         )
@@ -2781,7 +3204,7 @@ final class BrowserPanel: Panel, ObservableObject {
 
         // If nothing meaningful is loaded yet, prefer letting the omnibar take focus.
         if !webView.isLoading {
-            let urlString = webView.url?.absoluteString ?? currentURL?.absoluteString
+            let urlString = Self.remoteProxyDisplayURL(for: webView.url)?.absoluteString ?? currentURL?.absoluteString
             if urlString == nil || urlString == "about:blank" {
                 return
             }
@@ -2863,6 +3286,13 @@ final class BrowserPanel: Panel, ObservableObject {
             guard let self, let webView else { return }
             guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
             guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
+#if DEBUG
+            dlog(
+                "browser.favicon.begin " +
+                "panel=\(id.uuidString.prefix(5)) " +
+                "page=\(pageURL.absoluteString)"
+            )
+#endif
 
             // Try to discover the best icon URL from the document.
             let js = """
@@ -2890,7 +3320,11 @@ final class BrowserPanel: Panel, ObservableObject {
             """
 
             var discoveredURL: URL?
-            if let href = try? await webView.evaluateJavaScript(js) as? String {
+            if let href = await self.evaluateJavaScriptString(
+                js,
+                in: webView,
+                timeoutNanoseconds: 400_000_000
+            ) {
                 let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty, let u = URL(string: trimmed) {
                     discoveredURL = u
@@ -2899,13 +3333,50 @@ final class BrowserPanel: Panel, ObservableObject {
             guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
             guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
 
+            // SPAs often inject <link rel="icon"> via JavaScript after the initial
+            // HTML loads. If no link tag was found, wait briefly and retry once to
+            // give client-side scripts time to add the tag.
+            if discoveredURL == nil {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
+                guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
+                if let href = await self.evaluateJavaScriptString(
+                    js,
+                    in: webView,
+                    timeoutNanoseconds: 400_000_000
+                ) {
+                    let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty, let u = URL(string: trimmed) {
+                        discoveredURL = u
+                    }
+                }
+                guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
+                guard self.isCurrentFaviconRefresh(generation: refreshGeneration) else { return }
+            }
+
             let fallbackURL = URL(string: "/favicon.ico", relativeTo: pageURL)
             let iconURL = discoveredURL ?? fallbackURL
             guard let iconURL else { return }
+#if DEBUG
+            dlog(
+                "browser.favicon.iconURL " +
+                "panel=\(id.uuidString.prefix(5)) " +
+                "discovered=\(discoveredURL?.absoluteString ?? "<nil>") " +
+                "fallback=\(fallbackURL?.absoluteString ?? "<nil>") " +
+                "chosen=\(iconURL.absoluteString)"
+            )
+#endif
 
             // Avoid repeated fetches.
             let iconURLString = iconURL.absoluteString
             if iconURLString == lastFaviconURLString, faviconPNGData != nil {
+#if DEBUG
+                dlog(
+                    "browser.favicon.skipCached " +
+                    "panel=\(id.uuidString.prefix(5)) " +
+                    "icon=\(iconURLString)"
+                )
+#endif
                 return
             }
             lastFaviconURLString = iconURLString
@@ -2914,12 +3385,42 @@ final class BrowserPanel: Panel, ObservableObject {
             req.timeoutInterval = 2.0
             req.cachePolicy = .returnCacheDataElseLoad
             req.setValue(BrowserUserAgentSettings.safariUserAgent, forHTTPHeaderField: "User-Agent")
+            let effectiveRequest = remoteProxyPreparedRequest(from: req, logScope: "faviconRewrite")
 
             let data: Data
             let response: URLResponse
             do {
-                (data, response) = try await URLSession.shared.data(for: req)
+                let remoteSession = remoteProxyURLSession()
+                defer { remoteSession?.finishTasksAndInvalidate() }
+                if let remoteSession {
+#if DEBUG
+                    dlog(
+                        "browser.favicon.fetch " +
+                        "panel=\(id.uuidString.prefix(5)) " +
+                        "via=proxy " +
+                        "url=\(effectiveRequest.url?.absoluteString ?? "<nil>")"
+                    )
+#endif
+                    (data, response) = try await remoteSession.data(for: effectiveRequest)
+                } else {
+#if DEBUG
+                    dlog(
+                        "browser.favicon.fetch " +
+                        "panel=\(id.uuidString.prefix(5)) " +
+                        "via=direct " +
+                        "url=\(effectiveRequest.url?.absoluteString ?? "<nil>")"
+                    )
+#endif
+                    (data, response) = try await URLSession.shared.data(for: effectiveRequest)
+                }
             } catch {
+#if DEBUG
+                dlog(
+                    "browser.favicon.fetchError " +
+                    "panel=\(id.uuidString.prefix(5)) " +
+                    "error=\(String(describing: error))"
+                )
+#endif
                 return
             }
             guard self.isCurrentWebView(webView, instanceID: refreshWebViewInstanceID) else { return }
@@ -2927,19 +3428,80 @@ final class BrowserPanel: Panel, ObservableObject {
 
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
+#if DEBUG
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                dlog(
+                    "browser.favicon.badResponse " +
+                    "panel=\(id.uuidString.prefix(5)) " +
+                    "status=\(status)"
+                )
+#endif
                 return
             }
+#if DEBUG
+            dlog(
+                "browser.favicon.response " +
+                "panel=\(id.uuidString.prefix(5)) " +
+                "status=\(http.statusCode) " +
+                "bytes=\(data.count)"
+            )
+#endif
 
             // Use >= 2x the rendered point size so we don't upscale (blurry) on Retina.
-            guard let png = Self.makeFaviconPNGData(from: data, targetPx: 32) else { return }
+            guard let png = Self.makeFaviconPNGData(from: data, targetPx: 32) else {
+#if DEBUG
+                dlog(
+                    "browser.favicon.decodeFailed " +
+                    "panel=\(id.uuidString.prefix(5)) " +
+                    "bytes=\(data.count)"
+                )
+#endif
+                return
+            }
             // Only update if we got a real icon; keep the old one otherwise to avoid flashes.
             faviconPNGData = png
+#if DEBUG
+            dlog(
+                "browser.favicon.ready " +
+                "panel=\(id.uuidString.prefix(5)) " +
+                "pngBytes=\(png.count)"
+            )
+#endif
         }
     }
 
     private func isCurrentFaviconRefresh(generation: Int) -> Bool {
         guard !Task.isCancelled else { return false }
         return generation == faviconRefreshGeneration
+    }
+
+    @MainActor
+    private func evaluateJavaScriptString(
+        _ script: String,
+        in webView: WKWebView,
+        timeoutNanoseconds: UInt64
+    ) async -> String? {
+        await withCheckedContinuation { continuation in
+            var hasResumed = false
+
+            func resume(_ value: String?) {
+                guard !hasResumed else { return }
+                hasResumed = true
+                continuation.resume(returning: value)
+            }
+
+            webView.evaluateJavaScript(script) { result, _ in
+                let value = result as? String
+                Task { @MainActor in
+                    resume(value)
+                }
+            }
+
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                resume(nil)
+            }
+        }
     }
 
     @MainActor
@@ -3072,17 +3634,113 @@ final class BrowserPanel: Panel, ObservableObject {
         preserveRestoredSessionHistory: Bool = false
     ) {
         guard let url = request.url else { return }
+        if usesRemoteWorkspaceProxy, remoteProxyEndpoint == nil {
+            pendingRemoteNavigation = PendingRemoteNavigation(
+                request: request,
+                recordTypedNavigation: recordTypedNavigation,
+                preserveRestoredSessionHistory: preserveRestoredSessionHistory
+            )
+            shouldRenderWebView = true
+            currentURL = Self.remoteProxyDisplayURL(for: url) ?? url
+            navigationDelegate?.lastAttemptedURL = url
+            return
+        }
+        performNavigation(
+            request: request,
+            originalURL: url,
+            recordTypedNavigation: recordTypedNavigation,
+            preserveRestoredSessionHistory: preserveRestoredSessionHistory
+        )
+    }
+
+    private func resumePendingRemoteNavigationIfNeeded() {
+        guard remoteProxyEndpoint != nil,
+              let pendingRemoteNavigation else {
+            return
+        }
+        self.pendingRemoteNavigation = nil
+        guard let originalURL = pendingRemoteNavigation.request.url else { return }
+        performNavigation(
+            request: pendingRemoteNavigation.request,
+            originalURL: originalURL,
+            recordTypedNavigation: pendingRemoteNavigation.recordTypedNavigation,
+            preserveRestoredSessionHistory: pendingRemoteNavigation.preserveRestoredSessionHistory
+        )
+    }
+
+    private func performNavigation(
+        request: URLRequest,
+        originalURL: URL,
+        recordTypedNavigation: Bool,
+        preserveRestoredSessionHistory: Bool
+    ) {
         if !preserveRestoredSessionHistory {
             abandonRestoredSessionHistoryIfNeeded()
         }
+        let effectiveRequest = remoteProxyPreparedRequest(from: request, logScope: "rewrite")
         // Some installs can end up with a legacy Chrome UA override; keep this pinned.
         webView.customUserAgent = BrowserUserAgentSettings.safariUserAgent
         shouldRenderWebView = true
         if recordTypedNavigation {
-            historyStore.recordTypedNavigation(url: url)
+            historyStore.recordTypedNavigation(url: originalURL)
         }
-        navigationDelegate?.lastAttemptedURL = url
-        browserLoadRequest(request, in: webView)
+        navigationDelegate?.lastAttemptedURL = originalURL
+        browserLoadRequest(effectiveRequest, in: webView)
+    }
+
+    private func remoteProxyPreparedRequest(from request: URLRequest, logScope: String) -> URLRequest {
+        guard remoteProxyEndpoint != nil else { return request }
+        guard let url = request.url else { return request }
+        guard let rewrittenURL = Self.remoteProxyLoopbackAliasURL(for: url) else { return request }
+
+        var rewrittenRequest = request
+        rewrittenRequest.url = rewrittenURL
+#if DEBUG
+        dlog(
+            "browser.remoteProxy.\(logScope) " +
+            "panel=\(id.uuidString.prefix(5)) " +
+            "from=\(url.absoluteString) " +
+            "to=\(rewrittenURL.absoluteString)"
+        )
+#endif
+        return rewrittenRequest
+    }
+
+    private func remoteProxyURLSession() -> URLSession? {
+        guard let endpoint = remoteProxyEndpoint else { return nil }
+        let host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, endpoint.port > 0, endpoint.port <= 65535 else { return nil }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        configuration.timeoutIntervalForRequest = 2.0
+        configuration.timeoutIntervalForResource = 4.0
+        configuration.connectionProxyDictionary = [
+            kCFNetworkProxiesSOCKSEnable as String: 1,
+            kCFNetworkProxiesSOCKSProxy as String: host,
+            kCFNetworkProxiesSOCKSPort as String: endpoint.port,
+        ]
+        return URLSession(configuration: configuration)
+    }
+
+    private static func remoteProxyDisplayURL(for url: URL?) -> URL? {
+        guard let url else { return nil }
+        guard let host = BrowserInsecureHTTPSettings.normalizeHost(url.host ?? "") else { return url }
+        guard host == BrowserInsecureHTTPSettings.normalizeHost(remoteLoopbackProxyAliasHost) else { return url }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.host = "localhost"
+        return components?.url ?? url
+    }
+
+    private static func remoteProxyLoopbackAliasURL(for url: URL) -> URL? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" else { return nil }
+        guard let host = BrowserInsecureHTTPSettings.normalizeHost(url.host ?? "") else { return nil }
+        guard remoteLoopbackHosts.contains(host) else { return nil }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.host = remoteLoopbackProxyAliasHost
+        return components?.url
     }
 
     /// Navigate with smart URL/search detection
@@ -3201,6 +3859,8 @@ final class BrowserPanel: Panel, ObservableObject {
         developerToolsRestoreRetryWorkItem = nil
         developerToolsTransitionSettleWorkItem?.cancel()
         developerToolsTransitionSettleWorkItem = nil
+        developerToolsVisibilityLossCheckWorkItem?.cancel()
+        developerToolsVisibilityLossCheckWorkItem = nil
         if let detachedDeveloperToolsWindowCloseObserver {
             NotificationCenter.default.removeObserver(detachedDeveloperToolsWindowCloseObserver)
         }
@@ -3305,7 +3965,10 @@ extension BrowserPanel {
             oldCmuxWebView.onContextMenuDownloadStateChanged = nil
         }
 
-        let replacement = Self.makeWebView(profileID: profileID)
+        let replacement = Self.makeWebView(
+            profileID: profileID,
+            websiteDataStore: websiteDataStore
+        )
         webViewInstanceID = UUID()
         webView = replacement
         shouldRenderWebView = false
@@ -3361,20 +4024,29 @@ extension BrowserPanel {
     func goBack() {
         guard canGoBack else { return }
         if usesRestoredSessionHistory {
-            guard let targetURL = restoredBackHistoryStack.popLast() else {
+            realignRestoredSessionHistoryToLiveCurrentIfPossible()
+
+            if (isLiveSessionHistoryAlignedWithRestoredCurrent || !nativeCanGoBack),
+               let targetURL = restoredBackHistoryStack.popLast() {
+                if let current = resolvedCurrentSessionHistoryURL() {
+                    restoredForwardHistoryStack.append(current)
+                }
+                restoredHistoryCurrentURL = targetURL
                 refreshNavigationAvailability()
+                navigateWithoutInsecureHTTPPrompt(
+                    to: targetURL,
+                    recordTypedNavigation: false,
+                    preserveRestoredSessionHistory: true
+                )
                 return
             }
-            if let current = resolvedCurrentSessionHistoryURL() {
-                restoredForwardHistoryStack.append(current)
+
+            if nativeCanGoBack {
+                webView.goBack()
+                return
             }
-            restoredHistoryCurrentURL = targetURL
+
             refreshNavigationAvailability()
-            navigateWithoutInsecureHTTPPrompt(
-                to: targetURL,
-                recordTypedNavigation: false,
-                preserveRestoredSessionHistory: true
-            )
             return
         }
 
@@ -3385,6 +4057,13 @@ extension BrowserPanel {
     func goForward() {
         guard canGoForward else { return }
         if usesRestoredSessionHistory {
+            realignRestoredSessionHistoryToLiveCurrentIfPossible()
+
+            if nativeCanGoForward {
+                webView.goForward()
+                return
+            }
+
             guard let targetURL = restoredForwardHistoryStack.popLast() else {
                 refreshNavigationAvailability()
                 return
@@ -3581,6 +4260,7 @@ extension BrowserPanel {
         let isVisibleSelector = NSSelectorFromString("isVisible")
         if inspector.cmuxCallBool(selector: isVisibleSelector) ?? false {
             developerToolsDetachedOpenGraceDeadline = nil
+            developerToolsLastKnownVisibleAt = Date()
             return true
         }
 
@@ -3590,6 +4270,9 @@ extension BrowserPanel {
         guard inspector.responds(to: showSelector) else { return false }
         inspector.cmuxCallVoid(selector: showSelector)
         let visibleAfterShow = inspector.cmuxCallBool(selector: isVisibleSelector) ?? false
+        if visibleAfterShow {
+            developerToolsLastKnownVisibleAt = Date()
+        }
         if preferredDeveloperToolsPresentation == .detached {
             developerToolsDetachedOpenGraceDeadline = visibleAfterShow
                 ? nil
@@ -3806,6 +4489,7 @@ extension BrowserPanel {
             developerToolsDetachedOpenGraceDeadline = nil
             syncDeveloperToolsPresentationPreferenceFromUI()
             preferredDeveloperToolsVisible = true
+            developerToolsLastKnownVisibleAt = Date()
             cancelDeveloperToolsRestoreRetry()
             return
         }
@@ -3813,7 +4497,72 @@ extension BrowserPanel {
             return
         }
         preferredDeveloperToolsVisible = false
+        developerToolsLastKnownVisibleAt = nil
         cancelDeveloperToolsRestoreRetry()
+    }
+
+    func noteDeveloperToolsHostAttached() {
+        cancelPendingDeveloperToolsVisibilityLossCheck()
+        developerToolsLastAttachedHostAt = Date()
+        if isDeveloperToolsVisible() {
+            developerToolsLastKnownVisibleAt = Date()
+        }
+    }
+
+    func scheduleDeveloperToolsVisibilityLossCheck() {
+        developerToolsVisibilityLossCheckWorkItem?.cancel()
+        let attachedAge = developerToolsLastAttachedHostAt.map { Date().timeIntervalSince($0) } ?? 0
+        let delay = max(
+            developerToolsTransitionSettleDelay,
+            developerToolsAttachedManualCloseDetectionDelay - attachedAge
+        )
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.developerToolsVisibilityLossCheckWorkItem = nil
+            _ = self.consumeAttachedDeveloperToolsManualCloseIfNeeded()
+        }
+        developerToolsVisibilityLossCheckWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + max(0, delay),
+            execute: workItem
+        )
+    }
+
+    func cancelPendingDeveloperToolsVisibilityLossCheck() {
+        developerToolsVisibilityLossCheckWorkItem?.cancel()
+        developerToolsVisibilityLossCheckWorkItem = nil
+    }
+
+    @discardableResult
+    func consumeAttachedDeveloperToolsManualCloseIfNeeded(inspector: NSObject? = nil) -> Bool {
+        guard preferredDeveloperToolsVisible else { return false }
+        guard preferredDeveloperToolsPresentation != .detached else { return false }
+        guard !isDeveloperToolsTransitionInFlight else { return false }
+        guard webView.superview != nil, webView.window != nil else { return false }
+        guard let developerToolsLastAttachedHostAt else { return false }
+        guard Date().timeIntervalSince(developerToolsLastAttachedHostAt) >= developerToolsAttachedManualCloseDetectionDelay else {
+            return false
+        }
+        guard developerToolsLastKnownVisibleAt != nil else { return false }
+        guard let inspector = inspector ?? webView.cmuxInspectorObject() else { return false }
+        guard let visible = inspector.cmuxCallBool(selector: NSSelectorFromString("isVisible")) else { return false }
+        guard !visible else {
+            developerToolsLastKnownVisibleAt = Date()
+            return false
+        }
+
+        preferredDeveloperToolsVisible = false
+        developerToolsDetachedOpenGraceDeadline = nil
+        developerToolsLastKnownVisibleAt = nil
+        forceDeveloperToolsRefreshOnNextAttach = false
+        cancelDeveloperToolsRestoreRetry()
+#if DEBUG
+        dlog(
+            "browser.devtools attachedClose.consume panel=\(id.uuidString.prefix(5)) " +
+            "\(debugDeveloperToolsStateSummary()) \(debugDeveloperToolsGeometrySummary())"
+        )
+#endif
+        return true
     }
 
     /// Called after WKWebView reattaches to keep inspector stable across split/layout churn.
@@ -3836,6 +4585,7 @@ extension BrowserPanel {
         if visible {
             developerToolsDetachedOpenGraceDeadline = nil
             syncDeveloperToolsPresentationPreferenceFromUI()
+            developerToolsLastKnownVisibleAt = Date()
             #if DEBUG
             if shouldForceRefresh {
                 dlog("browser.devtools refresh.consumeVisible panel=\(id.uuidString.prefix(5)) \(debugDeveloperToolsStateSummary())")
@@ -3859,6 +4609,10 @@ extension BrowserPanel {
             return
         }
 
+        if consumeAttachedDeveloperToolsManualCloseIfNeeded(inspector: inspector) {
+            return
+        }
+
         #if DEBUG
         if shouldForceRefresh {
             dlog("browser.devtools refresh.forceShowWhenHidden panel=\(id.uuidString.prefix(5)) \(debugDeveloperToolsStateSummary())")
@@ -3874,6 +4628,7 @@ extension BrowserPanel {
         let visibleAfterShow = inspector.cmuxCallBool(selector: NSSelectorFromString("isVisible")) ?? false
         if visibleAfterShow {
             syncDeveloperToolsPresentationPreferenceFromUI()
+            developerToolsLastKnownVisibleAt = Date()
             cancelDeveloperToolsRestoreRetry()
             scheduleDetachedDeveloperToolsWindowDismissal()
         } else {
@@ -3958,6 +4713,16 @@ extension BrowserPanel {
         applyPageZoom(1.0)
     }
 
+    func currentPageZoomFactor() -> CGFloat {
+        webView.pageZoom
+    }
+
+    @discardableResult
+    func setPageZoomFactor(_ pageZoom: CGFloat) -> Bool {
+        let clamped = max(minPageZoom, min(maxPageZoom, pageZoom))
+        return applyPageZoom(clamped)
+    }
+
     /// Take a snapshot of the web view
     func takeSnapshot(completion: @escaping (NSImage?) -> Void) {
         let config = WKSnapshotConfiguration()
@@ -3984,6 +4749,8 @@ extension BrowserPanel {
         if created {
             searchState = BrowserSearchState()
         }
+        pendingAddressBarFocusRequestId = nil
+        NotificationCenter.default.post(name: .browserDidBlurAddressBar, object: id)
         let generation = beginSearchFocusRequest(reason: "startFind")
 #if DEBUG
         let window = webView.window
@@ -4531,7 +5298,7 @@ extension BrowserPanel {
     /// Returns the most reliable URL string for omnibar-related matching and UI decisions.
     /// `currentURL` can lag behind navigation changes, so prefer the live WKWebView URL.
     func preferredURLStringForOmnibar() -> String? {
-        if let webViewURL = webView.url?.absoluteString
+        if let webViewURL = Self.remoteProxyDisplayURL(for: webView.url)?.absoluteString
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !webViewURL.isEmpty,
            webViewURL != blankURLString {
@@ -4549,7 +5316,7 @@ extension BrowserPanel {
     }
 
     private func resolvedCurrentSessionHistoryURL() -> URL? {
-        if let webViewURL = webView.url,
+        if let webViewURL = Self.remoteProxyDisplayURL(for: webView.url),
            Self.serializableSessionHistoryURLString(webViewURL) != nil {
             return webViewURL
         }
@@ -4564,8 +5331,8 @@ extension BrowserPanel {
         let resolvedCanGoBack: Bool
         let resolvedCanGoForward: Bool
         if usesRestoredSessionHistory {
-            resolvedCanGoBack = !restoredBackHistoryStack.isEmpty
-            resolvedCanGoForward = !restoredForwardHistoryStack.isEmpty
+            resolvedCanGoBack = nativeCanGoBack || !restoredBackHistoryStack.isEmpty
+            resolvedCanGoForward = nativeCanGoForward || !restoredForwardHistoryStack.isEmpty
         } else {
             resolvedCanGoBack = nativeCanGoBack
             resolvedCanGoForward = nativeCanGoForward
@@ -4860,6 +5627,15 @@ private extension BrowserPanel {
 
     static func verticalOverlap(between lhs: NSRect, and rhs: NSRect) -> CGFloat {
         max(0, min(lhs.maxY, rhs.maxY) - max(lhs.minY, rhs.minY))
+    }
+}
+
+extension BrowserPanel {
+    func hideBrowserPortalView(source: String) {
+        BrowserWindowPortalRegistry.hide(
+            webView: webView,
+            source: source
+        )
     }
 }
 
@@ -6831,6 +7607,18 @@ struct BrowserImportStep3Presentation: Equatable {
     }
 }
 
+struct BrowserImportSourceProfilesPresentation: Equatable {
+    let scrollHeight: CGFloat
+    let showsHelpText: Bool
+
+    init(profileCount: Int) {
+        let visibleRows = min(max(profileCount, 1), 5)
+        let contentHeight = CGFloat(visibleRows * 26 + 14)
+        scrollHeight = max(76, contentHeight)
+        showsHelpText = profileCount > 1
+    }
+}
+
 enum BrowserImportPlanResolver {
     @MainActor
     static func defaultPlan(
@@ -8262,6 +9050,21 @@ final class BrowserDataImportCoordinator {
     }
 
 #if DEBUG
+    func debugMakeImportWizardWindow(
+        browsers: [InstalledBrowserCandidate],
+        destinationProfiles: [BrowserProfileDefinition]? = nil,
+        defaultDestinationProfileID: UUID? = nil
+    ) -> NSWindow {
+        let wizard = ImportWizardWindowController(
+            browsers: browsers,
+            destinationProfiles: destinationProfiles,
+            defaultDestinationProfileID: defaultDestinationProfileID
+        )
+        return wizard.debugPanelWindow
+    }
+#endif
+
+#if DEBUG
     private struct CapturedImportSelection: Encodable {
         struct Entry: Encodable {
             let sourceProfiles: [String]
@@ -8372,6 +9175,7 @@ final class BrowserDataImportCoordinator {
         private let sourceProfilesEmptyLabel = NSTextField(wrappingLabelWithString: "")
         private let sourceProfilesHelpLabel = NSTextField(labelWithString: "")
         private let sourceProfilesScrollView = NSScrollView()
+        private var sourceProfilesScrollHeightConstraint: NSLayoutConstraint?
         private let dataTypesContainer = NSStackView()
         private let validationLabel = NSTextField(labelWithString: "")
         private let destinationModeContainer = NSStackView()
@@ -8381,6 +9185,7 @@ final class BrowserDataImportCoordinator {
         private let mergeDestinationRow = NSStackView()
         private let mergeDestinationPopup = NSPopUpButton(frame: .zero, pullsDown: false)
         private let destinationHelpLabel = NSTextField(wrappingLabelWithString: "")
+        private let additionalDataNoteLabel = NSTextField(wrappingLabelWithString: "")
 
         private let cookiesCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
         private let historyCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -8406,7 +9211,7 @@ final class BrowserDataImportCoordinator {
                 ?? fallbackDestinationProfileID
             self.mergeDestinationProfileID = self.initialDestinationProfileID
             self.panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
+                contentRect: NSRect(x: 0, y: 0, width: 560, height: 292),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
@@ -8429,6 +9234,10 @@ final class BrowserDataImportCoordinator {
             guard response == .OK else { return nil }
             return selection
         }
+
+#if DEBUG
+        var debugPanelWindow: NSWindow { panel }
+#endif
 
         func windowWillClose(_ notification: Notification) {
             finishModal(with: .cancel)
@@ -8532,6 +9341,7 @@ final class BrowserDataImportCoordinator {
             guard selectedSourceProfiles.count > 1 else { return }
             destinationMode = sender == separateProfilesRadio ? .separateProfiles : .mergeIntoOne
             rebuildStep3DestinationUI()
+            updatePanelSize()
         }
 
         @objc
@@ -8554,6 +9364,13 @@ final class BrowserDataImportCoordinator {
             validationLabel.isHidden = true
         }
 
+        @objc
+        private func handleImportOptionChanged(_ sender: NSButton) {
+            validationLabel.isHidden = true
+            updateAdditionalDataNoteVisibility()
+            updatePanelSize()
+        }
+
         private func setupUI() {
             panel.title = String(
                 localized: "browser.import.title",
@@ -8564,7 +9381,7 @@ final class BrowserDataImportCoordinator {
             panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
             panel.standardWindowButton(.zoomButton)?.isHidden = true
 
-            let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 420))
+            let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 292))
             contentView.translatesAutoresizingMaskIntoConstraints = false
             panel.contentView = contentView
 
@@ -8574,9 +9391,9 @@ final class BrowserDataImportCoordinator {
                     defaultValue: "Import Browser Data"
                 )
             )
-            titleLabel.font = NSFont.systemFont(ofSize: 24, weight: .semibold)
+            titleLabel.font = NSFont.systemFont(ofSize: 22, weight: .semibold)
 
-            stepLabel.font = NSFont.systemFont(ofSize: 15, weight: .medium)
+            stepLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
             stepLabel.textColor = .secondaryLabelColor
 
             setupSourceContainer()
@@ -8588,6 +9405,7 @@ final class BrowserDataImportCoordinator {
             validationLabel.isHidden = true
             validationLabel.lineBreakMode = .byWordWrapping
             validationLabel.maximumNumberOfLines = 3
+            validationLabel.translatesAutoresizingMaskIntoConstraints = false
 
             backButton.target = self
             backButton.action = #selector(handleBack)
@@ -8625,23 +9443,32 @@ final class BrowserDataImportCoordinator {
                 validationLabel,
             ])
             contentStack.orientation = .vertical
-            contentStack.spacing = 10
+            contentStack.spacing = 8
             contentStack.alignment = .leading
             contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+            sourceContainer.translatesAutoresizingMaskIntoConstraints = false
+            sourceProfilesContainer.translatesAutoresizingMaskIntoConstraints = false
+            dataTypesContainer.translatesAutoresizingMaskIntoConstraints = false
 
             guard let panelContent = panel.contentView else { return }
             panelContent.addSubview(contentStack)
             panelContent.addSubview(buttonRow)
 
             NSLayoutConstraint.activate([
-                contentStack.topAnchor.constraint(equalTo: panelContent.topAnchor, constant: 18),
-                contentStack.leadingAnchor.constraint(equalTo: panelContent.leadingAnchor, constant: 20),
-                contentStack.trailingAnchor.constraint(equalTo: panelContent.trailingAnchor, constant: -20),
+                contentStack.topAnchor.constraint(equalTo: panelContent.topAnchor, constant: 16),
+                contentStack.leadingAnchor.constraint(equalTo: panelContent.leadingAnchor, constant: 18),
+                contentStack.trailingAnchor.constraint(equalTo: panelContent.trailingAnchor, constant: -18),
 
                 buttonRow.topAnchor.constraint(greaterThanOrEqualTo: contentStack.bottomAnchor, constant: 14),
-                buttonRow.leadingAnchor.constraint(equalTo: panelContent.leadingAnchor, constant: 20),
-                buttonRow.trailingAnchor.constraint(equalTo: panelContent.trailingAnchor, constant: -20),
-                buttonRow.bottomAnchor.constraint(equalTo: panelContent.bottomAnchor, constant: -16),
+                buttonRow.leadingAnchor.constraint(equalTo: panelContent.leadingAnchor, constant: 18),
+                buttonRow.trailingAnchor.constraint(equalTo: panelContent.trailingAnchor, constant: -18),
+                buttonRow.bottomAnchor.constraint(equalTo: panelContent.bottomAnchor, constant: -14),
+
+                sourceContainer.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+                sourceProfilesContainer.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+                dataTypesContainer.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+                validationLabel.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             ])
         }
 
@@ -8657,23 +9484,27 @@ final class BrowserDataImportCoordinator {
                 labelWithString: String(localized: "browser.import.source", defaultValue: "Source")
             )
             sourceLabel.alignment = .right
-            sourceLabel.frame.size.width = 80
+            sourceLabel.frame.size.width = 64
+
+            sourcePopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            sourcePopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             let sourceRow = NSStackView(views: [sourceLabel, sourcePopup])
             sourceRow.orientation = .horizontal
             sourceRow.spacing = 8
             sourceRow.alignment = .centerY
+            sourceRow.distribution = .fill
 
             let detectedLabel = NSTextField(
                 wrappingLabelWithString: InstalledBrowserDetector.summaryText(for: browsers)
             )
-            detectedLabel.font = NSFont.systemFont(ofSize: 12)
+            detectedLabel.font = NSFont.systemFont(ofSize: 11)
             detectedLabel.textColor = .secondaryLabelColor
             detectedLabel.maximumNumberOfLines = 2
             detectedLabel.preferredMaxLayoutWidth = 500
 
             sourceContainer.orientation = .vertical
-            sourceContainer.spacing = 10
+            sourceContainer.spacing = 8
             sourceContainer.alignment = .leading
             sourceContainer.addArrangedSubview(sourceRow)
             sourceContainer.addArrangedSubview(detectedLabel)
@@ -8686,17 +9517,17 @@ final class BrowserDataImportCoordinator {
                     defaultValue: "Source Profiles"
                 )
             )
-            sourceProfilesTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            sourceProfilesTitle.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
             sourceProfilesList.orientation = .vertical
             sourceProfilesList.spacing = 6
             sourceProfilesList.alignment = .leading
             sourceProfilesList.translatesAutoresizingMaskIntoConstraints = false
 
-            sourceProfilesEmptyLabel.font = NSFont.systemFont(ofSize: 13)
+            sourceProfilesEmptyLabel.font = NSFont.systemFont(ofSize: 12)
             sourceProfilesEmptyLabel.textColor = .secondaryLabelColor
             sourceProfilesEmptyLabel.maximumNumberOfLines = 0
-            sourceProfilesEmptyLabel.preferredMaxLayoutWidth = 520
+            sourceProfilesEmptyLabel.preferredMaxLayoutWidth = 500
 
             sourceProfilesDocumentView.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
             sourceProfilesDocumentView.translatesAutoresizingMaskIntoConstraints = false
@@ -8715,23 +9546,29 @@ final class BrowserDataImportCoordinator {
             sourceProfilesScrollView.documentView = sourceProfilesDocumentView
             sourceProfilesScrollView.translatesAutoresizingMaskIntoConstraints = false
             sourceProfilesScrollView.contentView.postsBoundsChangedNotifications = true
-            sourceProfilesScrollView.heightAnchor.constraint(equalToConstant: 180).isActive = true
+            sourceProfilesScrollHeightConstraint = sourceProfilesScrollView.heightAnchor.constraint(equalToConstant: 76)
+            sourceProfilesScrollHeightConstraint?.isActive = true
+            let sourceProfilesScrollWidthConstraint = sourceProfilesScrollView.widthAnchor.constraint(
+                equalTo: sourceProfilesContainer.widthAnchor
+            )
 
-            sourceProfilesHelpLabel.font = NSFont.systemFont(ofSize: 12)
+            sourceProfilesHelpLabel.font = NSFont.systemFont(ofSize: 11)
             sourceProfilesHelpLabel.textColor = .secondaryLabelColor
             sourceProfilesHelpLabel.maximumNumberOfLines = 2
             sourceProfilesHelpLabel.lineBreakMode = .byWordWrapping
+            sourceProfilesHelpLabel.preferredMaxLayoutWidth = 500
             sourceProfilesHelpLabel.stringValue = String(
                 localized: "browser.import.sourceProfiles.help",
                 defaultValue: "Choose one or more source profiles. Step 3 lets you keep them separate or merge them into one cmux profile."
             )
 
             sourceProfilesContainer.orientation = .vertical
-            sourceProfilesContainer.spacing = 10
+            sourceProfilesContainer.spacing = 8
             sourceProfilesContainer.alignment = .leading
             sourceProfilesContainer.addArrangedSubview(sourceProfilesTitle)
             sourceProfilesContainer.addArrangedSubview(sourceProfilesScrollView)
             sourceProfilesContainer.addArrangedSubview(sourceProfilesHelpLabel)
+            sourceProfilesScrollWidthConstraint.isActive = true
             sourceProfilesContainer.setHuggingPriority(.defaultLow, for: .vertical)
             sourceProfilesContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         }
@@ -8752,6 +9589,12 @@ final class BrowserDataImportCoordinator {
                 localized: "browser.import.additionalData",
                 defaultValue: "Additional data (bookmarks, settings, extensions)"
             )
+            cookiesCheckbox.target = self
+            cookiesCheckbox.action = #selector(handleImportOptionChanged(_:))
+            historyCheckbox.target = self
+            historyCheckbox.action = #selector(handleImportOptionChanged(_:))
+            additionalDataCheckbox.target = self
+            additionalDataCheckbox.action = #selector(handleImportOptionChanged(_:))
             cookiesCheckbox.setAccessibilityIdentifier("BrowserImportCookiesCheckbox")
             historyCheckbox.setAccessibilityIdentifier("BrowserImportHistoryCheckbox")
             additionalDataCheckbox.setAccessibilityIdentifier("BrowserImportAdditionalDataCheckbox")
@@ -8776,25 +9619,29 @@ final class BrowserDataImportCoordinator {
 
             mergeDestinationPopup.target = self
             mergeDestinationPopup.action = #selector(handleMergeDestinationChanged(_:))
+            mergeDestinationPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            mergeDestinationPopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             separateDestinationRows.orientation = .vertical
-            separateDestinationRows.spacing = 8
+            separateDestinationRows.spacing = 6
             separateDestinationRows.alignment = .leading
 
             mergeDestinationRow.orientation = .horizontal
-            mergeDestinationRow.spacing = 8
+            mergeDestinationRow.spacing = 6
             mergeDestinationRow.alignment = .centerY
 
-            destinationHelpLabel.font = NSFont.systemFont(ofSize: 12)
+            destinationHelpLabel.font = NSFont.systemFont(ofSize: 11)
             destinationHelpLabel.textColor = .secondaryLabelColor
-            destinationHelpLabel.maximumNumberOfLines = 3
-            destinationHelpLabel.preferredMaxLayoutWidth = 540
+            destinationHelpLabel.maximumNumberOfLines = 2
+            destinationHelpLabel.preferredMaxLayoutWidth = 500
 
             domainField.placeholderString = String(
                 localized: "browser.import.domain.placeholder",
                 defaultValue: "Optional domains only (e.g. github.com, openai.com)"
             )
             domainField.stringValue = ""
+            domainField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            domainField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             let destinationTitleLabel = NSTextField(
                 labelWithString: String(
@@ -8802,32 +9649,32 @@ final class BrowserDataImportCoordinator {
                     defaultValue: "cmux destination"
                 )
             )
-            destinationTitleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            destinationTitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
             let domainLabel = NSTextField(
                 labelWithString: String(localized: "browser.import.domain", defaultValue: "Limit to")
             )
             domainLabel.alignment = .right
-            domainLabel.frame.size.width = 80
+            domainLabel.frame.size.width = 72
 
             let domainRow = NSStackView(views: [domainLabel, domainField])
             domainRow.orientation = .horizontal
             domainRow.spacing = 8
             domainRow.alignment = .centerY
+            domainRow.distribution = .fill
 
-            let noteLabel = NSTextField(
-                wrappingLabelWithString: String(
-                    localized: "browser.import.additionalData.note",
-                    defaultValue: "Bookmarks, settings, and extensions import are not available yet."
-                )
+            additionalDataNoteLabel.stringValue = String(
+                localized: "browser.import.additionalData.note",
+                defaultValue: "Bookmarks, settings, and extensions import are not available yet."
             )
-            noteLabel.font = NSFont.systemFont(ofSize: 12)
-            noteLabel.textColor = .secondaryLabelColor
-            noteLabel.maximumNumberOfLines = 2
-            noteLabel.preferredMaxLayoutWidth = 540
+            additionalDataNoteLabel.font = NSFont.systemFont(ofSize: 11)
+            additionalDataNoteLabel.textColor = .secondaryLabelColor
+            additionalDataNoteLabel.maximumNumberOfLines = 2
+            additionalDataNoteLabel.preferredMaxLayoutWidth = 500
+            additionalDataNoteLabel.isHidden = true
 
             dataTypesContainer.orientation = .vertical
-            dataTypesContainer.spacing = 8
+            dataTypesContainer.spacing = 6
             dataTypesContainer.alignment = .leading
             dataTypesContainer.addArrangedSubview(destinationTitleLabel)
             dataTypesContainer.addArrangedSubview(destinationModeContainer)
@@ -8837,13 +9684,14 @@ final class BrowserDataImportCoordinator {
             dataTypesContainer.addArrangedSubview(cookiesCheckbox)
             dataTypesContainer.addArrangedSubview(historyCheckbox)
             dataTypesContainer.addArrangedSubview(additionalDataCheckbox)
+            dataTypesContainer.addArrangedSubview(additionalDataNoteLabel)
             dataTypesContainer.addArrangedSubview(domainRow)
-            dataTypesContainer.addArrangedSubview(noteLabel)
         }
 
         private func configureInitialState() {
             step = .source
             refreshSourceProfilesList()
+            updateAdditionalDataNoteVisibility()
             updateStepUI()
         }
 
@@ -8852,7 +9700,7 @@ final class BrowserDataImportCoordinator {
             case .source:
                 stepLabel.stringValue = String(
                     localized: "browser.import.step.source",
-                    defaultValue: "Step 1 of 3: Choose the browser to import from."
+                    defaultValue: "Step 1 of 3"
                 )
                 sourceContainer.isHidden = false
                 sourceProfilesContainer.isHidden = true
@@ -8862,11 +9710,8 @@ final class BrowserDataImportCoordinator {
                 primaryButton.title = String(localized: "browser.import.next", defaultValue: "Next")
             case .sourceProfiles:
                 stepLabel.stringValue = String(
-                    format: String(
-                        localized: "browser.import.step.sourceProfiles",
-                        defaultValue: "Step 2 of 3: Choose source profiles from %@."
-                    ),
-                    selectedBrowser().displayName
+                    localized: "browser.import.step.sourceProfiles",
+                    defaultValue: "Step 2 of 3"
                 )
                 sourceContainer.isHidden = true
                 sourceProfilesContainer.isHidden = false
@@ -8877,11 +9722,8 @@ final class BrowserDataImportCoordinator {
             case .dataTypes:
                 rebuildStep3DestinationUI()
                 stepLabel.stringValue = String(
-                    format: String(
-                        localized: "browser.import.step.dataTypes",
-                        defaultValue: "Step 3 of 3: Choose what to import from %@ and where to put it."
-                    ),
-                    selectedBrowser().displayName
+                    localized: "browser.import.step.dataTypes",
+                    defaultValue: "Step 3 of 3"
                 )
                 sourceContainer.isHidden = true
                 sourceProfilesContainer.isHidden = true
@@ -8893,6 +9735,7 @@ final class BrowserDataImportCoordinator {
                     defaultValue: "Start Import"
                 )
             }
+            updatePanelSize()
         }
 
         private func selectedBrowser() -> InstalledBrowserCandidate {
@@ -8919,6 +9762,7 @@ final class BrowserDataImportCoordinator {
                     browser.displayName
                 )
                 sourceProfilesList.addArrangedSubview(sourceProfilesEmptyLabel)
+                updateSourceProfilesPresentation(for: browser)
                 return
             }
 
@@ -8934,6 +9778,8 @@ final class BrowserDataImportCoordinator {
                 sourceProfilesList.addArrangedSubview(checkbox)
                 sourceProfileCheckboxes.append(checkbox)
             }
+
+            updateSourceProfilesPresentation(for: browser)
         }
 
         private func storedSelectedSourceProfileIDs(for browser: InstalledBrowserCandidate) -> Set<String> {
@@ -9049,16 +9895,16 @@ final class BrowserDataImportCoordinator {
                     localized: "browser.import.destinationProfile.separateHelp",
                     defaultValue: "Missing cmux profiles are created when import starts."
                 )
+                destinationHelpLabel.isHidden = false
             } else if plan.entries.count > 1 {
                 destinationHelpLabel.stringValue = String(
                     localized: "browser.import.destinationProfile.mergeHelp",
                     defaultValue: "All selected source profiles will be merged into the chosen cmux browser profile."
                 )
+                destinationHelpLabel.isHidden = false
             } else {
-                destinationHelpLabel.stringValue = String(
-                    localized: "browser.import.destinationProfile.help",
-                    defaultValue: "Imported cookies and history go into the selected cmux browser profile."
-                )
+                destinationHelpLabel.stringValue = ""
+                destinationHelpLabel.isHidden = true
             }
         }
 
@@ -9075,7 +9921,7 @@ final class BrowserDataImportCoordinator {
                 guard let sourceProfile = entry.sourceProfiles.first else { continue }
                 let sourceLabel = NSTextField(labelWithString: sourceProfile.displayName)
                 sourceLabel.alignment = .right
-                sourceLabel.frame.size.width = 140
+                sourceLabel.frame.size.width = 110
 
                 let popup = NSPopUpButton(frame: .zero, pullsDown: false)
                 popup.target = self
@@ -9095,11 +9941,14 @@ final class BrowserDataImportCoordinator {
                 } else {
                     popup.selectItem(at: 0)
                 }
+                popup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
                 let row = NSStackView(views: [sourceLabel, popup])
                 row.orientation = .horizontal
-                row.spacing = 8
+                row.spacing = 6
                 row.alignment = .centerY
+                row.distribution = .fill
                 separateDestinationRows.addArrangedSubview(row)
             }
         }
@@ -9131,7 +9980,7 @@ final class BrowserDataImportCoordinator {
                 )
             )
             destinationLabel.alignment = .right
-            destinationLabel.frame.size.width = 140
+            destinationLabel.frame.size.width = 110
 
             mergeDestinationRow.addArrangedSubview(destinationLabel)
             mergeDestinationRow.addArrangedSubview(mergeDestinationPopup)
@@ -9203,6 +10052,51 @@ final class BrowserDataImportCoordinator {
                 .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
             return base.isEmpty ? "profile-\(index)" : base
+        }
+
+        private func updateSourceProfilesPresentation(for browser: InstalledBrowserCandidate) {
+            let presentation = BrowserImportSourceProfilesPresentation(profileCount: browser.profiles.count)
+            sourceProfilesScrollHeightConstraint?.constant = presentation.scrollHeight
+            sourceProfilesHelpLabel.isHidden = !presentation.showsHelpText
+        }
+
+        private func updateAdditionalDataNoteVisibility() {
+            additionalDataNoteLabel.isHidden = additionalDataCheckbox.state != .on
+        }
+
+        private func updatePanelSize() {
+            let contentSize = preferredContentSize()
+            let targetFrame = panel.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize))
+
+            guard panel.frame.size != targetFrame.size else { return }
+            if !panel.isVisible {
+                panel.setContentSize(contentSize)
+                return
+            }
+
+            var frame = panel.frame
+            frame.origin.x -= (targetFrame.width - frame.width) / 2
+            frame.origin.y -= (targetFrame.height - frame.height) / 2
+            frame.size = targetFrame.size
+            panel.setFrame(frame, display: true)
+        }
+
+        private func preferredContentSize() -> NSSize {
+            switch step {
+            case .source:
+                return NSSize(width: 560, height: 292)
+            case .sourceProfiles:
+                let presentation = BrowserImportSourceProfilesPresentation(profileCount: selectedBrowser().profiles.count)
+                let helpHeight: CGFloat = presentation.showsHelpText ? 24 : 0
+                let height = 214 + presentation.scrollHeight + helpHeight
+                return NSSize(width: 560, height: min(max(height, 292), 360))
+            case .dataTypes:
+                var height: CGFloat = currentExecutionPlan().mode == .separateProfiles ? 412 : 374
+                if additionalDataCheckbox.state == .on {
+                    height += 24
+                }
+                return NSSize(width: 560, height: height)
+            }
         }
 
         private func finishModal(with response: NSApplication.ModalResponse) {
