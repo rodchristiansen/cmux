@@ -3222,7 +3222,9 @@ final class WindowBrowserPortal: NSObject {
             !clampedFrame.isNull &&
             clampedFrame.width > 1 &&
             clampedFrame.height > 1
-        let targetFrame = hasVisibleIntersection ? clampedFrame : frameInHost
+        // Use full unclamped frame so browser width stays constant during
+        // viewport scrolling. The host view clips visually.
+        let targetFrame = frameInHost
         let anchorHidden = Self.isHiddenOrAncestorHidden(anchorView)
         let tinyFrame = targetFrame.width <= 1 || targetFrame.height <= 1
         let outsideHostBounds = !hasVisibleIntersection

@@ -1354,7 +1354,10 @@ final class WindowTerminalPortal: NSObject {
             !clampedFrame.isNull &&
             clampedFrame.width > 1 &&
             clampedFrame.height > 1
-        let targetFrame = (hasFiniteFrame && hasVisibleIntersection) ? clampedFrame : frameInHost
+        // Use the full unclamped frame so terminal width stays constant during
+        // viewport scrolling. The host view clips visually via clipsToBounds.
+        // The clamped intersection is only used for the hide/show decision.
+        let targetFrame = frameInHost
         let anchorHidden = Self.isHiddenOrAncestorHidden(anchorView)
         let tinyFrame =
             targetFrame.width <= Self.tinyHideThreshold ||
