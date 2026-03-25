@@ -937,6 +937,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/vendor/cef-bridge",
+				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/vendor/cef-bridge",
@@ -945,6 +949,8 @@
 				OTHER_LDFLAGS = (
 					"-lc++",
 					"-lcef_bridge",
+					"-framework",
+					"\"Chromium Embedded Framework\"",
 					"-framework",
 					Metal,
 					"-framework",
@@ -981,6 +987,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/vendor/cef-bridge",
+				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/vendor/cef-bridge",
@@ -989,6 +999,8 @@
 				OTHER_LDFLAGS = (
 					"-lc++",
 					"-lcef_bridge",
+					"-framework",
+					"\"Chromium Embedded Framework\"",
 					"-framework",
 					Metal,
 					"-framework",

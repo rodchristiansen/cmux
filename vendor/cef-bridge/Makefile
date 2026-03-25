@@ -1,19 +1,20 @@
 # Build the CEF bridge as a static library.
 #
-# In stub mode (no CEF framework present), this compiles the stub
-# implementations that return CEF_BRIDGE_ERR_NOT_INIT for everything.
-# When CEF is available, set CEF_ROOT to the framework directory.
+# In stub mode (no CEF_ROOT), compiles stubs returning CEF_BRIDGE_ERR_NOT_INIT.
+# When CEF_ROOT points to the CEF distribution, builds with real CEF calls.
 
 CXX ?= clang++
 AR  ?= ar
 
-# CEF_ROOT should point to the CEF distribution root (containing
-# "include/" and the framework). Leave unset for stub builds.
+# CEF_ROOT: path to extracted CEF binary distribution
+# CEF_WRAPPER_LIB: path to built libcef_dll_wrapper.a
 CEF_ROOT ?=
+CEF_WRAPPER_LIB ?=
 
-CXXFLAGS := -std=c++17 -fPIC -Wall -Wextra -Wno-unused-parameter
-CXXFLAGS += -arch arm64 -arch x86_64
+CXXFLAGS := -std=c++20 -fPIC -Wall -Wextra -Wno-unused-parameter
+CXXFLAGS += -arch arm64
 CXXFLAGS += -mmacosx-version-min=13.0
+CXXFLAGS += -fno-exceptions -fno-rtti -fno-threadsafe-statics
 
 ifdef CEF_ROOT
   CXXFLAGS += -I$(CEF_ROOT) -DCEF_BRIDGE_HAS_CEF=1
@@ -27,8 +28,15 @@ LIB := libcef_bridge.a
 
 all: $(LIB)
 
+ifdef CEF_WRAPPER_LIB
+# When we have the wrapper lib, merge both into one archive
+$(LIB): $(OBJ)
+	cp $(CEF_WRAPPER_LIB) $@
+	$(AR) rs $@ $^
+else
 $(LIB): $(OBJ)
 	$(AR) rcs $@ $^
+endif
 
 %.o: %.cpp cef_bridge.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
