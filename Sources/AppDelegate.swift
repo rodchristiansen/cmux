@@ -2346,18 +2346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)
         if env["CMUX_UI_TEST_MODE"] == "1" {
             let trigger = env["CMUX_UI_TEST_TRIGGER_UPDATE_CHECK"] ?? "<nil>"
-            let dialogTrigger = env["CMUX_UI_TEST_TRIGGER_UPDATE_CHECK_DIALOG"] ?? "<nil>"
             let feed = env["CMUX_UI_TEST_FEED_URL"] ?? "<nil>"
-            UpdateLogStore.shared.append("ui test env: trigger=\(trigger) dialogTrigger=\(dialogTrigger) feed=\(feed)")
-            if let feedURL = URL(string: feed), feedURL.host == UpdateTestURLProtocol.host {
-                UpdateTestURLProtocol.registerIfNeeded()
-            }
-        }
-        if env["CMUX_UI_TEST_TRIGGER_UPDATE_CHECK_DIALOG"] == "1" {
-            UpdateLogStore.shared.append("ui test trigger update dialog detected")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                self?.checkForUpdatesInDialog(nil)
-            }
+            UpdateLogStore.shared.append("ui test env: trigger=\(trigger) feed=\(feed)")
         }
         if env["CMUX_UI_TEST_TRIGGER_UPDATE_CHECK"] == "1" {
             UpdateLogStore.shared.append("ui test trigger update check detected")
@@ -5869,11 +5859,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         updateController.checkForUpdates()
     }
 
-    @objc func checkForUpdatesInDialog(_ sender: Any?) {
-        updateViewModel.overrideState = nil
-        updateController.checkForUpdatesInDialog()
-    }
-
     func openWelcomeWorkspace() {
         guard let context = preferredMainWindowContextForWorkspaceCreation(event: nil, debugSource: "welcome") else {
             return
@@ -6006,7 +5991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 self?.jumpToLatestUnread()
             },
             onCheckForUpdates: { [weak self] in
-                self?.checkForUpdatesInDialog(nil)
+                self?.checkForUpdates(nil)
             },
             onOpenPreferences: { [weak self] in
                 self?.openPreferencesWindow(debugSource: "menuBarExtra")

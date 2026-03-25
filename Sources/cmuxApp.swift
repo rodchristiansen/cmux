@@ -382,7 +382,7 @@ struct cmuxApp: App {
                 .keyboardShortcut(",", modifiers: [.command, .shift])
                 Divider()
                 Button(String(localized: "menu.app.checkForUpdates", defaultValue: "Check for Updates…")) {
-                    appDelegate.checkForUpdatesInDialog(nil)
+                    appDelegate.checkForUpdates(nil)
                 }
                 InstallUpdateMenuItem(model: appDelegate.updateViewModel)
             }
