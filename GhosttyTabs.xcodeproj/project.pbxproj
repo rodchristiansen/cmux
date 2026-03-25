@@ -12,6 +12,7 @@
 		CEF00003 /* CEFRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEF00013 /* CEFRuntime.swift */; };
 		CEF00004 /* CEFDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEF00014 /* CEFDownloadView.swift */; };
 		CEF00005 /* CEFBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEF00015 /* CEFBrowserView.swift */; };
+		CEF00006 /* CEFBrowserViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEF00016 /* CEFBrowserViewRepresentable.swift */; };
 			A5001001 /* cmuxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001011 /* cmuxApp.swift */; };
 			A5001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001012 /* ContentView.swift */; };
 			E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */; };
@@ -186,6 +187,7 @@
 		CEF00013 /* CEFRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserEngine/CEFRuntime.swift; sourceTree = "<group>"; };
 		CEF00014 /* CEFDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserEngine/CEFDownloadView.swift; sourceTree = "<group>"; };
 		CEF00015 /* CEFBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserEngine/CEFBrowserView.swift; sourceTree = "<group>"; };
+		CEF00016 /* CEFBrowserViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserEngine/CEFBrowserViewRepresentable.swift; sourceTree = "<group>"; };
 			A5001000 /* cmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
 			F1000002A1B2C3D4E5F60718 /* cmuxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cmuxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 			7E7E6EF344A568AC7FEE3715 /* cmuxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cmuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -473,6 +475,7 @@
 				CEF00013 /* CEFRuntime.swift */,
 				CEF00014 /* CEFDownloadView.swift */,
 				CEF00015 /* CEFBrowserView.swift */,
+				CEF00016 /* CEFBrowserViewRepresentable.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -773,6 +776,7 @@
 				CEF00003 /* CEFRuntime.swift in Sources */,
 				CEF00004 /* CEFDownloadView.swift in Sources */,
 				CEF00005 /* CEFBrowserView.swift in Sources */,
+				CEF00006 /* CEFBrowserViewRepresentable.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

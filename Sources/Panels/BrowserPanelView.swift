@@ -1117,7 +1117,9 @@ struct BrowserPanelView: View {
             isCurrentPaneOwner
 
         return Group {
-            if panel.shouldRenderWebView {
+            if panel.engineType == .chromium {
+                chromiumWebView
+            } else if panel.shouldRenderWebView {
                 WebViewRepresentable(
                     panel: panel,
                     paneId: paneId,
@@ -1187,6 +1189,34 @@ struct BrowserPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .layoutPriority(1)
         .zIndex(0)
+    }
+
+    /// View for Chromium-engine browser panels. Shows the CEFBrowserView
+    /// if CEF is initialized, or the download/error UI otherwise.
+    @ViewBuilder
+    private var chromiumWebView: some View {
+        if let cefView = panel.cefBrowserView, CEFRuntime.shared.isInitialized {
+            CEFBrowserViewRepresentable(cefBrowserView: cefView)
+                .accessibilityIdentifier("ChromiumBrowserView")
+        } else if !CEFRuntime.shared.isInitialized {
+            CEFDownloadView {
+                // User cancelled, nothing to do
+            }
+        } else {
+            VStack {
+                Text(String(
+                    localized: "cef.error.title",
+                    defaultValue: "Chromium engine unavailable"
+                ))
+                .font(.headline)
+                if let error = CEFRuntime.shared.initError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private func triggerFocusFlashAnimation() {
