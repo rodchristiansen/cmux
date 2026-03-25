@@ -603,6 +603,8 @@ final class WindowTerminalPortal: NSObject {
     private var entriesByHostedId: [ObjectIdentifier: Entry] = [:]
     private var hostedByAnchorId: [ObjectIdentifier: ObjectIdentifier] = [:]
 
+    private let sidebarClipLayer = CALayer()
+
     init(window: NSWindow) {
         self.window = window
         super.init()
@@ -1475,7 +1477,30 @@ final class WindowTerminalPortal: NSObject {
         }
 
         if hasFiniteFrame {
+            // Use unclamped frame for position (terminal moves during scroll)
+            // and size (stable width). Sidebar clipping is handled by a mask
+            // layer on the host view.
             let stableFrame = unclampedFrameInHost
+
+            // Update sidebar clip mask: the mask layer clips the host view
+            // so terminals can't render in the sidebar area. The sidebar
+            // width comes from the first ancestor whose left edge is > 0.
+            let sidebarRight = targetFrame.origin.x
+            if sidebarRight > 0 {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                if hostView.layer?.mask !== sidebarClipLayer {
+                    hostView.layer?.mask = sidebarClipLayer
+                }
+                let hostSize = hostView.bounds.size
+                sidebarClipLayer.frame = NSRect(
+                    x: sidebarRight,
+                    y: 0,
+                    width: hostSize.width - sidebarRight,
+                    height: hostSize.height
+                )
+                CATransaction.commit()
+            }
             let sizeChanged = abs(oldFrame.width - stableFrame.width) > 1 ||
                               abs(oldFrame.height - stableFrame.height) > 1
             let positionChanged = abs(oldFrame.origin.x - stableFrame.origin.x) > 0.5 ||
