@@ -5,6 +5,7 @@ const terminal_session = @import("terminal_session.zig");
 pub const PtyHost = struct {
     alloc: std.mem.Allocator,
     master_fd: std.posix.fd_t,
+    master_open: bool = true,
     pid: std.posix.pid_t,
     closed: bool = false,
 
@@ -27,7 +28,7 @@ pub const PtyHost = struct {
             const shell_path: [*:0]const u8 = "/bin/sh";
             const argv = [_:null]?[*:0]const u8{
                 "/bin/sh",
-                "-lc",
+                "-c",
                 command_z,
                 null,
             };
@@ -48,25 +49,49 @@ pub const PtyHost = struct {
     }
 
     pub fn deinit(self: *PtyHost) void {
-        if (!self.closed) {
-            self.markClosed();
-            std.posix.kill(-self.pid, std.posix.SIG.HUP) catch {};
-            std.posix.kill(-self.pid, std.posix.SIG.KILL) catch {};
+        if (self.master_open) {
+            std.posix.close(self.master_fd);
+            self.master_open = false;
         }
+        self.markClosed();
+        std.posix.kill(-self.pid, std.posix.SIG.HUP) catch {};
+        std.posix.kill(self.pid, std.posix.SIG.HUP) catch {};
+        std.posix.kill(-self.pid, std.posix.SIG.KILL) catch {};
+        std.posix.kill(self.pid, std.posix.SIG.KILL) catch {};
         _ = std.posix.waitpid(self.pid, 0);
-        std.posix.close(self.master_fd);
     }
 
     pub fn write(self: *PtyHost, data: []const u8) !void {
         var remaining = data;
         while (remaining.len > 0) {
             const written = std.posix.write(self.master_fd, remaining) catch |err| switch (err) {
-                error.WouldBlock => return error.WouldBlock,
+                error.WouldBlock => {
+                    try self.waitWritable();
+                    continue;
+                },
                 else => return err,
             };
             if (written == 0) return;
             remaining = remaining[written..];
         }
+    }
+
+    pub fn writeDraining(self: *PtyHost, session: *terminal_session.TerminalSession, data: []const u8) !void {
+        var remaining = data;
+        while (remaining.len > 0) {
+            const written = std.posix.write(self.master_fd, remaining) catch |err| switch (err) {
+                error.WouldBlock => {
+                    try self.waitWritableOrReadable();
+                    try self.pump(session);
+                    continue;
+                },
+                else => return err,
+            };
+            if (written == 0) return;
+            remaining = remaining[written..];
+            try self.pump(session);
+        }
+        try self.pump(session);
     }
 
     pub fn resize(self: *PtyHost, cols: u16, rows: u16) !void {
@@ -91,6 +116,24 @@ pub const PtyHost = struct {
         }};
         const ready = try std.posix.poll(&fds, timeout_ms);
         return ready > 0;
+    }
+
+    fn waitWritable(self: *PtyHost) !void {
+        var fds = [1]std.posix.pollfd{.{
+            .fd = self.master_fd,
+            .events = std.posix.POLL.OUT | std.posix.POLL.ERR | std.posix.POLL.HUP,
+            .revents = 0,
+        }};
+        _ = try std.posix.poll(&fds, -1);
+    }
+
+    fn waitWritableOrReadable(self: *PtyHost) !void {
+        var fds = [1]std.posix.pollfd{.{
+            .fd = self.master_fd,
+            .events = std.posix.POLL.OUT | std.posix.POLL.IN | std.posix.POLL.ERR | std.posix.POLL.HUP,
+            .revents = 0,
+        }};
+        _ = try std.posix.poll(&fds, -1);
     }
 
     pub fn pump(self: *PtyHost, session: *terminal_session.TerminalSession) !void {

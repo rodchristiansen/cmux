@@ -62,13 +62,23 @@ const RuntimeSession = struct {
             if (effective_offset < window.base_offset) effective_offset = window.base_offset;
 
             if (effective_offset < window.next_offset) {
+                if (timeout_ms > 0 and !self.pty.isClosed()) {
+                    const elapsed = std.time.milliTimestamp() - start_ms;
+                    const remaining = @as(i64, timeout_ms) - elapsed;
+                    if (remaining > 0) {
+                        const ready = try self.pty.waitReadable(@as(i32, @intCast(remaining)));
+                        if (ready) continue;
+                    }
+                }
+
+                const refreshed = self.terminal.offsetWindow();
                 const raw = try self.terminal.readRaw(alloc, offset, max_bytes);
                 return .{
                     .data = raw.data,
                     .offset = raw.offset,
                     .base_offset = raw.base_offset,
                     .truncated = raw.truncated,
-                    .eof = self.pty.isClosed() and raw.offset >= window.next_offset,
+                    .eof = self.pty.isClosed() and raw.offset >= refreshed.next_offset,
                 };
             }
 
@@ -211,7 +221,7 @@ pub const Service = struct {
 
     pub fn writeTerminal(self: *Service, session_id: []const u8, data: []const u8) !usize {
         const runtime = self.runtimes.getPtr(session_id) orelse return error.TerminalSessionNotFound;
-        try runtime.*.*.pty.write(data);
+        try runtime.*.*.pty.writeDraining(&runtime.*.*.terminal, data);
         return data.len;
     }
 
@@ -258,4 +268,54 @@ test "terminal read returns subprocess output" {
     defer std.testing.allocator.free(read.data);
 
     try std.testing.expect(std.mem.indexOf(u8, read.data, "READY") != null);
+}
+
+test "list sessions retains last known size after final detach" {
+    var service = Service.init(std.testing.allocator);
+    defer service.deinit();
+
+    var opened = try service.openTerminal("dev", "printf READY", 120, 40);
+    defer opened.status.deinit(std.testing.allocator);
+    defer std.testing.allocator.free(opened.attachment_id);
+
+    const initial = try service.listSessions();
+    defer {
+        for (initial) |*entry| entry.deinit(std.testing.allocator);
+        std.testing.allocator.free(initial);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), initial.len);
+    try std.testing.expectEqual(@as(usize, 1), initial[0].attachment_count);
+    try std.testing.expectEqual(@as(u16, 120), initial[0].effective_cols);
+    try std.testing.expectEqual(@as(u16, 40), initial[0].effective_rows);
+
+    var detached = try service.detachSession("dev", opened.attachment_id);
+    defer detached.deinit(std.testing.allocator);
+
+    const listed = try service.listSessions();
+    defer {
+        for (listed) |*entry| entry.deinit(std.testing.allocator);
+        std.testing.allocator.free(listed);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), listed.len);
+    try std.testing.expectEqual(@as(usize, 0), listed[0].attachment_count);
+    try std.testing.expectEqual(@as(u16, 120), listed[0].effective_cols);
+    try std.testing.expectEqual(@as(u16, 40), listed[0].effective_rows);
+}
+
+test "close session removes terminal runtime" {
+    var service = Service.init(std.testing.allocator);
+    defer service.deinit();
+
+    var opened = try service.openTerminal("dev", "printf READY", 80, 24);
+    defer opened.status.deinit(std.testing.allocator);
+    defer std.testing.allocator.free(opened.attachment_id);
+
+    try service.closeSession("dev");
+
+    try std.testing.expectError(error.SessionNotFound, service.sessionStatus("dev"));
+    try std.testing.expectError(error.TerminalSessionNotFound, service.readTerminal("dev", 0, 32, 0));
+    try std.testing.expectError(error.TerminalSessionNotFound, service.writeTerminal("dev", "hello"));
+    try std.testing.expectError(error.TerminalSessionNotFound, service.history("dev", .plain));
 }

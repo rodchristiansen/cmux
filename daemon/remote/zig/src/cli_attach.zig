@@ -32,6 +32,8 @@ pub fn run(alloc: std.mem.Allocator, socket_path: []const u8, session_name: []co
     defer client.deinit();
     const stdin_fd = std.fs.File.stdin().handle;
     const stdout_file = std.fs.File.stdout();
+    var stdout_nonblocking = try NonBlockingFd.enter(stdout_file.handle);
+    defer stdout_nonblocking.deinit();
     var trace = try AttachTrace.init(alloc);
     defer trace.deinit();
     const fallback_size = try statusSize(&client, session_name, stderr);
@@ -58,6 +60,8 @@ pub fn run(alloc: std.mem.Allocator, socket_path: []const u8, session_name: []co
     var pending_detach: [tty_raw.max_detach_prefix_bytes]u8 = undefined;
     var pending_detach_len: usize = 0;
     var input_buf: [4096 + tty_raw.max_detach_prefix_bytes]u8 = undefined;
+    var pending_output: std.ArrayList(u8) = .empty;
+    defer pending_output.deinit(alloc);
 
     while (true) {
         const desired_size = currentAttachSizeWithTrace(last_size, &trace);
@@ -74,6 +78,8 @@ pub fn run(alloc: std.mem.Allocator, socket_path: []const u8, session_name: []co
             last_size = desired_size;
         }
 
+        try flushPendingOutput(stdout_file.handle, &pending_output, &trace, session_name);
+
         if (try stdinReady(stdin_fd)) {
             pending_detach_len = try drainAndWriteInput(
                 &client,
@@ -88,12 +94,20 @@ pub fn run(alloc: std.mem.Allocator, socket_path: []const u8, session_name: []co
             continue;
         }
 
+        if (pending_output.items.len > 0) {
+            std.Thread.yield() catch {};
+            continue;
+        }
+
         const read_started_ms = std.time.milliTimestamp();
         switch (try readTerminal(&client, session_name, offset, idle_read_timeout_ms, stderr)) {
             .timeout => std.Thread.yield() catch {},
             .data => |read| {
                 defer alloc.free(read.payload);
-                if (read.payload.len > 0) try stdout_file.writeAll(read.payload);
+                if (read.payload.len > 0) {
+                    try pending_output.appendSlice(alloc, read.payload);
+                    try flushPendingOutput(stdout_file.handle, &pending_output, &trace, session_name);
+                }
                 offset = read.next_offset;
                 try trace.log("read_result", .{
                     .hypothesis_id = "h1",
@@ -108,6 +122,28 @@ pub fn run(alloc: std.mem.Allocator, socket_path: []const u8, session_name: []co
         }
     }
 }
+
+const NonBlockingFd = struct {
+    fd: std.posix.fd_t,
+    original_flags: usize,
+    active: bool = false,
+
+    fn enter(fd: std.posix.fd_t) !NonBlockingFd {
+        const original_flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
+        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, original_flags | @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
+        return .{
+            .fd = fd,
+            .original_flags = original_flags,
+            .active = true,
+        };
+    }
+
+    fn deinit(self: *NonBlockingFd) void {
+        if (!self.active) return;
+        _ = std.posix.fcntl(self.fd, std.posix.F.SETFL, self.original_flags) catch {};
+        self.active = false;
+    }
+};
 
 const TraceEvent = struct {
     hypothesis_id: []const u8,
@@ -371,6 +407,27 @@ fn stdinReady(fd: std.posix.fd_t) !bool {
         .revents = 0,
     }};
     return try std.posix.poll(&poll_fds, 0) > 0;
+}
+
+fn flushPendingOutput(fd: std.posix.fd_t, pending_output: *std.ArrayList(u8), trace: *AttachTrace, session_name: []const u8) !void {
+    while (pending_output.items.len > 0) {
+        const written = std.posix.write(fd, pending_output.items) catch |err| switch (err) {
+            error.WouldBlock => {
+                try trace.log("stdout_backpressure", .{
+                    .hypothesis_id = "h2",
+                    .session_id = session_name,
+                    .payload_len = pending_output.items.len,
+                    .detail = "stdout_not_ready",
+                });
+                return;
+            },
+            else => return err,
+        };
+        if (written == 0) return;
+        const remaining = pending_output.items[written..];
+        std.mem.copyForwards(u8, pending_output.items[0..remaining.len], remaining);
+        pending_output.items.len = remaining.len;
+    }
 }
 
 fn drainAndWriteInput(
