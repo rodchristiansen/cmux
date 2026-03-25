@@ -8,6 +8,7 @@ import Darwin
 import Sentry
 import Bonsplit
 import IOSurface
+import CoreServices
 import UniformTypeIdentifiers
 
 #if os(macOS)
@@ -1768,14 +1769,35 @@ class GhosttyApp {
         reloadConfiguration(source: "appearanceSync:\(source)")
     }
 
-    func openConfigurationInTextEdit() {
+    static func preferredConfigurationEditorApplicationURL(
+        for fileURL: URL,
+        defaultApplicationURLForExtension: (String) -> URL? = {
+            NSWorkspace.shared.cmuxDefaultApplicationURL(forExtension: $0)
+        },
+        defaultTextEditorURL: () -> URL? = {
+            NSWorkspace.shared.cmuxDefaultTextEditor
+        }
+    ) -> URL? {
+        let pathExtension = fileURL.pathExtension
+        if !pathExtension.isEmpty,
+           let editorURL = defaultApplicationURLForExtension(pathExtension) {
+            return editorURL
+        }
+
+        return defaultTextEditorURL()
+    }
+
+    func openConfigurationInPreferredEditor() {
         #if os(macOS)
         let path = ghosttyStringValue(ghostty_config_open_path())
         guard !path.isEmpty else { return }
         let fileURL = URL(fileURLWithPath: path)
-        let editorURL = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
-        let configuration = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.open([fileURL], withApplicationAt: editorURL, configuration: configuration)
+        if let editorURL = Self.preferredConfigurationEditorApplicationURL(for: fileURL) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open([fileURL], withApplicationAt: editorURL, configuration: configuration)
+        } else {
+            NSWorkspace.shared.open(fileURL)
+        }
         #endif
     }
 
@@ -2613,6 +2635,25 @@ class GhosttyApp {
                 try? handle.write(contentsOf: data)
             }
         }
+    }
+}
+
+private extension NSWorkspace {
+    var cmuxDefaultTextEditor: URL? {
+        cmuxDefaultApplicationURL(forContentType: UTType.plainText.identifier)
+    }
+
+    func cmuxDefaultApplicationURL(forContentType contentType: String) -> URL? {
+        LSCopyDefaultApplicationURLForContentType(
+            contentType as CFString,
+            .all,
+            nil
+        )?.takeRetainedValue() as? URL
+    }
+
+    func cmuxDefaultApplicationURL(forExtension ext: String) -> URL? {
+        guard let contentType = UTType(filenameExtension: ext) else { return nil }
+        return cmuxDefaultApplicationURL(forContentType: contentType.identifier)
     }
 }
 
