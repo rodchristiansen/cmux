@@ -322,6 +322,7 @@ struct BrowserProfileDefinition: Codable, Hashable, Identifiable, Sendable {
     var displayName: String
     let createdAt: Date
     let isBuiltInDefault: Bool
+    var engineType: BrowserEngineType = .webkit
 
     var slug: String {
         if isBuiltInDefault {
@@ -374,14 +375,15 @@ final class BrowserProfileStore: ObservableObject {
         ?? String(localized: "browser.profile.default", defaultValue: "Default")
     }
 
-    func createProfile(named rawName: String) -> BrowserProfileDefinition? {
+    func createProfile(named rawName: String, engineType: BrowserEngineType = .webkit) -> BrowserProfileDefinition? {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
         let profile = BrowserProfileDefinition(
             id: UUID(),
             displayName: name,
             createdAt: Date(),
-            isBuiltInDefault: false
+            isBuiltInDefault: false,
+            engineType: engineType
         )
         profiles.append(profile)
         profiles.sort {
@@ -1865,9 +1867,15 @@ final class BrowserPanel: Panel, ObservableObject {
     @Published private(set) var profileID: UUID
     @Published private(set) var historyStore: BrowserHistoryStore
 
+    /// The browser engine type for this panel.
+    let engineType: BrowserEngineType
+
     /// The underlying web view
     private(set) var webView: WKWebView
     private var websiteDataStore: WKWebsiteDataStore
+
+    /// The underlying CEF browser view (Chromium engine only, nil for WebKit).
+    private(set) var cefBrowserView: CEFBrowserView?
 
     /// Monotonic identity for the current WKWebView instance.
     /// Incremented whenever we replace the underlying WKWebView after a process crash.
@@ -2580,6 +2588,11 @@ final class BrowserPanel: Panel, ObservableObject {
         self.remoteProxyEndpoint = proxyEndpoint
         self.usesRemoteWorkspaceProxy = isRemoteWorkspace
         self.browserThemeMode = BrowserThemeSettings.mode()
+
+        // Resolve engine type from the profile definition
+        let profileDef = BrowserProfileStore.shared.profileDefinition(id: resolvedProfileID)
+        self.engineType = profileDef?.engineType ?? .webkit
+
         self.websiteDataStore = isRemoteWorkspace
             ? WKWebsiteDataStore(forIdentifier: remoteWebsiteDataStoreIdentifier ?? workspaceId)
             : BrowserProfileStore.shared.websiteDataStore(for: resolvedProfileID)
@@ -2592,6 +2605,41 @@ final class BrowserPanel: Panel, ObservableObject {
         self.insecureHTTPAlertFactory = { NSAlert() }
         applyRemoteProxyConfigurationIfAvailable()
         BrowserProfileStore.shared.noteUsed(resolvedProfileID)
+
+        // For Chromium profiles, also create a CEFBrowserView.
+        // The view layer will display it instead of the WKWebView.
+        if engineType == .chromium {
+            let cefView = CEFBrowserView(frame: .zero)
+            self.cefBrowserView = cefView
+
+            if !CEFRuntime.shared.isInitialized {
+                CEFRuntime.shared.initialize()
+            }
+
+            if CEFRuntime.shared.isInitialized {
+                let cachePath: String = {
+                    let appSupport = FileManager.default.urls(
+                        for: .applicationSupportDirectory,
+                        in: .userDomainMask
+                    ).first!
+                    let bundleID = Bundle.main.bundleIdentifier ?? "com.cmuxterm.app"
+                    return appSupport
+                        .appendingPathComponent(bundleID)
+                        .appendingPathComponent("browser_profiles")
+                        .appendingPathComponent(resolvedProfileID.uuidString)
+                        .appendingPathComponent("cef_cache")
+                        .path
+                }()
+                try? FileManager.default.createDirectory(
+                    atPath: cachePath,
+                    withIntermediateDirectories: true
+                )
+                let url = initialURL?.absoluteString ?? "about:blank"
+                cefView.createBrowser(initialURL: url, cachePath: cachePath)
+            }
+        } else {
+            self.cefBrowserView = nil
+        }
 
         // Set up navigation delegate
         let navDelegate = BrowserNavigationDelegate()
