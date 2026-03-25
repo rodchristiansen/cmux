@@ -164,7 +164,7 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertTrue(path?.lastPathComponent.hasPrefix("window-geometry-") == true)
     }
 
-    func testWindowGeometryStoreRoundTripWithCustomPath() {
+    func testWindowGeometryStoreRoundTripWithCustomPath() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-window-geometry-tests-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -182,13 +182,14 @@ final class SessionPersistenceTests: XCTestCase {
 
         XCTAssertTrue(SessionWindowGeometryStore.save(snapshot, fileURL: fileURL))
 
-        let loaded = SessionWindowGeometryStore.load(fileURL: fileURL)
-        XCTAssertEqual(loaded?.frame.x, 10, accuracy: 0.001)
-        XCTAssertEqual(loaded?.frame.y, 20, accuracy: 0.001)
-        XCTAssertEqual(loaded?.frame.width, 900, accuracy: 0.001)
-        XCTAssertEqual(loaded?.frame.height, 700, accuracy: 0.001)
-        XCTAssertEqual(loaded?.display?.displayID, 42)
-        XCTAssertEqual(loaded?.display?.visibleFrame?.y, 25, accuracy: 0.001)
+        let loaded = try XCTUnwrap(SessionWindowGeometryStore.load(fileURL: fileURL))
+        XCTAssertEqual(loaded.frame.x, 10, accuracy: 0.001)
+        XCTAssertEqual(loaded.frame.y, 20, accuracy: 0.001)
+        XCTAssertEqual(loaded.frame.width, 900, accuracy: 0.001)
+        XCTAssertEqual(loaded.frame.height, 700, accuracy: 0.001)
+        XCTAssertEqual(loaded.display?.displayID, 42)
+        let visibleFrame = try XCTUnwrap(loaded.display?.visibleFrame)
+        XCTAssertEqual(visibleFrame.y, 25, accuracy: 0.001)
     }
 
     func testRestorePolicySkipsWhenLaunchHasExplicitArguments() {
