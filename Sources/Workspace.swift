@@ -678,18 +678,49 @@ extension Workspace {
         snapshotNode: SessionWorkspaceLayoutSnapshot,
         liveNode: ExternalTreeNode
     ) {
-        switch (snapshotNode, liveNode) {
-        case (.split(let snapshotSplit), .split(let liveSplit)):
-            if let splitID = UUID(uuidString: liveSplit.id) {
-                layoutController.setDividerPosition(
-                    CGFloat(snapshotSplit.dividerPosition),
-                    for: splitID
-                )
-            }
-            applySessionDividerPositions(snapshotNode: snapshotSplit.first, liveNode: liveSplit.first)
-            applySessionDividerPositions(snapshotNode: snapshotSplit.second, liveNode: liveSplit.second)
-        default:
-            return
+        // Paper layout: extract divider ratios from the right-leaning
+        // split chain and compute absolute pane widths.
+        var ratios: [Double] = []
+        extractDividerRatios(from: snapshotNode, into: &ratios)
+
+        let panes = layoutController.panes
+        guard !ratios.isEmpty, panes.count > 1 else { return }
+
+        let totalWidth = panes.reduce(CGFloat(0)) { $0 + $1.width }
+        guard totalWidth > 0 else { return }
+
+        // Reconstruct widths from the right-leaning chain ratios.
+        // ratio[0] = pane0 / total
+        // ratio[1] = pane1 / (total - pane0)
+        // ratio[2] = pane2 / (total - pane0 - pane1)
+        // etc.
+        var remaining = totalWidth
+        let minWidth = layoutController.configuration.appearance.minimumPaneWidth
+        for i in 0..<min(ratios.count, panes.count - 1) {
+            let width = max(remaining * CGFloat(ratios[i]), minWidth)
+            panes[i].width = width
+            remaining -= width
+        }
+        // Last pane gets whatever remains
+        if let lastPane = panes.last {
+            lastPane.width = max(remaining, minWidth)
+        }
+
+        layoutController.notifyGeometryChange()
+    }
+
+    private func extractDividerRatios(
+        from node: SessionWorkspaceLayoutSnapshot,
+        into ratios: inout [Double]
+    ) {
+        switch node {
+        case .split(let split):
+            ratios.append(split.dividerPosition)
+            // Don't recurse into .first (it's a leaf pane in the right-leaning chain)
+            // Recurse into .second which may be another split
+            extractDividerRatios(from: split.second, into: &ratios)
+        case .pane:
+            break
         }
     }
 }
