@@ -17,9 +17,8 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
         self.emptyPaneBuilder = emptyPane
     }
 
-    // The focused pane ID drives ScrollViewReader.scrollTo. Stored as @State
-    // so SwiftUI can animate the scroll transition.
     @State private var scrollTarget: PaneID?
+    @State private var scrollAnchor: UnitPoint = .leading
 
     var body: some View {
         GeometryReader { geometry in
@@ -47,14 +46,34 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
                         guard let target else { return }
                         if controller.configuration.appearance.enableAnimations {
                             withAnimation(.easeInOut(duration: controller.configuration.appearance.animationDuration)) {
-                                proxy.scrollTo(target, anchor: .leading)
+                                proxy.scrollTo(target, anchor: scrollAnchor)
                             }
                         } else {
-                            proxy.scrollTo(target, anchor: .leading)
+                            proxy.scrollTo(target, anchor: scrollAnchor)
                         }
                     }
-                    .onChange(of: controller.focusedPaneIndex) { _, _ in
-                        scrollTarget = controller.focusedPaneId
+                    .onChange(of: controller.focusedPaneIndex) { oldIdx, newIdx in
+                        guard let newIdx, let id = controller.focusedPaneId else { return }
+                        // Only scroll if the total canvas is wider than the viewport
+                        let totalWidth = controller.panes.reduce(CGFloat(0)) { $0 + $1.width }
+                        guard totalWidth > viewportWidth else { return }
+
+                        // Determine scroll anchor based on navigation direction
+                        if let oldIdx, newIdx > oldIdx {
+                            // Navigated right: align target's trailing edge to viewport right
+                            scrollAnchor = .trailing
+                        } else {
+                            // Navigated left: align target's leading edge to viewport left
+                            scrollAnchor = .leading
+                        }
+                        scrollTarget = id
+                    }
+                    .onChange(of: controller.panes.count) { oldCount, newCount in
+                        // When a new pane is added, scroll to it
+                        if newCount > oldCount, let id = controller.focusedPaneId {
+                            scrollAnchor = .trailing
+                            scrollTarget = id
+                        }
                     }
                 }
             }
@@ -164,10 +183,13 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
             }
         }
         .overlay(alignment: .trailing) {
-            if controller.panes.last?.id != pane.id && controller.panes.count > 1 {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.15))
-                    .frame(width: 1)
+            // Resize handle + separator on the right edge (except for the last pane)
+            if let paneIndex = controller.paneIndex(pane.id),
+               paneIndex < controller.panes.count - 1 {
+                PaperResizeHandle(
+                    controller: controller,
+                    leftPaneIndex: paneIndex
+                )
             }
         }
     }
@@ -185,12 +207,20 @@ private struct PaperResizeHandle: View {
     private let handleWidth: CGFloat = 6
 
     var body: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: handleWidth)
-            .contentShape(Rectangle())
-            .cursor(.resizeLeftRight)
-            .gesture(
+        ZStack {
+            // Visible 1px separator
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1)
+            // Wider invisible hit area
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: handleWidth)
+                .contentShape(Rectangle())
+        }
+        .frame(width: handleWidth)
+        .cursor(.resizeLeftRight)
+        .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
                         if !isDragging {
