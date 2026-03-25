@@ -17,49 +17,48 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
         self.emptyPaneBuilder = emptyPane
     }
 
+    // The focused pane ID drives ScrollViewReader.scrollTo. Stored as @State
+    // so SwiftUI can animate the scroll transition.
+    @State private var scrollTarget: PaneID?
+
     var body: some View {
         GeometryReader { geometry in
             let viewportWidth = geometry.size.width
             let viewportHeight = geometry.size.height
 
-            ZStack(alignment: .topLeading) {
-                // Canvas: all panes laid out horizontally
-                HStack(spacing: 0) {
-                    ForEach(controller.panes) { pane in
-                        let resolvedWidth = (pane.width <= 0 || pane.width == .infinity)
-                            ? viewportWidth
-                            : pane.width
-                        PaperPaneContainerView(
-                            pane: pane,
-                            controller: controller,
-                            contentBuilder: contentBuilder,
-                            emptyPaneBuilder: emptyPaneBuilder
-                        )
-                        .frame(width: resolvedWidth, height: viewportHeight)
+            ScrollView(.horizontal, showsIndicators: false) {
+                ScrollViewReader { proxy in
+                    HStack(spacing: 0) {
+                        ForEach(controller.panes) { pane in
+                            let resolvedWidth = (pane.width <= 0 || pane.width == .infinity)
+                                ? viewportWidth
+                                : pane.width
+                            PaperPaneContainerView(
+                                pane: pane,
+                                controller: controller,
+                                contentBuilder: contentBuilder,
+                                emptyPaneBuilder: emptyPaneBuilder
+                            )
+                            .frame(width: resolvedWidth, height: viewportHeight)
+                            .id(pane.id)
+                        }
+                    }
+                    .onChange(of: scrollTarget) { _, target in
+                        guard let target else { return }
+                        if controller.configuration.appearance.enableAnimations {
+                            withAnimation(.easeInOut(duration: controller.configuration.appearance.animationDuration)) {
+                                proxy.scrollTo(target, anchor: .leading)
+                            }
+                        } else {
+                            proxy.scrollTo(target, anchor: .leading)
+                        }
+                    }
+                    .onChange(of: controller.focusedPaneIndex) { _, _ in
+                        scrollTarget = controller.focusedPaneId
                     }
                 }
-                .offset(x: -controller.viewportOffset)
-                .animation(
-                    controller.configuration.appearance.enableAnimations
-                        ? .easeInOut(duration: controller.configuration.appearance.animationDuration)
-                        : nil,
-                    value: controller.viewportOffset
-                )
-
-                // Resize handles between panes
-                ForEach(0..<max(0, controller.panes.count - 1), id: \.self) { index in
-                    PaperResizeHandle(
-                        controller: controller,
-                        leftPaneIndex: index
-                    )
-                    .position(
-                        x: controller.paneXOffset(at: index + 1) - controller.viewportOffset,
-                        y: viewportHeight / 2
-                    )
-                    .frame(height: viewportHeight)
-                }
             }
-            .clipped()
+            .scrollDisabled(true)
             .onAppear {
                 controller.viewportWidth = viewportWidth
                 controller.viewportHeight = viewportHeight
@@ -70,9 +69,6 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
                 controller.viewportWidth = newSize.width
                 controller.viewportHeight = newSize.height
 
-                // Scale pane widths proportionally when the viewport resizes.
-                // This keeps panes from overflowing or underflowing the viewport
-                // after a window resize.
                 if oldWidth > 0 && !controller.panes.isEmpty {
                     let scale = newSize.width / oldWidth
                     for pane in controller.panes {
@@ -81,12 +77,8 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
                             controller.configuration.appearance.minimumPaneWidth
                         )
                     }
-                    // Also scale viewport offset to keep the same relative scroll position
-                    controller.viewportOffset *= scale
                 }
             }
-            // Trackpad gesture scrolling will be added in a follow-up.
-            // Keyboard navigation (Cmd+Opt+Arrow) works for now.
         }
     }
 
