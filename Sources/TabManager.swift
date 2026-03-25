@@ -2094,10 +2094,16 @@ class TabManager: ObservableObject {
     ) -> ghostty_surface_config_s? {
         if let panel = terminalPanelForWorkspaceConfigInheritanceSource(snapshot: snapshot),
            let sourceSurface = cmuxSurfaceForInheritance(panel) {
-            return cmuxInheritedSurfaceConfig(
+            var config = cmuxInheritedSurfaceConfig(
                 sourceSurface: sourceSurface,
                 context: GHOSTTY_SURFACE_CONTEXT_TAB
             )
+            if config.font_size <= 0,
+               let fallbackFontPoints = snapshot.selectedWorkspace?.lastRememberedTerminalFontPointsForConfigInheritance(),
+               fallbackFontPoints > 0 {
+                config.font_size = fallbackFontPoints
+            }
+            return config
         }
         if let fallbackFontPoints = snapshot.selectedWorkspace?.lastRememberedTerminalFontPointsForConfigInheritance() {
             var config = ghostty_surface_config_new()
