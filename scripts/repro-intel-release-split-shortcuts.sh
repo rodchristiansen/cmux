@@ -145,7 +145,7 @@ install_release_app() {
 launch_release_app() {
   pkill -f "/cmux.app/Contents/MacOS/cmux$" 2>/dev/null || true
   sleep 1
-  "${APP_BINARY}" > "${APP_LOG}" 2>&1 &
+  CMUX_SOCKET_MODE=allowAll "${APP_BINARY}" > "${APP_LOG}" 2>&1 &
   APP_PID=$!
   log "Launched ${APP_BINARY} pid=${APP_PID}"
 }
