@@ -72,17 +72,21 @@ class UpdateDriver: NSObject, SPUUserDriver {
                          state: SPUUserUpdateState,
                          reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void) {
         UpdateLogStore.shared.append("show update found: \(appcastItem.displayVersionString)")
+        let forwardedReply: @Sendable (SPUUserUpdateChoice) -> Void = { [weak self] choice in
+            if choice != .install {
+                self?.finishUserInitiatedCheckPresentation()
+            }
+            reply(choice)
+        }
+        let guardedReply = shouldGuardInstallChoice(for: state)
+            ? makeGuardedUpdateInstallChoiceReply(forwardedReply)
+            : forwardedReply
         if usesStandardPresentation {
             clearCustomStateForStandardPresentation()
-            standard.showUpdateFound(with: appcastItem, state: state) { [weak self] choice in
-                if choice != .install {
-                    self?.finishUserInitiatedCheckPresentation()
-                }
-                reply(choice)
-            }
+            standard.showUpdateFound(with: appcastItem, state: state, reply: guardedReply)
             return
         }
-        setStateAfterMinimumCheckDelay(.updateAvailable(.init(appcastItem: appcastItem, reply: reply)))
+        setStateAfterMinimumCheckDelay(.updateAvailable(.init(appcastItem: appcastItem, reply: guardedReply)))
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
@@ -209,11 +213,18 @@ class UpdateDriver: NSObject, SPUUserDriver {
 
     func showReady(toInstallAndRelaunch reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void) {
         UpdateLogStore.shared.append("show ready to install")
+        let forwardedReply: @Sendable (SPUUserUpdateChoice) -> Void = { [weak self] choice in
+            if choice != .install {
+                self?.finishUserInitiatedCheckPresentation()
+            }
+            reply(choice)
+        }
+        let guardedReply = makeGuardedUpdateInstallChoiceReply(forwardedReply)
         if usesStandardPresentation {
-            standard.showReady(toInstallAndRelaunch: reply)
+            standard.showReady(toInstallAndRelaunch: guardedReply)
             return
         }
-        reply(.install)
+        guardedReply(.install)
     }
 
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
@@ -465,10 +476,35 @@ class UpdateDriver: NSObject, SPUUserDriver {
         }
     }
 
+    private func shouldGuardInstallChoice(for state: SPUUserUpdateState) -> Bool {
+        state.stage != .notDownloaded
+    }
+
+    @MainActor
+    private func confirmUpdateRelaunchIfNeeded() -> Bool {
+        confirmUpdateRelaunchIfNeededHandler?() ?? AppDelegate.shared?.confirmUpdateRelaunchIfNeeded() ?? true
+    }
+
     func makeGuardedUpdateInstallChoiceReply(
         _ reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void
     ) -> @Sendable (SPUUserUpdateChoice) -> Void {
-        reply
+        { [weak self] choice in
+            guard choice == .install else {
+                reply(choice)
+                return
+            }
+
+            Task { @MainActor [weak self] in
+                let confirmed = self?.confirmUpdateRelaunchIfNeeded() ?? true
+                guard confirmed else {
+                    self?.recordDeferredUpdateRelaunch()
+                    reply(.dismiss)
+                    return
+                }
+
+                reply(.install)
+            }
+        }
     }
 
     func makeGuardedUpdateRelaunchAction(
@@ -477,20 +513,24 @@ class UpdateDriver: NSObject, SPUUserDriver {
     ) -> () -> Void {
         { [weak self] in
             Task { @MainActor [weak self] in
-                guard self != nil else { return }
                 if applicationTerminated {
                     action()
                     return
                 }
 
-                guard AppDelegate.shared?.confirmUpdateRelaunchIfNeeded() ?? true else {
-                    UpdateLogStore.shared.append("update relaunch deferred due to active terminal sessions")
+                let confirmed = self?.confirmUpdateRelaunchIfNeeded() ?? true
+                guard confirmed else {
+                    self?.recordDeferredUpdateRelaunch()
                     return
                 }
 
                 action()
             }
         }
+    }
+
+    private func recordDeferredUpdateRelaunch() {
+        UpdateLogStore.shared.append("update relaunch deferred due to active terminal sessions")
     }
 
     private func runOnMain(_ action: @escaping () -> Void) {

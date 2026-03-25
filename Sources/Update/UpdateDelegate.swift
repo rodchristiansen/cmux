@@ -47,11 +47,15 @@ extension UpdateDriver: SPUUpdaterDelegate {
     /// Called when an update is scheduled to install silently,
     /// which occurs when automatic download is enabled.
     func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
+        let guardedImmediateInstallHandler = makeGuardedUpdateRelaunchAction(
+            applicationTerminated: false,
+            action: immediateInstallHandler
+        )
         DispatchQueue.main.async { [weak viewModel] in
             viewModel?.clearDetectedUpdate()
             viewModel?.state = .installing(.init(
                 isAutoUpdate: true,
-                retryTerminatingApplication: immediateInstallHandler,
+                retryTerminatingApplication: guardedImmediateInstallHandler,
                 dismiss: { [weak viewModel] in
                     viewModel?.state = .idle
                 }
