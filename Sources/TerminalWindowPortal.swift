@@ -720,29 +720,10 @@ final class WindowTerminalPortal: NSObject {
             frameInContainer.size.height.isFinite
         guard hasFiniteFrame else { return false }
 
-        // Offset the host view to start at the sidebar boundary so
-        // masksToBounds clips terminals at the sidebar edge.
-        let sidebarW = PaperLayoutController.sidebarWidth
-        let adjustedFrame = NSRect(
-            x: frameInContainer.origin.x + sidebarW,
-            y: frameInContainer.origin.y,
-            width: max(0, frameInContainer.width - sidebarW),
-            height: frameInContainer.height
-        )
-
-        if !Self.rectApproximatelyEqual(hostView.frame, adjustedFrame) {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            hostView.frame = adjustedFrame
-            CATransaction.commit()
-#if DEBUG
-            dlog(
-                "portal.hostFrame.update host=\(portalDebugToken(hostView)) " +
-                "frame=\(portalDebugFrame(frameInContainer))"
-            )
-#endif
-        }
-        return frameInContainer.width > 1 && frameInContainer.height > 1
+        // Host frame is managed by Auto Layout constraints (with sidebar
+        // offset on the leading edge). Just check if it has a valid size.
+        let hostFrame = hostView.frame
+        return hostFrame.width > 1 && hostFrame.height > 1
     }
 
     fileprivate func synchronizeAllEntriesFromExternalGeometryChange() {
@@ -795,8 +776,12 @@ final class WindowTerminalPortal: NSObject {
                 container.addSubview(hostView, positioned: .above, relativeTo: reference)
             }
 
+            // Offset the leading edge by the sidebar width so the host
+            // view starts at the sidebar boundary. masksToBounds then clips
+            // terminals at the sidebar edge instead of the window edge.
+            let sidebarOffset = PaperLayoutController.sidebarWidth
             installConstraints = [
-                hostView.leadingAnchor.constraint(equalTo: reference.leadingAnchor),
+                hostView.leadingAnchor.constraint(equalTo: reference.leadingAnchor, constant: sidebarOffset),
                 hostView.trailingAnchor.constraint(equalTo: reference.trailingAnchor),
                 hostView.topAnchor.constraint(equalTo: reference.topAnchor),
                 hostView.bottomAnchor.constraint(equalTo: reference.bottomAnchor),
