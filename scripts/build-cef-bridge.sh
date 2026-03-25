@@ -120,6 +120,7 @@ build_stub_framework() {
     printf 'void cmux_cef_framework_stub(void) {}\n' | \
         clang -dynamiclib "${arch_flags[@]}" -mmacosx-version-min=13.0 \
             -install_name "@rpath/Chromium Embedded Framework.framework/Chromium Embedded Framework" \
+            -compatibility_version 1460.0.6 -current_version 1460.0.6 \
             -x c - -o "$framework_bin"
     ln -sfn "A" "$framework_current_dir"
     ln -sfn "Versions/Current/Chromium Embedded Framework" "$framework_dir/Chromium Embedded Framework"

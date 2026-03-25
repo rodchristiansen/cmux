@@ -67,6 +67,15 @@ mkdir -p "$HELPER_APP/Contents/MacOS"
 cp "$HELPER_BIN" "$HELPER_APP/Contents/MacOS/cmux Helper"
 cp "$HELPER_SRC/Info.plist" "$HELPER_APP/Contents/Info.plist"
 
+# Fix the helper's CEF framework reference to use @rpath.
+# The CEF framework has install name @executable_path/../Frameworks/...
+# which works for the main app but not the nested helper. The helper's
+# rpath entries already point to the right Frameworks/ directory.
+install_name_tool -change \
+    "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework" \
+    "@rpath/Chromium Embedded Framework.framework/Chromium Embedded Framework" \
+    "$HELPER_APP/Contents/MacOS/cmux Helper" 2>/dev/null || true
+
 # Sign the helper
 codesign --force --sign - "$HELPER_APP" 2>/dev/null || true
 
