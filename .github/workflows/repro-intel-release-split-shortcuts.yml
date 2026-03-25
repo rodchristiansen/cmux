@@ -62,9 +62,16 @@ jobs:
           set -euo pipefail
           clang -framework Foundation -framework CoreGraphics \
             -o /tmp/create-virtual-display scripts/create-virtual-display.m
-          /tmp/create-virtual-display &
-          echo "VDISPLAY_PID=$!" >> "$GITHUB_ENV"
-          sleep 3
+          READY_FILE="$(mktemp)"
+          rm -f "$READY_FILE"
+          /tmp/create-virtual-display --ready-path "$READY_FILE" &
+          for _ in $(seq 1 60); do
+            if [[ -f "$READY_FILE" ]]; then
+              break
+            fi
+            sleep 0.5
+          done
+          [[ -f "$READY_FILE" ]] || { echo "Virtual display did not become ready" >&2; exit 1; }
           system_profiler SPDisplaysDataType 2>/dev/null || true
 
       - name: Reproduce release split failure

@@ -188,7 +188,11 @@ wait_for_cli_ready() {
       return 2
     fi
     if run_cli_json "${output_path}"; then
-      return 0
+      local current_count
+      current_count="$(pane_count "${output_path}")" || return 1
+      if (( current_count >= 1 )); then
+        return 0
+      fi
     fi
     sleep 1
   done
@@ -332,18 +336,15 @@ attempt_shortcut() {
       fail "Unknown shortcut method ${method}"
       ;;
   esac
-  if wait_for_expected_result "${expected_count}" "${AFTER_JSON}"; then
-    return 0
-  fi
-  return $?
+  wait_for_expected_result "${expected_count}" "${AFTER_JSON}"
 }
 
 main() {
-  record_system_info
-  capture_existing_crash_list
-  download_release_dmg
-  install_release_app
-  launch_release_app
+  record_system_info || fail "Failed to capture system info"
+  capture_existing_crash_list || fail "Failed to capture existing crash list"
+  download_release_dmg || fail "Failed to download release DMG"
+  install_release_app || fail "Failed to install release app"
+  launch_release_app || fail "Failed to launch release app"
 
   if ! wait_for_process_launch; then
     fail "cmux app process never stayed alive after launch"
@@ -361,7 +362,7 @@ main() {
   fi
 
   local before_count
-  before_count="$(pane_count "${BEFORE_JSON}")"
+  before_count="$(pane_count "${BEFORE_JSON}")" || fail "Failed to parse initial pane list"
   log "Pane count before shortcut: ${before_count}"
   local expected_count=$((before_count + 1))
 
@@ -386,7 +387,7 @@ main() {
   fi
 
   local after_count
-  after_count="$(pane_count "${AFTER_JSON}")"
+  after_count="$(pane_count "${AFTER_JSON}")" || fail "Failed to parse post-shortcut pane list"
   log "Pane count after shortcut: ${after_count}"
 
   if ! kill -0 "${APP_PID}" 2>/dev/null; then
