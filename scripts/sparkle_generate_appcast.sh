@@ -18,6 +18,8 @@ fi
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.8.1}"
 DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://github.com/manaflow-ai/cmux/releases/download/$TAG/}"
 RELEASE_NOTES_URL="${RELEASE_NOTES_URL:-https://github.com/manaflow-ai/cmux/releases/tag/$TAG}"
+CHANGELOG_PATH="${CHANGELOG_PATH:-CHANGELOG.md}"
+APPCAST_CHANGELOG_TEXT="${APPCAST_CHANGELOG_TEXT:-}"
 
 work_dir="$(mktemp -d)"
 cleanup() {
@@ -90,6 +92,10 @@ if [[ ! -f "$generated_appcast_path" ]]; then
   exit 1
 fi
 
+if [[ -z "$APPCAST_CHANGELOG_TEXT" && -f "$CHANGELOG_PATH" ]]; then
+  APPCAST_CHANGELOG_TEXT="$(python3 scripts/appcast_changelog.py --tag "$TAG" --changelog "$CHANGELOG_PATH" || true)"
+fi
+
 # Check if generate_appcast added the edSignature. If not, use sign_update
 # to sign the DMG and inject the signature. generate_appcast silently skips
 # signing when the public key derived from the private key doesn't match the
@@ -115,6 +121,59 @@ xml = xml.replace(
 open('$generated_appcast_path', 'w').write(xml)
 print('  Injected edSignature into appcast.xml')
 "
+fi
+
+if [[ -n "$APPCAST_CHANGELOG_TEXT" ]]; then
+  APPCAST_PATH="$generated_appcast_path" APPCAST_CHANGELOG_TEXT="$APPCAST_CHANGELOG_TEXT" python3 <<'PY'
+import os
+import pathlib
+import re
+
+appcast_path = pathlib.Path(os.environ["APPCAST_PATH"])
+release_notes = os.environ["APPCAST_CHANGELOG_TEXT"].strip()
+
+if not release_notes:
+    raise SystemExit(0)
+
+description = (
+    "<description sparkle:format=\"plain-text\"><![CDATA["
+    + release_notes.replace("]]>", "]]]]><![CDATA[>")
+    + "]]></description>"
+)
+
+xml = appcast_path.read_text(encoding="utf-8")
+item_match = re.search(r"(<item>\s*)(.*?)(\s*</item>)", xml, re.DOTALL)
+if item_match is None:
+    raise SystemExit("Failed to find <item> in generated appcast")
+
+item_open, item_body, item_close = item_match.groups()
+item_body = re.sub(
+    r"\n\s*<description(?:\s+[^>]*)?>.*?</description>",
+    "",
+    item_body,
+    count=1,
+    flags=re.DOTALL,
+)
+
+for pattern in (r"(<pubDate>.*?</pubDate>)", r"(<title>.*?</title>)"):
+    item_body, count = re.subn(
+        pattern,
+        r"\1\n            " + description,
+        item_body,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if count:
+        break
+else:
+    item_body = f"\n            {description}{item_body}"
+
+xml = xml[:item_match.start()] + item_open + item_body + item_close + xml[item_match.end():]
+appcast_path.write_text(xml, encoding="utf-8")
+print("Injected plain-text changelog into appcast.xml")
+PY
+else
+  echo "No matching changelog entry found for $TAG; appcast will link to release notes without embedded text"
 fi
 
 cp "$generated_appcast_path" "$OUT_PATH"

@@ -56,7 +56,7 @@ final class SidebarHelpMenuUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["ShortcutRecordingHint"].waitForExistence(timeout: 6.0))
     }
 
-    func testHelpMenuCheckForUpdatesShowsSparkleDialogOnFirstAttempt() {
+    func testHelpMenuCheckForUpdatesShowsInlineUpdatePillOnFirstAttempt() {
         let app = XCUIApplication()
         configureEnglishLocale(app)
         app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
@@ -82,11 +82,34 @@ final class SidebarHelpMenuUITests: XCTestCase {
         )
         checkForUpdatesItem.click()
 
+        let pill = app.buttons["Update Available: 99.0.0"]
+        XCTAssertTrue(pill.waitForExistence(timeout: 8.0))
+        XCTAssertFalse(app.buttons["Install Update"].exists)
+        XCTAssertFalse(app.buttons["Remind Me Later"].exists)
+        XCTAssertFalse(app.buttons["Skip This Version"].exists)
+    }
+
+    func testDialogTriggeredCheckForUpdatesShowsSparkleDialogWithChangelog() {
+        let app = XCUIApplication()
+        let summary = "Important fixes, improved reliability, and small workflow polish."
+        configureEnglishLocale(app)
+        app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_TRIGGER_UPDATE_CHECK_DIALOG"] = "1"
+        app.launchEnvironment["CMUX_UI_TEST_FEED_URL"] = "https://cmux.test/appcast.xml"
+        app.launchEnvironment["CMUX_UI_TEST_FEED_MODE"] = "available"
+        app.launchEnvironment["CMUX_UI_TEST_UPDATE_VERSION"] = "99.0.0"
+        app.launchEnvironment["CMUX_UI_TEST_RELEASE_NOTES_SUMMARY"] = summary
+        app.launchEnvironment["CMUX_UI_TEST_AUTO_ALLOW_PERMISSION"] = "1"
+        launchAndActivate(app)
+
+        XCTAssertTrue(waitForWindowCount(atLeast: 1, app: app, timeout: 6.0))
+
         let installButton = app.buttons["Install Update"]
         XCTAssertTrue(installButton.waitForExistence(timeout: 8.0))
         XCTAssertTrue(app.buttons["Remind Me Later"].exists)
         XCTAssertTrue(app.buttons["Skip This Version"].exists)
         XCTAssertTrue(app.staticTexts["99.0.0"].exists)
+        XCTAssertTrue(app.staticTexts[summary].waitForExistence(timeout: 8.0))
     }
 
     func testHelpMenuCheckForUpdatesShowsLatestVersionWhenDeferredUpdateIsStale() {
@@ -116,11 +139,11 @@ final class SidebarHelpMenuUITests: XCTestCase {
         )
         checkForUpdatesItem.click()
 
-        let installButton = app.buttons["Install Update"]
-        XCTAssertTrue(installButton.waitForExistence(timeout: 8.0))
-        XCTAssertTrue(app.buttons["Remind Me Later"].exists)
-        XCTAssertTrue(app.buttons["Skip This Version"].exists)
-        XCTAssertTrue(app.staticTexts["99.0.0"].exists)
+        let pill = app.buttons["Update Available: 99.0.0"]
+        XCTAssertTrue(pill.waitForExistence(timeout: 8.0))
+        XCTAssertFalse(app.buttons["Install Update"].exists)
+        XCTAssertFalse(app.buttons["Remind Me Later"].exists)
+        XCTAssertFalse(app.buttons["Skip This Version"].exists)
         XCTAssertFalse(app.staticTexts["98.0.0"].exists)
     }
 

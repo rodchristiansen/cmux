@@ -217,8 +217,13 @@ class UpdateController {
         requestCheckForUpdates(presentation: .custom)
     }
 
-    /// Check for updates (used by the menu item).
+    /// Check for updates using the inline in-app update pill flow.
     @objc func checkForUpdates() {
+        requestCheckForUpdates(presentation: .custom)
+    }
+
+    /// Check for updates using Sparkle's standard dialog.
+    @objc func checkForUpdatesInDialog() {
         requestCheckForUpdates(presentation: .dialog)
     }
 

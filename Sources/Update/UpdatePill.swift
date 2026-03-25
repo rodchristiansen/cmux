@@ -29,7 +29,7 @@ struct UpdatePill: View {
         Button(action: {
             if model.showsDetectedBackgroundUpdate {
                 showPopover = false
-                AppDelegate.shared?.checkForUpdates(nil)
+                AppDelegate.shared?.checkForUpdatesInDialog(nil)
                 return
             }
             if case .notFound(let notFound) = model.state {

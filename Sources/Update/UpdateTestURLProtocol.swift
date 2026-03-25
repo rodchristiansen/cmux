@@ -75,6 +75,9 @@ final class UpdateTestURLProtocol: URLProtocol {
         let env = ProcessInfo.processInfo.environment
         let mode = env["CMUX_UI_TEST_FEED_MODE"] ?? "available"
         let version = env["CMUX_UI_TEST_UPDATE_VERSION"] ?? "9.9.9"
+        let releaseNotesSummary = (env["CMUX_UI_TEST_RELEASE_NOTES_SUMMARY"] ??
+            "Important fixes, improved reliability, and small workflow polish.")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let updateURL = "https://\(host)\(updatePath)"
         let updateLength = updateArchiveData().count
 
@@ -87,6 +90,8 @@ final class UpdateTestURLProtocol: URLProtocol {
               <title>cmux \(version)</title>
               <sparkle:version>\(version)</sparkle:version>
               <sparkle:shortVersionString>\(version)</sparkle:shortVersionString>
+              <description sparkle:format="plain-text"><![CDATA[\(releaseNotesSummary)]]></description>
+              <sparkle:fullReleaseNotesLink>https://github.com/manaflow-ai/cmux/releases/tag/v\(version)</sparkle:fullReleaseNotesLink>
               <enclosure url="\(updateURL)" length="\(updateLength)" type="application/octet-stream" />
             </item>
             """
