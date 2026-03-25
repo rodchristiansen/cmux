@@ -80,12 +80,14 @@ build_bridge() {
             ARCHS="$target_archs" \
             CEF_ROOT="$CEF_EXTRACT_DIR" \
             CEF_WRAPPER_LIB="$wrapper_lib"
-        link_framework
     else
         echo "==> Building CEF bridge (stub mode, no CEF framework)..."
         make -C "$CEF_BRIDGE_DIR" clean all ARCHS="$target_archs"
-        build_stub_framework "$target_archs"
     fi
+    # Always use the stub framework for Xcode linking. The real CEF framework
+    # has a flat bundle structure that Xcode's validator rejects. The real
+    # framework is embedded at runtime via embed-cef.sh.
+    build_stub_framework "$target_archs"
 }
 
 # Symlink the CEF framework for Xcode to find at runtime

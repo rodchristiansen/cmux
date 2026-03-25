@@ -35,14 +35,11 @@ fi
 
 echo "==> Embedding CEF into $APP_BUNDLE"
 
-# 1. Copy the CEF framework
+# 1. Copy the real CEF framework (replaces any stub from the build)
 mkdir -p "$FRAMEWORKS_DIR"
-if [ ! -d "$FRAMEWORKS_DIR/Chromium Embedded Framework.framework" ]; then
-    echo "==> Copying Chromium Embedded Framework.framework..."
-    cp -R "$CEF_FW" "$FRAMEWORKS_DIR/"
-else
-    echo "==> CEF framework already present"
-fi
+echo "==> Copying Chromium Embedded Framework.framework..."
+rm -rf "$FRAMEWORKS_DIR/Chromium Embedded Framework.framework"
+cp -R "$CEF_FW" "$FRAMEWORKS_DIR/"
 
 # 2. Build the helper if needed
 HELPER_BIN="$HELPER_SRC/cmux_helper"
