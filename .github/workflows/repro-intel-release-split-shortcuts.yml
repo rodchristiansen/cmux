@@ -1,0 +1,70 @@
+name: Repro Intel release split shortcuts
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to test
+        required: false
+        default: v0.62.2
+
+jobs:
+  repro:
+    name: ${{ matrix.runner }} ${{ matrix.shortcut }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - macos-15-intel
+          - macos-26-intel
+        shortcut:
+          - cmd-d
+          - cmd-shift-d
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            XCODE_DIR="/Applications/Xcode.app/Contents/Developer"
+          else
+            XCODE_APP="$(ls -d /Applications/Xcode*.app 2>/dev/null | head -n 1 || true)"
+            if [ -z "$XCODE_APP" ]; then
+              echo "No Xcode installation found" >&2
+              exit 1
+            fi
+            XCODE_DIR="${XCODE_APP}/Contents/Developer"
+          fi
+          echo "DEVELOPER_DIR=$XCODE_DIR" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XCODE_DIR"
+          xcodebuild -version
+
+      - name: Create virtual display
+        run: |
+          set -euo pipefail
+          clang -framework Foundation -framework CoreGraphics \
+            -o /tmp/create-virtual-display scripts/create-virtual-display.m
+          /tmp/create-virtual-display &
+          echo "VDISPLAY_PID=$!" >> "$GITHUB_ENV"
+          sleep 3
+          system_profiler SPDisplaysDataType 2>/dev/null || true
+
+      - name: Reproduce release split failure
+        env:
+          CMUX_RELEASE_TAG: ${{ inputs.release_tag || 'v0.62.2' }}
+          CMUX_REPRO_SHORTCUT: ${{ matrix.shortcut }}
+          CMUX_REPRO_DIR: ${{ runner.temp }}/cmux-intel-release-repro-${{ matrix.runner }}-${{ matrix.shortcut }}
+        run: scripts/repro-intel-release-split-shortcuts.sh
+
+      - name: Upload repro artifacts
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: intel-release-repro-${{ matrix.runner }}-${{ matrix.shortcut }}
+          path: ${{ runner.temp }}/cmux-intel-release-repro-${{ matrix.runner }}-${{ matrix.shortcut }}/artifacts
+          if-no-files-found: warn
