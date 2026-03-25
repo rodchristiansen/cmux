@@ -137,11 +137,11 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
     let emptyPaneBuilder: (PaneID) -> EmptyContent
 
     var body: some View {
-        if pane.tabs.isEmpty {
-            emptyPaneBuilder(pane.id)
-        } else if controller.configuration.contentViewLifecycle == .keepAllAlive {
-            // Keep all tab views alive, show selected
-            ZStack {
+        ZStack {
+            if pane.tabs.isEmpty {
+                emptyPaneBuilder(pane.id)
+            } else if controller.configuration.contentViewLifecycle == .keepAllAlive {
+                // Keep all tab views alive, show selected
                 ForEach(pane.tabs, id: \.id) { tabItem in
                     let tab = PaperTab(from: tabItem)
                     let isSelected = tabItem.id == pane.selectedTabId
@@ -149,12 +149,20 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
                         .opacity(isSelected ? 1 : 0)
                         .allowsHitTesting(isSelected)
                 }
+            } else {
+                // Only render selected tab
+                if let selectedItem = pane.selectedTab {
+                    let tab = PaperTab(from: selectedItem)
+                    contentBuilder(tab, pane.id)
+                }
             }
-        } else {
-            // Only render selected tab
-            if let selectedItem = pane.selectedTab {
-                let tab = PaperTab(from: selectedItem)
-                contentBuilder(tab, pane.id)
+        }
+        .overlay(alignment: .trailing) {
+            // Thin separator line between panes (except last)
+            if controller.panes.last?.id != pane.id && controller.panes.count > 1 {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.15))
+                    .frame(width: 1)
             }
         }
     }
