@@ -5351,7 +5351,7 @@ final class Workspace: Identifiable, ObservableObject {
         backgroundOpacity: Double
     ) -> PaperLayoutConfiguration.Appearance {
         PaperLayoutConfiguration.Appearance(
-            enableAnimations: false,
+            enableAnimations: true,
             chromeColors: .init(
                 backgroundHex: Self.bonsplitChromeHex(
                     backgroundColor: backgroundColor,

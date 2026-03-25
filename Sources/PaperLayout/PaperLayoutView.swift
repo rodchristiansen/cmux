@@ -136,29 +136,42 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
     let contentBuilder: (PaperTab, PaneID) -> Content
     let emptyPaneBuilder: (PaneID) -> EmptyContent
 
+    private var isFocused: Bool {
+        controller.focusedPaneId == pane.id
+    }
+
     var body: some View {
-        ZStack {
-            if pane.tabs.isEmpty {
-                emptyPaneBuilder(pane.id)
-            } else if controller.configuration.contentViewLifecycle == .keepAllAlive {
-                // Keep all tab views alive, show selected
-                ForEach(pane.tabs, id: \.id) { tabItem in
-                    let tab = PaperTab(from: tabItem)
-                    let isSelected = tabItem.id == pane.selectedTabId
-                    contentBuilder(tab, pane.id)
-                        .opacity(isSelected ? 1 : 0)
-                        .allowsHitTesting(isSelected)
-                }
-            } else {
-                // Only render selected tab
-                if let selectedItem = pane.selectedTab {
-                    let tab = PaperTab(from: selectedItem)
-                    contentBuilder(tab, pane.id)
+        VStack(spacing: 0) {
+            // Tab bar
+            if controller.panes.count > 1 || pane.tabs.count > 1 {
+                PaperTabBarView(
+                    pane: pane,
+                    controller: controller,
+                    isFocused: isFocused
+                )
+            }
+
+            // Content area
+            ZStack {
+                if pane.tabs.isEmpty {
+                    emptyPaneBuilder(pane.id)
+                } else if controller.configuration.contentViewLifecycle == .keepAllAlive {
+                    ForEach(pane.tabs, id: \.id) { tabItem in
+                        let tab = PaperTab(from: tabItem)
+                        let isSelected = tabItem.id == pane.selectedTabId
+                        contentBuilder(tab, pane.id)
+                            .opacity(isSelected ? 1 : 0)
+                            .allowsHitTesting(isSelected)
+                    }
+                } else {
+                    if let selectedItem = pane.selectedTab {
+                        let tab = PaperTab(from: selectedItem)
+                        contentBuilder(tab, pane.id)
+                    }
                 }
             }
         }
         .overlay(alignment: .trailing) {
-            // Thin separator line between panes (except last)
             if controller.panes.last?.id != pane.id && controller.panes.count > 1 {
                 Rectangle()
                     .fill(Color.primary.opacity(0.15))
