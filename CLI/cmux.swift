@@ -8957,11 +8957,11 @@ struct CMUXCLI {
         }
 
         let workspaceId = try tmuxResolveWorkspaceTarget(tmuxWindowSelector(from: raw), client: client)
-        if tmuxWindowSelector(from: raw) == nil,
-           tmuxCallerWorkspaceHandle() == workspaceId,
+        if tmuxCallerWorkspaceHandle() == workspaceId,
            let callerSurface = tmuxCallerSurfaceHandle(),
            let surfaceId = try? tmuxCanonicalSurfaceId(callerSurface, workspaceId: workspaceId, client: client) {
-            return (workspaceId, nil, surfaceId)
+            let paneId = tmuxCallerCanonicalPaneId(workspaceId: workspaceId, client: client)
+            return (workspaceId, paneId, surfaceId)
         }
         let surfaceId = try resolveSurfaceId(nil, workspaceId: workspaceId, client: client)
         return (workspaceId, nil, surfaceId)
