@@ -760,6 +760,33 @@ public final class PaperLayoutController {
         animateViewportTo(targetOffset)
     }
 
+    // MARK: - Pane Resize
+
+    /// Preset width ratios for cycling with widen/narrow shortcuts.
+    private static let widthPresets: [CGFloat] = [1.0/3.0, 1.0/2.0, 2.0/3.0, 1.0]
+
+    /// Widen the focused pane to the next preset width.
+    func widenFocusedPane() {
+        guard let idx = focusedPaneIndex, idx < panes.count else { return }
+        let pane = panes[idx]
+        let currentRatio = pane.width / max(viewportWidth, 1)
+        // Find next larger preset
+        let nextRatio = Self.widthPresets.first(where: { $0 > currentRatio + 0.01 }) ?? Self.widthPresets.last!
+        pane.width = max(viewportWidth * nextRatio, configuration.appearance.minimumPaneWidth)
+        notifyGeometryChange()
+    }
+
+    /// Narrow the focused pane to the next smaller preset width.
+    func narrowFocusedPane() {
+        guard let idx = focusedPaneIndex, idx < panes.count else { return }
+        let pane = panes[idx]
+        let currentRatio = pane.width / max(viewportWidth, 1)
+        // Find next smaller preset
+        let nextRatio = Self.widthPresets.last(where: { $0 < currentRatio - 0.01 }) ?? Self.widthPresets.first!
+        pane.width = max(viewportWidth * nextRatio, configuration.appearance.minimumPaneWidth)
+        notifyGeometryChange()
+    }
+
     // MARK: - Zoom (V1: disabled)
 
     var zoomedPaneId: PaneID? { nil }

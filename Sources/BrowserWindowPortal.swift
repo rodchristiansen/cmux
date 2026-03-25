@@ -2245,7 +2245,7 @@ final class WindowBrowserPortal: NSObject {
 #if DEBUG
             dlog(
                 "browser.portal.hostFrame.update host=\(browserPortalDebugToken(hostView)) " +
-                "frame=\(browserPortalDebugFrame(frameInContainer))"
+                "frame=\(browserPortalDebugFrame(adjustedFrame)) sidebarW=\(Int(sidebarW))"
             )
 #endif
         }
@@ -3228,9 +3228,21 @@ final class WindowBrowserPortal: NSObject {
             !clampedFrame.isNull &&
             clampedFrame.width > 1 &&
             clampedFrame.height > 1
-        // Use full unclamped frame so browser width stays constant during
-        // viewport scrolling. The host view clips visually.
-        let targetFrame = frameInHost
+        // Clamp the right edge to host bounds to prevent bleeding into
+        // adjacent panes. Keep the left edge unclamped (allows negative X
+        // during viewport scrolling, host masksToBounds clips at sidebar).
+        let targetFrame: NSRect = {
+            let maxRight = hostBounds.maxX
+            if frameInHost.maxX > maxRight && frameInHost.origin.x < maxRight {
+                return NSRect(
+                    x: frameInHost.origin.x,
+                    y: frameInHost.origin.y,
+                    width: maxRight - frameInHost.origin.x,
+                    height: frameInHost.height
+                )
+            }
+            return frameInHost
+        }()
         let anchorHidden = Self.isHiddenOrAncestorHidden(anchorView)
         let tinyFrame = targetFrame.width <= 1 || targetFrame.height <= 1
         let outsideHostBounds = !hasVisibleIntersection

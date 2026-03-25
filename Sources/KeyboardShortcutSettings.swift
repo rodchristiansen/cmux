@@ -42,6 +42,8 @@ enum KeyboardShortcutSettings {
         case splitBrowserRight
         case splitBrowserDown
         case newPane
+        case widenPane
+        case narrowPane
 
         // Panels
         case openBrowser
@@ -82,6 +84,8 @@ enum KeyboardShortcutSettings {
             case .splitBrowserRight: return String(localized: "shortcut.splitBrowserRight.label", defaultValue: "Split Browser Right")
             case .splitBrowserDown: return String(localized: "shortcut.splitBrowserDown.label", defaultValue: "Split Browser Down")
             case .newPane: return String(localized: "shortcut.newPane.label", defaultValue: "New Pane")
+            case .widenPane: return String(localized: "shortcut.widenPane.label", defaultValue: "Widen Pane")
+            case .narrowPane: return String(localized: "shortcut.narrowPane.label", defaultValue: "Narrow Pane")
             case .openBrowser: return String(localized: "shortcut.openBrowser.label", defaultValue: "Open Browser")
             case .toggleBrowserDeveloperTools: return String(localized: "shortcut.toggleBrowserDevTools.label", defaultValue: "Toggle Browser Developer Tools")
             case .showBrowserJavaScriptConsole: return String(localized: "shortcut.showBrowserJSConsole.label", defaultValue: "Show Browser JavaScript Console")
@@ -115,6 +119,8 @@ enum KeyboardShortcutSettings {
             case .splitBrowserRight: return "shortcut.splitBrowserRight"
             case .splitBrowserDown: return "shortcut.splitBrowserDown"
             case .newPane: return "shortcut.newPane"
+            case .widenPane: return "shortcut.widenPane"
+            case .narrowPane: return "shortcut.narrowPane"
             case .nextSurface: return "shortcut.nextSurface"
             case .prevSurface: return "shortcut.prevSurface"
             case .selectSurfaceByNumber: return "shortcut.selectSurfaceByNumber"
@@ -176,6 +182,10 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "d", command: true, shift: true, option: true, control: false)
             case .newPane:
                 return StoredShortcut(key: "n", command: true, shift: false, option: true, control: false)
+            case .widenPane:
+                return StoredShortcut(key: "=", command: true, shift: false, option: true, control: false)
+            case .narrowPane:
+                return StoredShortcut(key: "-", command: true, shift: false, option: true, control: false)
             case .nextSurface:
                 return StoredShortcut(key: "]", command: true, shift: true, option: false, control: false)
             case .prevSurface:
@@ -319,6 +329,8 @@ enum KeyboardShortcutSettings {
     static func splitBrowserRightShortcut() -> StoredShortcut { shortcut(for: .splitBrowserRight) }
     static func splitBrowserDownShortcut() -> StoredShortcut { shortcut(for: .splitBrowserDown) }
     static func newPaneShortcut() -> StoredShortcut { shortcut(for: .newPane) }
+    static func widenPaneShortcut() -> StoredShortcut { shortcut(for: .widenPane) }
+    static func narrowPaneShortcut() -> StoredShortcut { shortcut(for: .narrowPane) }
 
     static func nextSurfaceShortcut() -> StoredShortcut { shortcut(for: .nextSurface) }
     static func prevSurfaceShortcut() -> StoredShortcut { shortcut(for: .prevSurface) }

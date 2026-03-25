@@ -9604,6 +9604,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .widenPane)) {
+#if DEBUG
+            dlog("shortcut.action name=widenPane \(debugShortcutRouteSnapshot(event: event))")
+#endif
+            tabManager?.selectedTab?.layoutController.widenFocusedPane()
+            return true
+        }
+
+        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .narrowPane)) {
+#if DEBUG
+            dlog("shortcut.action name=narrowPane \(debugShortcutRouteSnapshot(event: event))")
+#endif
+            tabManager?.selectedTab?.layoutController.narrowFocusedPane()
+            return true
+        }
+
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .splitBrowserRight)) {
 #if DEBUG
             dlog("shortcut.action name=splitBrowserRight \(debugShortcutRouteSnapshot(event: event))")
