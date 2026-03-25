@@ -394,9 +394,12 @@ cef_bridge_browser_t cef_bridge_browser_create(
     bb->client->SetOwner(bb);
 
     CefWindowInfo window_info;
-    // Do NOT set parent_view initially. CEF will create its own window.
-    // We'll reparent the view after creation.
-    // Setting parent_view with Chrome runtime causes CreateBrowser to fail.
+    if (parent_view) {
+        window_info.parent_view = parent_view;
+        window_info.bounds = {0, 0, width, height};
+        // Alloy runtime required when parent_view is set on macOS.
+        window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+    }
 
     CefBrowserSettings browser_settings;
     // Don't override size - the CefStructBase constructor sets it correctly
