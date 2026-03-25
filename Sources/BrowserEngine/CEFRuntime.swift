@@ -12,57 +12,71 @@ final class CEFRuntime {
 
     private var messageLoopTimer: Timer?
     private(set) var isInitialized = false
+    private(set) var initError: String?
 
     private init() {}
 
     // MARK: - Initialization
 
     /// Initialize CEF using the bridge layer. Must be called from
-    /// the main thread after CEFFrameworkManager reports .ready.
+    /// the main thread.
     ///
-    /// Returns true on success. Once initialized, call
-    /// startMessageLoop() to begin pumping.
+    /// Looks for the CEF framework in the app bundle's Frameworks/
+    /// directory first, then falls back to the on-demand download
+    /// location.
+    ///
+    /// Returns true on success.
     @discardableResult
     func initialize() -> Bool {
         guard !isInitialized else { return true }
-        guard CEFFrameworkManager.shared.isAvailable else { return false }
 
-        let frameworkPath = CEFFrameworkManager.shared.frameworksDir.path
-        let helperPath = Bundle.main.privateFrameworksPath
-            .map { ($0 as NSString).appendingPathComponent("cmux Helper.app/Contents/MacOS/cmux Helper") }
-            ?? ""
+        // Find the framework directory (parent of the .framework bundle)
+        let frameworkDir = resolveFrameworkDir()
+        guard let frameworkDir else {
+            initError = "CEF framework not found in app bundle or download cache"
+            return false
+        }
 
+        // Find the helper process
+        let helperPath = resolveHelperPath()
+        guard let helperPath else {
+            initError = "CEF helper process not found"
+            return false
+        }
+
+        // Cache root for CEF data
         let cacheRoot: String = {
             let appSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory,
                 in: .userDomainMask
             ).first!
-            let bundleID = Bundle.main.bundleIdentifier ?? "com.manaflow.cmux"
+            let bundleID = Bundle.main.bundleIdentifier ?? "com.cmuxterm.app"
             return appSupport
                 .appendingPathComponent(bundleID)
                 .appendingPathComponent("CEFCache")
                 .path
         }()
 
-        // Ensure cache directory exists
         try? FileManager.default.createDirectory(
             atPath: cacheRoot,
             withIntermediateDirectories: true
         )
 
-        let result = cef_bridge_initialize(frameworkPath, helperPath, cacheRoot)
+        let result = cef_bridge_initialize(frameworkDir, helperPath, cacheRoot)
         if result == CEF_BRIDGE_OK {
             isInitialized = true
+            initError = nil
             startMessageLoop()
             return true
         }
+
+        initError = "CefInitialize failed (code \(result))"
         return false
     }
 
     // MARK: - Message Loop
 
     /// Start pumping the CEF message loop from the main thread.
-    /// Uses a repeating timer at ~60Hz.
     func startMessageLoop() {
         guard isInitialized, messageLoopTimer == nil else { return }
         messageLoopTimer = Timer.scheduledTimer(
@@ -73,7 +87,6 @@ final class CEFRuntime {
         }
     }
 
-    /// Stop the message loop timer.
     func stopMessageLoop() {
         messageLoopTimer?.invalidate()
         messageLoopTimer = nil
@@ -81,7 +94,6 @@ final class CEFRuntime {
 
     // MARK: - Shutdown
 
-    /// Shut down CEF. Call at app termination.
     func shutdown() {
         stopMessageLoop()
         if isInitialized {
@@ -92,11 +104,46 @@ final class CEFRuntime {
 
     // MARK: - Version
 
-    /// Get the CEF version string.
     var version: String {
         guard let cstr = cef_bridge_get_version() else { return "unknown" }
         let str = String(cString: cstr)
         cef_bridge_free_string(cstr)
         return str
+    }
+
+    // MARK: - Path Resolution
+
+    /// Resolve the directory containing "Chromium Embedded Framework.framework".
+    /// Checks app bundle first, then on-demand download location.
+    private func resolveFrameworkDir() -> String? {
+        // 1. App bundle Frameworks/
+        if let bundleFW = Bundle.main.privateFrameworksPath {
+            let candidate = (bundleFW as NSString)
+                .appendingPathComponent("Chromium Embedded Framework.framework")
+            if FileManager.default.fileExists(atPath: candidate) {
+                return bundleFW
+            }
+        }
+
+        // 2. On-demand download location
+        let downloadFW = CEFFrameworkManager.shared.frameworkPath.path
+        if FileManager.default.fileExists(atPath: downloadFW) {
+            return CEFFrameworkManager.shared.frameworksDir.path
+        }
+
+        return nil
+    }
+
+    /// Resolve the path to the CEF helper executable.
+    private func resolveHelperPath() -> String? {
+        // Look in app bundle Frameworks/
+        if let bundleFW = Bundle.main.privateFrameworksPath {
+            let candidate = (bundleFW as NSString)
+                .appendingPathComponent("cmux Helper.app/Contents/MacOS/cmux Helper")
+            if FileManager.default.fileExists(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 }
