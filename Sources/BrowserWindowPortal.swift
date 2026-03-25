@@ -2054,6 +2054,7 @@ final class WindowBrowserPortal: NSObject {
 
     private weak var window: NSWindow?
     private let hostView = WindowBrowserHostView(frame: .zero)
+    private let sidebarClipLayer = CALayer()
     private weak var installedContainerView: NSView?
     private weak var installedReferenceView: NSView?
     private var hasDeferredFullSyncScheduled = false
@@ -2241,6 +2242,24 @@ final class WindowBrowserPortal: NSObject {
             )
 #endif
         }
+
+        // Update sidebar clip mask so browsers don't render over the sidebar
+        let sidebarWidth = PaperLayoutController.sidebarWidth
+        if sidebarWidth > 0 {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            if hostView.layer?.mask !== sidebarClipLayer {
+                hostView.layer?.mask = sidebarClipLayer
+            }
+            sidebarClipLayer.frame = NSRect(
+                x: sidebarWidth,
+                y: 0,
+                width: frameInContainer.width - sidebarWidth,
+                height: frameInContainer.height
+            )
+            CATransaction.commit()
+        }
+
         return frameInContainer.width > 1 && frameInContainer.height > 1
     }
 
