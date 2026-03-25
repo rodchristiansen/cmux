@@ -150,68 +150,30 @@ public final class PaperLayoutController {
     /// Current horizontal scroll offset of the viewport. This is the value used
     /// for SwiftUI .offset() and portal compensation. Updated every frame during
     /// animated scrolls so the portal stays in sync with the visual position.
-    var viewportOffset: CGFloat = 0
+    var viewportOffset: CGFloat = 0 {
+        didSet {
+            if viewportOffset != oldValue {
+                // Debounce geometry notification until animation settles
+                geometryNotifyWorkItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in
+                    self?.notifyGeometryChange()
+                }
+                geometryNotifyWorkItem = item
+                let delay = configuration.appearance.animationDuration + 0.05
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            }
+        }
+    }
+    private var geometryNotifyWorkItem: DispatchWorkItem?
 
     /// Current sidebar width, set by ContentView. Used by the portal system
     /// to clip the host view at the sidebar boundary.
     @MainActor static var sidebarWidth: CGFloat = 200
 
-    private var targetViewportOffset: CGFloat = 0
-    private var animationStartOffset: CGFloat = 0
-    private var animationStartTime: CFTimeInterval = 0
-    private var animationDisplayLink: CADisplayLink?
-
-    /// Animate the viewport offset to a target value over the configured duration.
-    /// Uses CADisplayLink for frame-perfect synchronization with the display refresh.
-    func animateViewportOffset(to target: CGFloat) {
-        let duration = configuration.appearance.enableAnimations
-            ? configuration.appearance.animationDuration
-            : 0
-
-        stopAnimation()
-
-        if duration <= 0 || abs(target - viewportOffset) < 1 {
-            viewportOffset = target
-            notifyGeometryChange()
-            return
-        }
-
-        targetViewportOffset = target
-        animationStartOffset = viewportOffset
-        animationStartTime = CACurrentMediaTime()
-
-        let link = NSScreen.main?.displayLink(target: self, selector: #selector(animationTick))
-        link?.add(to: .main, forMode: .common)
-        animationDisplayLink = link
-    }
-
-    private func stopAnimation() {
-        animationDisplayLink?.invalidate()
-        animationDisplayLink = nil
-    }
-
-    @objc private func animationTick(_ displayLink: CADisplayLink) {
-        let elapsed = CACurrentMediaTime() - animationStartTime
-        let duration = configuration.appearance.animationDuration
-        let progress = min(elapsed / duration, 1.0)
-
-        // Ease-in-out cubic
-        let t: Double
-        if progress < 0.5 {
-            t = 4 * progress * progress * progress
-        } else {
-            let p = -2 * progress + 2
-            t = 1 - p * p * p / 2
-        }
-
-        viewportOffset = animationStartOffset + (targetViewportOffset - animationStartOffset) * t
-
-        if progress >= 1.0 {
-            viewportOffset = targetViewportOffset
-            stopAnimation()
-            notifyGeometryChange()
-        }
-    }
+    /// Set the viewport offset directly. SwiftUI's .animation() modifier on
+    /// the HStack handles smooth interpolation. The portal reads the animated
+    /// anchor positions via NSView.convert which reflects the CALayer transform
+    /// at each frame, keeping tab bar and terminal perfectly synchronized.
 
     /// Width of the visible viewport (set by GeometryReader on each layout pass).
     var viewportWidth: CGFloat = 0
@@ -741,7 +703,7 @@ public final class PaperLayoutController {
         let maxOffset = max(0, totalCanvasWidth - viewportWidth)
         targetOffset = max(0, min(targetOffset, maxOffset))
 
-        animateViewportOffset(to: targetOffset)
+        viewportOffset = targetOffset
     }
 
     /// Scroll viewport to center a pane (used for new-pane operations).
@@ -754,7 +716,7 @@ public final class PaperLayoutController {
         let maxOffset = max(0, totalCanvasWidth - viewportWidth)
         targetOffset = max(0, min(targetOffset, maxOffset))
 
-        animateViewportOffset(to: targetOffset)
+        viewportOffset = targetOffset
     }
 
     // MARK: - Zoom (V1: disabled)

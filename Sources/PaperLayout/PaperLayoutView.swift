@@ -37,9 +37,12 @@ struct PaperLayoutView<Content: View, EmptyContent: View>: View {
                 }
             }
             .offset(x: -controller.viewportOffset)
-            // No SwiftUI .animation() here. Viewport animation is driven
-            // manually via CVDisplayLink so that viewportOffset matches the
-            // visual position on every frame, keeping portal positions in sync.
+            .animation(
+                controller.configuration.appearance.enableAnimations
+                    ? .easeInOut(duration: controller.configuration.appearance.animationDuration)
+                    : nil,
+                value: controller.viewportOffset
+            )
             .clipped()
             .onAppear {
                 controller.viewportWidth = viewportWidth
@@ -152,8 +155,14 @@ private struct PaperPaneContainerView<Content: View, EmptyContent: View>: View {
                 }
             }
         }
+        .border(
+            isFocused && controller.panes.count > 1
+                ? Color.accentColor.opacity(0.5)
+                : Color(nsColor: .separatorColor).opacity(controller.panes.count > 1 ? 1 : 0),
+            width: controller.panes.count > 1 ? 1 : 0
+        )
         .overlay(alignment: .trailing) {
-            // Resize handle + separator on the right edge (except for the last pane)
+            // Resize handle on the right edge (except for the last pane)
             if let paneIndex = controller.paneIndex(pane.id),
                paneIndex < controller.panes.count - 1 {
                 PaperResizeHandle(
