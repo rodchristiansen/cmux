@@ -166,6 +166,20 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertTrue(shouldRestore)
     }
 
+    func testRestorePolicyAllowsMacOSRelaunchArgumentsOnly() {
+        let shouldRestore = SessionRestorePolicy.shouldAttemptRestore(
+            arguments: [
+                "/Applications/cmux.app/Contents/MacOS/cmux",
+                "-ApplePersistenceIgnoreState",
+                "YES",
+                "-psn_0_12345"
+            ],
+            environment: [:]
+        )
+
+        XCTAssertTrue(shouldRestore)
+    }
+
     func testRestorePolicySkipsWhenRunningUnderXCTest() {
         let shouldRestore = SessionRestorePolicy.shouldAttemptRestore(
             arguments: ["/Applications/cmux.app/Contents/MacOS/cmux"],
