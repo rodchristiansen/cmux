@@ -150,13 +150,10 @@ public final class PaperLayoutController {
     /// Current horizontal scroll offset of the viewport. This is the value used
     /// for SwiftUI .offset() and portal compensation. Updated every frame during
     /// animated scrolls so the portal stays in sync with the visual position.
-    var viewportOffset: CGFloat = 0 {
-        didSet {
-            if viewportOffset != oldValue {
-                notifyGeometryChange()
-            }
-        }
-    }
+    /// Current horizontal scroll offset. Geometry notifications are suppressed
+    /// during animated scrolls to prevent per-frame terminal resize. The
+    /// animation completion fires a single final notification.
+    var viewportOffset: CGFloat = 0
 
     private var targetViewportOffset: CGFloat = 0
     private var animationStartOffset: CGFloat = 0
@@ -216,6 +213,9 @@ public final class PaperLayoutController {
             viewportOffset = targetViewportOffset
             animationTimer?.cancel()
             animationTimer = nil
+            // Fire geometry notification only on animation completion
+            // to avoid per-frame terminal resize during scrolling.
+            notifyGeometryChange()
         }
     }
 
