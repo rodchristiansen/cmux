@@ -70,6 +70,12 @@ public:
                  const RectList& dirtyRects,
                  const void* buffer,
                  int width, int height) override {
+        static int paint_count = 0;
+        if (++paint_count <= 3) {
+            fprintf(stderr, "[CEF bridge] OnPaint type=%d %dx%d buffer=%p\n",
+                    type, width, height, buffer);
+            fflush(stderr);
+        }
         if (type != PET_VIEW) return;
         if (callbacks_.on_paint) {
             callbacks_.on_paint(owner_, buffer, width, height, callbacks_.user_data);
@@ -80,6 +86,12 @@ public:
                             PaintElementType type,
                             const RectList& dirtyRects,
                             const CefAcceleratedPaintInfo& info) override {
+        static int apaint_count = 0;
+        if (++apaint_count <= 3) {
+            fprintf(stderr, "[CEF bridge] OnAcceleratedPaint type=%d surface=%p\n",
+                    type, info.shared_texture_io_surface);
+            fflush(stderr);
+        }
         if (type != PET_VIEW) return;
         if (callbacks_.on_accelerated_paint) {
             callbacks_.on_accelerated_paint(
@@ -160,6 +172,10 @@ public:
         cef_browser_ = browser;
         fprintf(stderr, "[CEF bridge] OnAfterCreated (OSR)\n");
         fflush(stderr);
+        // Kick rendering: tell CEF the view is visible and sized
+        browser->GetHost()->WasResized();
+        browser->GetHost()->SetFocus(true);
+        browser->GetHost()->Invalidate(PET_VIEW);
     }
 
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
@@ -203,8 +219,9 @@ public:
         const CefString& process_type,
         CefRefPtr<CefCommandLine> command_line) override {
         command_line->AppendSwitch("use-mock-keychain");
-        // Multi-process with GPU for IOSurface delivery.
-        // No --single-process, no --disable-gpu.
+        // Single-process for now (helper subprocess crashes on CEF 146).
+        // TODO: fix helper, remove --single-process for process isolation.
+        command_line->AppendSwitch("single-process");
     }
 
 private:

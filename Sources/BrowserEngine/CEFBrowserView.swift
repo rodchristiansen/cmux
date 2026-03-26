@@ -70,7 +70,11 @@ final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
 
         // --- OSR rendering callbacks ---
         callbacks.on_accelerated_paint = { _, ioSurfacePtr, _, _, ud in
-            guard let ud, let ioSurfacePtr else { return }
+            guard let ud else { return }
+#if DEBUG
+            dlog("cef.osr.accelPaint surface=\(ioSurfacePtr != nil)")
+#endif
+            guard let ioSurfacePtr else { return }
             let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
             let surface = unsafeBitCast(ioSurfacePtr, to: IOSurfaceRef.self)
             view.surfaceView.updateIOSurface(surface)

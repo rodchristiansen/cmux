@@ -24,8 +24,10 @@ final class CEFSurfaceView: NSView {
         wantsLayer = true
 
         displayLayer = CALayer()
-        displayLayer.contentsGravity = .topLeft
+        displayLayer.contentsGravity = .resizeAspectFill
         displayLayer.magnificationFilter = .nearest
+        displayLayer.isOpaque = true
+        displayLayer.backgroundColor = NSColor.red.cgColor // DEBUG: red = layer visible but no content
         // Disable implicit animations on the display layer
         displayLayer.actions = [
             "contents": NSNull(),
@@ -47,9 +49,22 @@ final class CEFSurfaceView: NSView {
     func updateIOSurface(_ surfaceRef: IOSurfaceRef) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        displayLayer.contents = surfaceRef
+        // CALayer.contents accepts IOSurfaceRef as an id-compatible type.
+        // Use unsafeBitCast to pass the IOSurface as the contents object.
+        displayLayer.contents = unsafeBitCast(surfaceRef, to: AnyObject.self)
         CATransaction.commit()
+#if DEBUG
+        if updateCount < 3 {
+            let w = IOSurfaceGetWidth(surfaceRef)
+            let h = IOSurfaceGetHeight(surfaceRef)
+            dlog("cef.osr.updateIOSurface \(w)x\(h) layer=\(displayLayer.frame) view=\(bounds) inWindow=\(window != nil) superview=\(superview != nil)")
+        }
+        updateCount += 1
+#endif
     }
+    #if DEBUG
+    private var updateCount = 0
+    #endif
 
     /// Fallback: called from OnPaint with a BGRA pixel buffer.
     func updateBitmap(_ buffer: UnsafeRawPointer, width: Int, height: Int) {
