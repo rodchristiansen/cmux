@@ -18,6 +18,7 @@
 #include "include/cef_load_handler.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_keyboard_handler.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/wrapper/cef_library_loader.h"
 
 struct BridgeBrowser;
@@ -26,7 +27,8 @@ class BridgeClient : public CefClient,
                      public CefLifeSpanHandler,
                      public CefLoadHandler,
                      public CefDisplayHandler,
-                     public CefKeyboardHandler {
+                     public CefKeyboardHandler,
+                     public CefContextMenuHandler {
 public:
     explicit BridgeClient(const cef_bridge_client_callbacks* cbs)
         : callbacks_(*cbs) {}
@@ -35,6 +37,15 @@ public:
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+    // Suppress the default context menu in single-process Alloy mode.
+    // CEF may crash trying to show native menus in some configurations.
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                             CefRefPtr<CefContextMenuParams>,
+                             CefRefPtr<CefMenuModel> model) override {
+        model->Clear();
+    }
 
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
         if (callbacks_.on_title_change) {
