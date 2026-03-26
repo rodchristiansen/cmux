@@ -221,6 +221,14 @@ final class CEFBrowserView: NSView {
             chromeView.frame = bounds
             chromeView.autoresizingMask = [.width, .height]
             addSubview(chromeView)
+
+            // After reparenting, notify CEF that the view moved to a new
+            // window so it can update its compositor/rendering pipeline.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let handle = self.browserHandle else { return }
+                cef_bridge_browser_set_hidden(handle, false)
+                cef_bridge_browser_notify_resized(handle)
+            }
         }
         cefChildView = chromeView
         return true

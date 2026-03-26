@@ -206,12 +206,11 @@ public:
         const CefString& process_type,
         CefRefPtr<CefCommandLine> command_line) override {
         command_line->AppendSwitch("use-mock-keychain");
-        // Disable GPU process to avoid subprocess launch failures.
-        // The GPU process can't find the CEF framework from its sandboxed context.
         command_line->AppendSwitch("disable-gpu");
         command_line->AppendSwitch("disable-gpu-compositing");
-        // Run subprocesses in-process to avoid launch failures
         command_line->AppendSwitch("single-process");
+        // Hide Chrome's tab strip (we use cmux's sidebar for tab management)
+        command_line->AppendSwitch("hide-tabstrip");
     }
 
 private:
