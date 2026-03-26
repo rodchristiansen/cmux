@@ -161,6 +161,8 @@ final class CEFBrowserView: NSView {
         }
     }
 
+    private var parentWindowObservations: [NSObjectProtocol] = []
+
     private func attachChildWindow() -> Bool {
         guard let handle = browserHandle,
               let ptr = cef_bridge_browser_get_nsview(handle) else { return false }
@@ -171,28 +173,50 @@ final class CEFBrowserView: NSView {
 
         self.cefWindow = cefWin
 
-        // Configure the Chrome window as a borderless child
+        // Make the Chrome window borderless so it looks embedded.
+        // Remove title bar, make non-movable by user dragging.
         cefWin.styleMask = [.borderless]
-        cefWin.isOpaque = false
+        cefWin.isMovableByWindowBackground = false
+        cefWin.isMovable = false
         cefWin.hasShadow = false
-        cefWin.level = .normal
+        cefWin.backgroundColor = .clear
 
         // Position over our view's area in the parent window
         updateChildWindowFrame()
 
-        // Add as child window so it moves/resizes with the parent
+        // Add as child window so it moves with the parent
         parentWindow.addChildWindow(cefWin, ordered: .above)
         cefWin.orderFront(nil)
 
-        // Observe frame changes to reposition the child window
-        frameObservation = NotificationCenter.default.addObserver(
+        // Observe our frame changes
+        postsFrameChangedNotifications = true
+        let viewObs = NotificationCenter.default.addObserver(
             forName: NSView.frameDidChangeNotification,
             object: self,
             queue: .main
         ) { [weak self] _ in
             self?.updateChildWindowFrame()
         }
-        postsFrameChangedNotifications = true
+        parentWindowObservations.append(viewObs)
+
+        // Also observe the parent window moving/resizing
+        let moveObs = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: parentWindow,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateChildWindowFrame()
+        }
+        parentWindowObservations.append(moveObs)
+
+        let resizeObs = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: parentWindow,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateChildWindowFrame()
+        }
+        parentWindowObservations.append(resizeObs)
 
         return true
     }
@@ -206,6 +230,10 @@ final class CEFBrowserView: NSView {
     }
 
     private func detachChildWindow() {
+        for obs in parentWindowObservations {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        parentWindowObservations.removeAll()
         if let obs = frameObservation {
             NotificationCenter.default.removeObserver(obs)
             frameObservation = nil
