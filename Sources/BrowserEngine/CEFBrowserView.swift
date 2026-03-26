@@ -366,9 +366,24 @@ final class CEFBrowserView: NSView {
         notifyResized()
     }
 
-    // MARK: - First Responder
+    // MARK: - Input Handling
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    // Forward mouse clicks to the CEF child view to make it first responder.
+    // Without this, clicks land on our container NSView and CEF never gets focus.
+    override func mouseDown(with event: NSEvent) {
+        if let child = cefChildView {
+            window?.makeFirstResponder(child)
+            child.mouseDown(with: event)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
 
     override func becomeFirstResponder() -> Bool {
         if let child = cefChildView {

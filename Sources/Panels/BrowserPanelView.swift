@@ -1196,8 +1196,17 @@ struct BrowserPanelView: View {
     @ViewBuilder
     private var chromiumWebView: some View {
         if let cefView = panel.cefBrowserView, CEFRuntime.shared.isInitialized {
-            CEFBrowserViewRepresentable(cefBrowserView: cefView)
-                .accessibilityIdentifier("ChromiumBrowserView")
+            ZStack(alignment: .bottomTrailing) {
+                CEFBrowserViewRepresentable(cefBrowserView: cefView)
+                    .accessibilityIdentifier("ChromiumBrowserView")
+                Text("Chromium")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+                    .padding(8)
+            }
         } else if !CEFRuntime.shared.isInitialized {
             CEFDownloadView {
                 // User cancelled, nothing to do
