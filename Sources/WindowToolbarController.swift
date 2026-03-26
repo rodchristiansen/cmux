@@ -78,9 +78,13 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
         let currentMode = WorkspacePresentationModeSettings.mode()
         guard currentMode != lastKnownPresentationMode else { return }
         lastKnownPresentationMode = currentMode
-        let visible = currentMode != .minimal
+        let isMinimal = currentMode == .minimal
         for window in NSApp.windows {
-            window.toolbar?.isVisible = visible
+            if isMinimal {
+                window.toolbar = nil
+            } else {
+                attach(to: window)
+            }
         }
     }
 
@@ -92,6 +96,7 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
 
     private func attach(to window: NSWindow) {
         guard window.toolbar == nil else { return }
+        guard !WorkspacePresentationModeSettings.isMinimal() else { return }
         let toolbar = NSToolbar(identifier: NSToolbar.Identifier("cmux.toolbar"))
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
@@ -99,7 +104,6 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
         toolbar.showsBaselineSeparator = false
-        toolbar.isVisible = !WorkspacePresentationModeSettings.isMinimal()
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
         window.titleVisibility = .hidden
