@@ -1,19 +1,17 @@
 import AppKit
 import Combine
+import IOSurface
 import Bonsplit
 
-/// An NSView that hosts a CEF (Chromium) browser using Alloy runtime.
-/// CEF renders directly inside this view via parent_view.
-/// Navigation is controlled by cmux's address bar.
-final class CEFBrowserView: NSView {
+/// Orchestrates a CEF browser in OSR mode.
+/// Contains a CEFSurfaceView for rendering and forwards input events to CEF.
+final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
 
+    private let surfaceView: CEFSurfaceView
     private var browserHandle: cef_bridge_browser_t?
-    private var profileHandle: cef_bridge_profile_t?
-    private var cefChildView: NSView?
     private var callbacksStorage: cef_bridge_client_callbacks?
 
     private var pendingURL: String?
-    private var pendingCachePath: String?
     private var browserCreationAttempted = false
 
     @Published private(set) var currentURL: String = ""
@@ -22,29 +20,31 @@ final class CEFBrowserView: NSView {
     @Published private(set) var canGoBack: Bool = false
     @Published private(set) var canGoForward: Bool = false
 
-    weak var delegate: CEFBrowserViewDelegate?
-
     override init(frame: NSRect) {
+        surfaceView = CEFSurfaceView(frame: NSRect(origin: .zero, size: frame.size))
         super.init(frame: frame)
         wantsLayer = true
+        addSubview(surfaceView)
+        surfaceView.autoresizingMask = [.width, .height]
+        surfaceView.inputDelegate = self
+
+        surfaceView.onViewSizeChanged = { [weak self] _ in
+            guard let self, let h = self.browserHandle else { return }
+            cef_bridge_browser_notify_resized(h)
+        }
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError()
-    }
+    required init?(coder: NSCoder) { fatalError() }
 
-    deinit {
-        destroyBrowser()
-    }
+    deinit { destroyBrowser() }
 
     // MARK: - Browser Lifecycle
 
-    func createBrowser(initialURL: String, cachePath: String?) {
+    func createBrowser(initialURL: String) {
         guard CEFRuntime.shared.isInitialized else { return }
         guard browserHandle == nil, !browserCreationAttempted else { return }
         pendingURL = initialURL
-        pendingCachePath = cachePath
         if bounds.width > 0, bounds.height > 0, window != nil {
             createBrowserNow()
         }
@@ -54,7 +54,7 @@ final class CEFBrowserView: NSView {
         guard pendingURL != nil, !browserCreationAttempted else { return }
         browserCreationAttempted = true
 #if DEBUG
-        dlog("cef.createBrowserNow bounds=\(bounds) window=\(window != nil)")
+        dlog("cef.osr.createBrowserNow bounds=\(bounds)")
 #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.createBrowserImmediate()
@@ -64,13 +64,36 @@ final class CEFBrowserView: NSView {
     private func createBrowserImmediate() {
         guard let url = pendingURL else { return }
 
-        if let cachePath = pendingCachePath {
-            profileHandle = cef_bridge_profile_create(cachePath)
-        }
-
         var callbacks = cef_bridge_client_callbacks()
         let ud = Unmanaged.passUnretained(self).toOpaque()
         callbacks.user_data = ud
+
+        // --- OSR rendering callbacks ---
+        callbacks.on_accelerated_paint = { _, ioSurfacePtr, _, _, ud in
+            guard let ud, let ioSurfacePtr else { return }
+            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            let surface = unsafeBitCast(ioSurfacePtr, to: IOSurfaceRef.self)
+            view.surfaceView.updateIOSurface(surface)
+        }
+        callbacks.on_paint = { _, buffer, width, height, ud in
+            guard let ud, let buffer else { return }
+            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            view.surfaceView.updateBitmap(buffer, width: Int(width), height: Int(height))
+        }
+        callbacks.on_get_view_rect = { _, w, h, ud in
+            guard let ud else { return }
+            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            w?.pointee = Int32(view.surfaceView.bounds.width)
+            h?.pointee = Int32(view.surfaceView.bounds.height)
+        }
+        callbacks.on_get_screen_info = { _, scaleFactor, ud in
+            guard let ud else { return }
+            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            scaleFactor?.pointee = Float(view.surfaceView.window?.backingScaleFactor ?? 2.0)
+        }
+        callbacks.on_cursor_change = { _, _, _ in }
+
+        // --- Navigation/display callbacks ---
         callbacks.on_title_change = { _, title, ud in
             guard let ud, let title else { return }
             Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
@@ -88,57 +111,29 @@ final class CEFBrowserView: NSView {
             v.canGoBack = back
             v.canGoForward = fwd
         }
-        callbacks.on_navigation = { _, _, _, _ in }
-        callbacks.on_fullscreen_change = { _, _, _ in }
         callbacks.on_popup_request = { _, _, _ in false }
-        callbacks.on_console_message = { _, _, _, _, _, _ in }
+
         callbacksStorage = callbacks
 
-        let parentPtr = Unmanaged.passUnretained(self).toOpaque()
-        let w = Int32(bounds.width)
-        let h = Int32(bounds.height)
+        let w = Int32(surfaceView.bounds.width)
+        let h = Int32(surfaceView.bounds.height)
 
         browserHandle = withUnsafePointer(to: &callbacksStorage!) { ptr in
-            cef_bridge_browser_create(profileHandle, url, parentPtr, w, h, ptr)
+            cef_bridge_browser_create(url, w, h, ptr)
         }
 
 #if DEBUG
-        dlog("cef.browser browserHandle=\(browserHandle != nil ? "ok" : "NULL")")
+        dlog("cef.osr.browser browserHandle=\(browserHandle != nil ? "ok" : "NULL")")
 #endif
-        guard browserHandle != nil else { return }
 
-        pollForChild()
         pendingURL = nil
-        pendingCachePath = nil
-    }
-
-    // MARK: - Child View Tracking
-
-    private var pollCount = 0
-
-    private func pollForChild() {
-        pollCount += 1
-        if let child = subviews.first {
-            child.frame = bounds
-            child.autoresizingMask = [.width, .height]
-            cefChildView = child
-#if DEBUG
-            dlog("cef.childFound polls=\(pollCount)")
-#endif
-            return
-        }
-        if pollCount < 100 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                self?.pollForChild()
-            }
-        }
     }
 
     func destroyBrowser() {
-        if let h = browserHandle { cef_bridge_browser_destroy(h); browserHandle = nil }
-        if let p = profileHandle { cef_bridge_profile_destroy(p); profileHandle = nil }
-        cefChildView?.removeFromSuperview()
-        cefChildView = nil
+        if let h = browserHandle {
+            cef_bridge_browser_destroy(h)
+            browserHandle = nil
+        }
         callbacksStorage = nil
     }
 
@@ -148,7 +143,6 @@ final class CEFBrowserView: NSView {
         guard let h = browserHandle else { return }
         cef_bridge_browser_load_url(h, urlString)
     }
-
     func goBack() { if let h = browserHandle { cef_bridge_browser_go_back(h) } }
     func goForward() { if let h = browserHandle { cef_bridge_browser_go_forward(h) } }
     func reload() { if let h = browserHandle { cef_bridge_browser_reload(h) } }
@@ -158,7 +152,6 @@ final class CEFBrowserView: NSView {
     func closeDevTools() { if let h = browserHandle { cef_bridge_browser_close_devtools(h) } }
 
     func notifyHidden(_ hidden: Bool) { if let h = browserHandle { cef_bridge_browser_set_hidden(h, hidden) } }
-    func notifyResized() { if let h = browserHandle { cef_bridge_browser_notify_resized(h) } }
 
     // MARK: - View Lifecycle
 
@@ -175,47 +168,39 @@ final class CEFBrowserView: NSView {
            bounds.width > 0, bounds.height > 0, window != nil {
             createBrowserNow()
         }
-        cefChildView?.frame = bounds
-        notifyResized()
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        cefChildView?.frame = bounds
-        notifyResized()
+    // MARK: - CEFSurfaceInputDelegate
+
+    func sendMouseClick(x: Int32, y: Int32, button: Int32, mouseUp: Bool,
+                        clickCount: Int32, modifiers: UInt32) {
+        guard let h = browserHandle else { return }
+        cef_bridge_browser_send_mouse_click(h, x, y, button, mouseUp, clickCount, modifiers)
     }
 
-    // MARK: - Input
-
-    override var acceptsFirstResponder: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func mouseDown(with event: NSEvent) {
-        if let child = cefChildView {
-            window?.makeFirstResponder(child)
-            child.mouseDown(with: event)
-        } else { super.mouseDown(with: event) }
+    func sendMouseMove(x: Int32, y: Int32, mouseLeave: Bool, modifiers: UInt32) {
+        guard let h = browserHandle else { return }
+        cef_bridge_browser_send_mouse_move(h, x, y, mouseLeave, modifiers)
     }
 
-    override func rightMouseDown(with event: NSEvent) {
-        if let child = cefChildView {
-            window?.makeFirstResponder(child)
-            child.rightMouseDown(with: event)
-        } else { super.rightMouseDown(with: event) }
+    func sendMouseWheel(x: Int32, y: Int32, deltaX: Int32, deltaY: Int32, modifiers: UInt32) {
+        guard let h = browserHandle else { return }
+        cef_bridge_browser_send_mouse_wheel(h, x, y, deltaX, deltaY, modifiers)
     }
 
-    override func becomeFirstResponder() -> Bool {
-        if let child = cefChildView {
-            window?.makeFirstResponder(child)
-            return true
-        }
-        return super.becomeFirstResponder()
+    func sendKeyEvent(_ event: NSEvent, type: Int32) {
+        guard let h = browserHandle else { return }
+        let wkc = CEFKeyCodeMap.windowsKeyCode(from: event.keyCode)
+        let ch: UInt16 = event.characters?.first.map { UInt16($0.asciiValue ?? 0) } ?? 0
+        let uch: UInt16 = event.charactersIgnoringModifiers?.first.map { UInt16($0.asciiValue ?? 0) } ?? 0
+        let mods = CEFModifiers.from(event)
+        let isSys = event.modifierFlags.contains(.command)
+        cef_bridge_browser_send_key_event(h, type, wkc, Int32(event.keyCode),
+                                           mods, ch, uch, isSys)
     }
-}
 
-protocol CEFBrowserViewDelegate: AnyObject {
-    func cefBrowserView(_ view: CEFBrowserView, didFailWithError message: String)
-}
-extension CEFBrowserViewDelegate {
-    func cefBrowserView(_ view: CEFBrowserView, didFailWithError message: String) {}
+    func sendFocus(_ focused: Bool) {
+        guard let h = browserHandle else { return }
+        cef_bridge_browser_send_focus(h, focused)
+    }
 }
