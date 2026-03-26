@@ -816,7 +816,7 @@ class TabManager: ObservableObject {
         let selectedTabId: UUID?
         let selectedTabWasPinned: Bool
         let preferredWorkingDirectory: String?
-        let inheritedTerminalConfig: ghostty_surface_config_s?
+        let inheritedTerminalConfig: CmuxSurfaceConfigTemplate?
     }
     private var agentPIDSweepTimer: DispatchSourceTimer?
     private var workspaceGitMetadataPollTimer: DispatchSourceTimer?
@@ -1155,7 +1155,7 @@ class TabManager: ObservableObject {
         title: String,
         workingDirectory: String?,
         portOrdinal: Int,
-        configTemplate: ghostty_surface_config_s?,
+        configTemplate: CmuxSurfaceConfigTemplate?,
         initialTerminalCommand: String?,
         initialTerminalEnvironment: [String: String]
     ) -> Workspace {
@@ -2247,13 +2247,13 @@ class TabManager: ObservableObject {
         return candidates.first
     }
 
-    private func inheritedTerminalConfigForNewWorkspace() -> ghostty_surface_config_s? {
+    private func inheritedTerminalConfigForNewWorkspace() -> CmuxSurfaceConfigTemplate? {
         inheritedTerminalConfigForNewWorkspace(workspace: selectedWorkspace)
     }
 
     private func inheritedTerminalConfigForNewWorkspace(
         workspace: Workspace?
-    ) -> ghostty_surface_config_s? {
+    ) -> CmuxSurfaceConfigTemplate? {
         if let panel = terminalPanelForWorkspaceConfigInheritanceSource(workspace: workspace),
            let sourceSurface = panel.surface.liveSurfaceForGhosttyAccess(
                reason: "tabManager.inheritedTerminalConfigForNewWorkspace"
@@ -2264,8 +2264,8 @@ class TabManager: ObservableObject {
             )
         }
         if let fallbackFontPoints = workspace?.lastRememberedTerminalFontPointsForConfigInheritance() {
-            var config = ghostty_surface_config_new()
-            config.font_size = fallbackFontPoints
+            var config = CmuxSurfaceConfigTemplate()
+            config.fontSize = fallbackFontPoints
             return config
         }
         return nil
