@@ -306,7 +306,7 @@ final class WorkspaceCreationPlacementTests: XCTestCase {
             title: String,
             workingDirectory: String?,
             portOrdinal: Int,
-            configTemplate: ghostty_surface_config_s?,
+            configTemplate: CmuxSurfaceConfigTemplate?,
             initialTerminalCommand: String?,
             initialTerminalEnvironment: [String: String]
         ) -> Workspace {
