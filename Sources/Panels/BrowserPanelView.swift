@@ -1647,6 +1647,9 @@ struct BrowserPanelView: View {
     }
 
     private func autoFocusOmnibarIfBlank() {
+        // Chromium panels manage their own focus via CEF.
+        // Don't auto-steal focus to the omnibar.
+        guard panel.engineType != .chromium else { return }
         guard isFocused else {
 #if DEBUG
             logBrowserFocusState(event: "addressBarFocus.autoFocus.skip", detail: "reason=panel_not_focused")
@@ -1718,8 +1721,13 @@ struct BrowserPanelView: View {
 
     private func openDevTools() {
         #if DEBUG
-        dlog("browser.toggleDevTools panel=\(panel.id.uuidString.prefix(5))")
+        dlog("browser.toggleDevTools panel=\(panel.id.uuidString.prefix(5)) engine=\(panel.engineType)")
         #endif
+        if panel.engineType == .chromium {
+            // CEF DevTools opens in a separate window via Chromium's built-in inspector
+            panel.cefBrowserView?.showDevTools()
+            return
+        }
         if !panel.toggleDeveloperTools() {
             NSSound.beep()
         }
