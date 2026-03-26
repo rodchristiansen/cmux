@@ -134,26 +134,24 @@ final class CEFBrowserView: NSView {
         guard !destroyed else { return }
         destroyed = true
 
-        // Remove CEF's child view from hierarchy FIRST to prevent
-        // AppKit from accessing it after CEF destroys it.
-        for sub in subviews {
-            sub.removeFromSuperview()
-        }
-        cefChildView = nil
+        // Hide CEF's view but don't remove it yet (CEF may still access it)
+        cefChildView?.isHidden = true
 
-        // Now destroy the CEF browser
-        let handle = browserHandle
+        // Request async browser close
+        if let h = browserHandle {
+            cef_bridge_browser_destroy(h)
+        }
         browserHandle = nil
 
-        // Release the retained self reference
-        if let cbs = callbacksStorage, let ud = cbs.user_data {
-            Unmanaged<CEFBrowserView>.fromOpaque(ud).release()
-        }
-        callbacksStorage = nil
-
-        // Destroy CEF browser LAST, after all references are cleared
-        if let h = handle {
-            cef_bridge_browser_destroy(h)
+        // Defer cleanup to next run loop to let CEF finish async close
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            for sub in self.subviews { sub.removeFromSuperview() }
+            self.cefChildView = nil
+            if let cbs = self.callbacksStorage, let ud = cbs.user_data {
+                Unmanaged<CEFBrowserView>.fromOpaque(ud).release()
+            }
+            self.callbacksStorage = nil
         }
     }
 

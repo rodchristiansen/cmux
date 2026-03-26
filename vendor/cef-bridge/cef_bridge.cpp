@@ -170,14 +170,16 @@ cef_bridge_browser_t cef_bridge_browser_create(
 void cef_bridge_browser_destroy(cef_bridge_browser_t b) {
     if (!b) return;
     auto* bb = static_cast<BridgeBrowser*>(b);
-    if (auto br = bb->client->GetBrowser()) {
-        br->GetHost()->CloseBrowser(true);
-        // Don't delete bb here. OnBeforeClose will clear the browser ref.
-        // The BridgeBrowser leaks intentionally to avoid use-after-free
-        // in single-process mode where CloseBrowser is synchronous.
-    } else {
-        delete bb;
+    auto br = bb->client->GetBrowser();
+    if (br) {
+        // In single-process mode, CloseBrowser(true) is synchronous and
+        // can crash if the browser is still processing events.
+        // Use force_close=false to request async close via OnBeforeClose.
+        br->GetHost()->CloseBrowser(false);
     }
+    // Intentional leak: the BridgeBrowser is not deleted because CEF
+    // may still reference it during async close. The small memory leak
+    // is acceptable for tab close stability.
 }
 
 #define GB(b) if (!g_initialized||!b) return CEF_BRIDGE_ERR_NOT_INIT; \
