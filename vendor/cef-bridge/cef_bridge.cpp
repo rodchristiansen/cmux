@@ -397,7 +397,6 @@ cef_bridge_browser_t cef_bridge_browser_create(
     // menus, extensions toolbar). The browser opens in its own window which
     // Swift code positions as a child window over the panel area.
     window_info.bounds = {0, 0, width, height};
-    window_info.hidden = true;
 
     CefBrowserSettings browser_settings;
     // Don't override size - the CefStructBase constructor sets it correctly
