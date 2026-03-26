@@ -204,28 +204,26 @@ final class CEFBrowserView: NSView {
 
     @discardableResult
     private func findAndTrackCEFChildView() -> Bool {
-        // CEF adds its own child view to our view
-        if let child = subviews.first(where: { $0 !== cefChildView }) {
-            child.frame = bounds
-            child.autoresizingMask = [.width, .height]
-            cefChildView = child
-            return true
-        }
-
-        // Fallback: get the view handle from CEF (may be nil if async creation pending)
+        // For Chrome runtime: get the full Chrome UI view (includes omnibar)
+        // and reparent it into our container. Also hide CEF's own window.
         guard let handle = browserHandle,
               let nsviewPtr = cef_bridge_browser_get_nsview(handle) else { return false }
-        let childView = Unmanaged<NSView>.fromOpaque(nsviewPtr).takeUnretainedValue()
-        if childView !== self {
-            if childView.superview !== self {
-                childView.frame = bounds
-                childView.autoresizingMask = [.width, .height]
-                addSubview(childView)
-            }
-            cefChildView = childView
-            return true
+        let chromeView = Unmanaged<NSView>.fromOpaque(nsviewPtr).takeUnretainedValue()
+        guard chromeView !== self else { return false }
+
+        // Hide CEF's Chrome window (we're stealing its content view)
+        if let cefWindow = chromeView.window, cefWindow !== self.window {
+            cefWindow.orderOut(nil)
         }
-        return false
+
+        if chromeView.superview !== self {
+            chromeView.removeFromSuperview()
+            chromeView.frame = bounds
+            chromeView.autoresizingMask = [.width, .height]
+            addSubview(chromeView)
+        }
+        cefChildView = chromeView
+        return true
     }
 
     func destroyBrowser() {
