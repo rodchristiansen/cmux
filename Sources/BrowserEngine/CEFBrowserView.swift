@@ -65,17 +65,16 @@ final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
         guard let url = pendingURL else { return }
 
         var callbacks = cef_bridge_client_callbacks()
-        let ud = Unmanaged.passUnretained(self).toOpaque()
+        // Use passRetained to prevent deallocation while CEF holds callbacks.
+        // Released in destroyBrowser().
+        let ud = Unmanaged.passRetained(self).toOpaque()
         callbacks.user_data = ud
 
         // --- OSR rendering callbacks ---
         callbacks.on_accelerated_paint = { _, ioSurfacePtr, _, _, ud in
-            guard let ud else { return }
-#if DEBUG
-            dlog("cef.osr.accelPaint surface=\(ioSurfacePtr != nil)")
-#endif
-            guard let ioSurfacePtr else { return }
+            guard let ud, let ioSurfacePtr else { return }
             let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            guard view.browserHandle != nil else { return }
             let surface = unsafeBitCast(ioSurfacePtr, to: IOSurfaceRef.self)
             view.surfaceView.updateIOSurface(surface)
         }
@@ -137,6 +136,10 @@ final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
         if let h = browserHandle {
             cef_bridge_browser_destroy(h)
             browserHandle = nil
+        }
+        // Release the retained self reference from createBrowserImmediate
+        if let cbs = callbacksStorage, let ud = cbs.user_data {
+            Unmanaged<CEFBrowserView>.fromOpaque(ud).release()
         }
         callbacksStorage = nil
     }

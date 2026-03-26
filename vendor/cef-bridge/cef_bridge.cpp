@@ -582,3 +582,22 @@ void cef_bridge_free_string(char* s) { free(s); }
 char* cef_bridge_get_version(void) { return bridge_strdup("0.0.0-stub"); }
 
 #endif
+
+// Debug: install signal handlers to log crashes
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+
+static void crash_handler(int sig) {
+    void* bt[30];
+    int count = backtrace(bt, 30);
+    backtrace_symbols_fd(bt, count, STDERR_FILENO);
+    _exit(128 + sig);
+}
+
+__attribute__((constructor))
+static void install_crash_handlers(void) {
+    signal(SIGSEGV, crash_handler);
+    signal(SIGBUS, crash_handler);
+    signal(SIGABRT, crash_handler);
+}
