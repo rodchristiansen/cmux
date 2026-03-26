@@ -69,6 +69,7 @@ var cmuxGhosttyInheritedSurfaceConfigOverride: ((ghostty_surface_t, ghostty_surf
 var cmuxSurfaceForInheritanceOverride: ((TerminalPanel) -> ghostty_surface_t?)?
 #endif
 
+@MainActor
 func cmuxSurfaceForInheritance(_ terminalPanel: TerminalPanel) -> ghostty_surface_t? {
 #if DEBUG
     if let override = cmuxSurfaceForInheritanceOverride {
