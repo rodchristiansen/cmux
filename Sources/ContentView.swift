@@ -2624,19 +2624,31 @@ struct ContentView: View {
     }
 
     var body: some View {
-        var view = AnyView(
-            contentAndSidebarLayout
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .overlay(alignment: .topLeading) {
-                    if isFullScreen && sidebarState.isVisible && !isMinimalMode {
-                        fullscreenControls
-                            .padding(.leading, 10)
-                            .padding(.top, 4)
+        let mainLayout: AnyView
+        if isMinimalMode {
+            mainLayout = AnyView(
+                contentAndSidebarLayout
+                    .ignoresSafeArea(.container, edges: .top)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(minWidth: CGFloat(SessionPersistencePolicy.minimumWindowWidth), minHeight: CGFloat(SessionPersistencePolicy.minimumWindowHeight))
+                    .background(Color.clear)
+            )
+        } else {
+            mainLayout = AnyView(
+                contentAndSidebarLayout
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .overlay(alignment: .topLeading) {
+                        if isFullScreen && sidebarState.isVisible {
+                            fullscreenControls
+                                .padding(.leading, 10)
+                                .padding(.top, 4)
+                        }
                     }
-                }
-                .frame(minWidth: CGFloat(SessionPersistencePolicy.minimumWindowWidth), minHeight: CGFloat(SessionPersistencePolicy.minimumWindowHeight))
-                .background(Color.clear)
-        )
+                    .frame(minWidth: CGFloat(SessionPersistencePolicy.minimumWindowWidth), minHeight: CGFloat(SessionPersistencePolicy.minimumWindowHeight))
+                    .background(Color.clear)
+            )
+        }
+        var view = mainLayout
 
         view = AnyView(view.onAppear {
             tabManager.applyWindowBackgroundForSelectedTab()
