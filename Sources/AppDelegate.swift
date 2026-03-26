@@ -9082,6 +9082,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         let normalizedFlags = flags.subtracting([.numericPad, .function, .capsLock])
+
+        #if DEBUG
+        // Cmd+Ctrl+N: Open niri canvas demo
+        if hasCommand && hasControl && !flags.contains(.shift) && (chars.lowercased() == "n" || event.keyCode == 45) {
+            openNiriCanvas()
+            return true
+        }
+        #endif
+
         let commandPaletteTargetWindow = commandPaletteWindowForShortcutEvent(event)
         let commandPaletteShortcutWindow = shouldHandleCommandPaletteShortcutEvent(
             event,
@@ -11545,6 +11554,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 #endif
 
+    // MARK: - Niri Canvas (experimental)
+
+    #if DEBUG
+    private var niriCanvasController: NiriCanvasWindowController?
+
+    /// Opens a niri-style horizontal terminal strip with new terminal surfaces.
+    func openNiriCanvas() {
+        if niriCanvasController == nil {
+            niriCanvasController = NiriCanvasWindowController()
+        }
+        niriCanvasController?.open(terminalCount: 5)
+    }
+    #endif
+
 }
 
 @MainActor
@@ -12897,5 +12920,4 @@ private extension NSWindow {
         }
         return hitWebView === webView
     }
-
 }
