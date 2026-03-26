@@ -61,6 +61,8 @@ final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
         }
     }
 
+    private var destroyed = false
+
     private func createBrowserImmediate() {
         guard let url = pendingURL else { return }
 
@@ -70,49 +72,59 @@ final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
         let ud = Unmanaged.passRetained(self).toOpaque()
         callbacks.user_data = ud
 
-        // --- OSR rendering callbacks ---
-        callbacks.on_accelerated_paint = { _, ioSurfacePtr, _, _, ud in
-            guard let ud, let ioSurfacePtr else { return }
+        // Helper: safely get view from user_data, returns nil if destroyed
+        func getView(_ ud: UnsafeMutableRawPointer?) -> CEFBrowserView? {
+            guard let ud else { return nil }
             let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
-            guard view.browserHandle != nil else { return }
+            return view.destroyed ? nil : view
+        }
+
+        // --- OSR rendering callbacks ---
+        // OnAcceleratedPaint is called on CEF UI thread (= main thread).
+        // Must set CALayer.contents synchronously before returning.
+        callbacks.on_accelerated_paint = { _, ioSurfacePtr, _, _, ud in
+            guard let ioSurfacePtr, let view = getView(ud) else { return }
             let surface = unsafeBitCast(ioSurfacePtr, to: IOSurfaceRef.self)
             view.surfaceView.updateIOSurface(surface)
         }
         callbacks.on_paint = { _, buffer, width, height, ud in
-            guard let ud, let buffer else { return }
-            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            guard let buffer, let view = getView(ud) else { return }
             view.surfaceView.updateBitmap(buffer, width: Int(width), height: Int(height))
         }
         callbacks.on_get_view_rect = { _, w, h, ud in
-            guard let ud else { return }
-            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
-            w?.pointee = Int32(view.surfaceView.bounds.width)
-            h?.pointee = Int32(view.surfaceView.bounds.height)
+            guard let view = getView(ud) else {
+                w?.pointee = 800; h?.pointee = 600; return
+            }
+            w?.pointee = max(1, Int32(view.surfaceView.bounds.width))
+            h?.pointee = max(1, Int32(view.surfaceView.bounds.height))
         }
         callbacks.on_get_screen_info = { _, scaleFactor, ud in
-            guard let ud else { return }
-            let view = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
+            guard let view = getView(ud) else {
+                scaleFactor?.pointee = 2.0; return
+            }
             scaleFactor?.pointee = Float(view.surfaceView.window?.backingScaleFactor ?? 2.0)
         }
         callbacks.on_cursor_change = { _, _, _ in }
 
         // --- Navigation/display callbacks ---
+        // These may fire from any thread. Dispatch to main for safety.
         callbacks.on_title_change = { _, title, ud in
-            guard let ud, let title else { return }
-            Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
-                .currentTitle = String(cString: title)
+            guard let title else { return }
+            let s = String(cString: title)
+            DispatchQueue.main.async { getView(ud)?.currentTitle = s }
         }
         callbacks.on_url_change = { _, url, ud in
-            guard let ud, let url else { return }
-            Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
-                .currentURL = String(cString: url)
+            guard let url else { return }
+            let s = String(cString: url)
+            DispatchQueue.main.async { getView(ud)?.currentURL = s }
         }
         callbacks.on_loading_state_change = { _, loading, back, fwd, ud in
-            guard let ud else { return }
-            let v = Unmanaged<CEFBrowserView>.fromOpaque(ud).takeUnretainedValue()
-            v.isLoading = loading
-            v.canGoBack = back
-            v.canGoForward = fwd
+            DispatchQueue.main.async {
+                guard let v = getView(ud) else { return }
+                v.isLoading = loading
+                v.canGoBack = back
+                v.canGoForward = fwd
+            }
         }
         callbacks.on_popup_request = { _, _, _ in false }
 
@@ -133,6 +145,7 @@ final class CEFBrowserView: NSView, CEFSurfaceInputDelegate {
     }
 
     func destroyBrowser() {
+        destroyed = true
         if let h = browserHandle {
             cef_bridge_browser_destroy(h)
             browserHandle = nil

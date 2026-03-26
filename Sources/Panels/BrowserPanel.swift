@@ -3313,6 +3313,8 @@ final class BrowserPanel: Panel, ObservableObject {
         uiDelegate = nil
         webViewObservers.removeAll()
         webViewCancellables.removeAll()
+        cefCancellables.removeAll()
+        cefBrowserView?.destroyBrowser()
         faviconTask?.cancel()
         faviconTask = nil
     }
@@ -3935,6 +3937,9 @@ final class BrowserPanel: Panel, ObservableObject {
         }
         webViewObservers.removeAll()
         webViewCancellables.removeAll()
+        cefCancellables.removeAll()
+        cefBrowserView?.destroyBrowser()
+        cefBrowserView = nil
         let webView = webView
         Task { @MainActor in
             BrowserWindowPortalRegistry.detach(webView: webView)
@@ -4202,6 +4207,7 @@ extension BrowserPanel {
 
     /// Reload the current page
     func reload() {
+        if engineType == .chromium { cefBrowserView?.reload(); return }
         webView.customUserAgent = BrowserUserAgentSettings.safariUserAgent
         if Self.serializableSessionHistoryURLString(Self.remoteProxyDisplayURL(for: webView.url)) == nil {
             let fallbackURL = resolvedCurrentSessionHistoryURL()
@@ -4222,6 +4228,7 @@ extension BrowserPanel {
 
     /// Stop loading
     func stopLoading() {
+        if engineType == .chromium { cefBrowserView?.stopLoading(); return }
         webView.stopLoading()
     }
 
