@@ -210,7 +210,8 @@ esac`}</CodeBlock>
           ),
         })}
       </p>
-      <CodeBlock title="~/.copilot/config.json" lang="json">{`{
+      <CodeBlock title=".github/hooks/cmux-notify.json" lang="json">{`{
+  "version": 1,
   "hooks": {
     "userPromptSubmitted": [
       {
@@ -219,7 +220,7 @@ esac`}</CodeBlock>
         "timeoutSec": 3
       }
     ],
-    "agentStop": [
+    "postToolUse": [
       {
         "type": "command",
         "bash": "if command -v cmux &>/dev/null; then cmux notify --title 'Copilot CLI' --body 'Done'; cmux set-status copilot_cli Idle; fi",
@@ -229,7 +230,7 @@ esac`}</CodeBlock>
     "errorOccurred": [
       {
         "type": "command",
-        "bash": "if command -v cmux &>/dev/null; then cmux notify --title 'Copilot CLI' --subtitle 'Error' --body 'An error occurred'; cmux set-status copilot_cli Error; fi",
+        "bash": "if command -v cmux &>/dev/null; then cmux notify --title 'Copilot CLI' --subtitle 'Error' --body \\"$(cat | jq -r '.errorMessage // \\"An error occurred\\"' 2>/dev/null | head -c 100)\\"; cmux set-status copilot_cli Error; fi",
         "timeoutSec": 5
       }
     ],
@@ -240,14 +241,6 @@ esac`}</CodeBlock>
         "timeoutSec": 3
       }
     ]
-  }
-}`}</CodeBlock>
-      <p>{t("copilotCliRepoHooks")}</p>
-      <CodeBlock title=".github/hooks/notify.json" lang="json">{`{
-  "version": 1,
-  "hooks": {
-    "userPromptSubmitted": [ ... ],
-    "agentStop": [ ... ]
   }
 }`}</CodeBlock>
 
