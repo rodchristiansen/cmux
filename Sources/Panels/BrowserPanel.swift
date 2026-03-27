@@ -322,6 +322,7 @@ struct BrowserProfileDefinition: Codable, Hashable, Identifiable, Sendable {
     var displayName: String
     let createdAt: Date
     let isBuiltInDefault: Bool
+    var engineType: BrowserEngineType = .webkit
 
     var slug: String {
         if isBuiltInDefault {
@@ -374,14 +375,15 @@ final class BrowserProfileStore: ObservableObject {
         ?? String(localized: "browser.profile.default", defaultValue: "Default")
     }
 
-    func createProfile(named rawName: String) -> BrowserProfileDefinition? {
+    func createProfile(named rawName: String, engineType: BrowserEngineType = .webkit) -> BrowserProfileDefinition? {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
         let profile = BrowserProfileDefinition(
             id: UUID(),
             displayName: name,
             createdAt: Date(),
-            isBuiltInDefault: false
+            isBuiltInDefault: false,
+            engineType: engineType
         )
         profiles.append(profile)
         profiles.sort {
@@ -1865,9 +1867,16 @@ final class BrowserPanel: Panel, ObservableObject {
     @Published private(set) var profileID: UUID
     @Published private(set) var historyStore: BrowserHistoryStore
 
+    /// The browser engine type for this panel.
+    let engineType: BrowserEngineType
+
     /// The underlying web view
     private(set) var webView: WKWebView
     private var websiteDataStore: WKWebsiteDataStore
+
+    /// CEF browser view (Chromium engine only, nil for WebKit).
+    private(set) var chromiumBrowserView: ChromiumBrowserView?
+    private var chromiumCancellables = Set<AnyCancellable>()
 
     /// Monotonic identity for the current WKWebView instance.
     /// Incremented whenever we replace the underlying WKWebView after a process crash.
@@ -2580,6 +2589,11 @@ final class BrowserPanel: Panel, ObservableObject {
         self.remoteProxyEndpoint = proxyEndpoint
         self.usesRemoteWorkspaceProxy = isRemoteWorkspace
         self.browserThemeMode = BrowserThemeSettings.mode()
+
+        // Resolve engine type from the profile definition
+        let profileDef = BrowserProfileStore.shared.profileDefinition(id: resolvedProfileID)
+        self.engineType = profileDef?.engineType ?? .webkit
+
         self.websiteDataStore = isRemoteWorkspace
             ? WKWebsiteDataStore(forIdentifier: remoteWebsiteDataStoreIdentifier ?? workspaceId)
             : BrowserProfileStore.shared.websiteDataStore(for: resolvedProfileID)
@@ -2592,6 +2606,28 @@ final class BrowserPanel: Panel, ObservableObject {
         self.insecureHTTPAlertFactory = { NSAlert() }
         applyRemoteProxyConfigurationIfAvailable()
         BrowserProfileStore.shared.noteUsed(resolvedProfileID)
+
+        // For Chromium profiles, create a ChromiumBrowserView.
+        if engineType == .chromium {
+            let cefView = ChromiumBrowserView(frame: .zero)
+            self.chromiumBrowserView = cefView
+            cefView.createBrowser(initialURL: initialURL?.absoluteString ?? "https://www.google.com")
+            shouldRenderWebView = true
+            cefView.$currentURL.receive(on: DispatchQueue.main)
+                .sink { [weak self] s in if let self, !s.isEmpty { self.currentURL = URL(string: s) } }
+                .store(in: &chromiumCancellables)
+            cefView.$currentTitle.receive(on: DispatchQueue.main)
+                .sink { [weak self] s in if let self, !s.isEmpty { self.pageTitle = s } }
+                .store(in: &chromiumCancellables)
+            cefView.$canGoBack.receive(on: DispatchQueue.main)
+                .sink { [weak self] v in self?.canGoBack = v }
+                .store(in: &chromiumCancellables)
+            cefView.$canGoForward.receive(on: DispatchQueue.main)
+                .sink { [weak self] v in self?.canGoForward = v }
+                .store(in: &chromiumCancellables)
+        } else {
+            self.chromiumBrowserView = nil
+        }
 
         // Set up navigation delegate
         let navDelegate = BrowserNavigationDelegate()
@@ -3253,6 +3289,21 @@ final class BrowserPanel: Panel, ObservableObject {
     }
 
     func close() {
+        // For Chromium panels, resign first responder from CEF's view
+        // before any view hierarchy changes. Then destroy the browser.
+        if engineType == .chromium {
+            // Move first responder away from CEF's RenderWidgetHostViewCocoa
+            if let cefView = chromiumBrowserView, let window = cefView.window {
+                window.makeFirstResponder(nil)
+            }
+            chromiumCancellables.removeAll()
+            chromiumBrowserView?.destroyBrowser()
+            chromiumBrowserView = nil
+            faviconTask?.cancel()
+            faviconTask = nil
+            return
+        }
+
         // Ensure we don't keep a hidden WKWebView (or its content view) as first responder while
         // bonsplit/SwiftUI reshuffles views during close.
         unfocus()
@@ -3632,6 +3683,11 @@ final class BrowserPanel: Panel, ObservableObject {
 
     /// Navigate to a URL
     func navigate(to url: URL, recordTypedNavigation: Bool = false) {
+        if engineType == .chromium, let cefView = chromiumBrowserView {
+            shouldRenderWebView = true
+            cefView.loadURL(url.absoluteString)
+            return
+        }
         let request = URLRequest(url: url)
         if shouldBlockInsecureHTTPNavigation(to: url) {
             presentInsecureHTTPAlert(for: request, intent: .currentTab, recordTypedNavigation: recordTypedNavigation)
@@ -3891,6 +3947,9 @@ final class BrowserPanel: Panel, ObservableObject {
         }
         webViewObservers.removeAll()
         webViewCancellables.removeAll()
+        chromiumCancellables.removeAll()
+        chromiumBrowserView?.destroyBrowser()
+        chromiumBrowserView = nil
         let webView = webView
         Task { @MainActor in
             BrowserWindowPortalRegistry.detach(webView: webView)
@@ -4047,6 +4106,7 @@ extension BrowserPanel {
 
     /// Go back in history
     func goBack() {
+        if engineType == .chromium { chromiumBrowserView?.goBack(); return }
         guard canGoBack else { return }
         if usesRestoredSessionHistory {
             realignRestoredSessionHistoryToLiveCurrentIfPossible()
@@ -4080,6 +4140,7 @@ extension BrowserPanel {
 
     /// Go forward in history
     func goForward() {
+        if engineType == .chromium { chromiumBrowserView?.goForward(); return }
         guard canGoForward else { return }
         if usesRestoredSessionHistory {
             realignRestoredSessionHistoryToLiveCurrentIfPossible()
@@ -4156,6 +4217,7 @@ extension BrowserPanel {
 
     /// Reload the current page
     func reload() {
+        if engineType == .chromium { chromiumBrowserView?.reload(); return }
         webView.customUserAgent = BrowserUserAgentSettings.safariUserAgent
         if Self.serializableSessionHistoryURLString(Self.remoteProxyDisplayURL(for: webView.url)) == nil {
             let fallbackURL = resolvedCurrentSessionHistoryURL()
@@ -4176,6 +4238,7 @@ extension BrowserPanel {
 
     /// Stop loading
     func stopLoading() {
+        if engineType == .chromium { chromiumBrowserView?.stopLoading(); return }
         webView.stopLoading()
     }
 

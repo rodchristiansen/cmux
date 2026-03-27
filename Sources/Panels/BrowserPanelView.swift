@@ -1117,7 +1117,9 @@ struct BrowserPanelView: View {
             isCurrentPaneOwner
 
         return Group {
-            if panel.shouldRenderWebView {
+            if panel.engineType == .chromium {
+                chromiumWebView
+            } else if panel.shouldRenderWebView {
                 WebViewRepresentable(
                     panel: panel,
                     paneId: paneId,
@@ -1189,6 +1191,33 @@ struct BrowserPanelView: View {
         .zIndex(0)
     }
 
+    @ViewBuilder
+    private var chromiumWebView: some View {
+        if let cefView = panel.chromiumBrowserView {
+            ZStack(alignment: .bottomTrailing) {
+                ChromiumBrowserViewRepresentable(chromiumBrowserView: cefView)
+                    .accessibilityIdentifier("ChromiumBrowserView")
+                Text("Chromium")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+                    .padding(8)
+            }
+        } else if ChromiumProcess.shared.resolveContentShellPath() == nil {
+            Text("Chromium engine loading...")
+        } else {
+            VStack {
+                Text(String(localized: "cef.error.title", defaultValue: "Chromium engine unavailable"))
+                    .font(.headline)
+                Text("Content Shell not found")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     private func triggerFocusFlashAnimation() {
         focusFlashAnimationGeneration &+= 1
         let generation = focusFlashAnimationGeneration
@@ -1256,6 +1285,9 @@ struct BrowserPanelView: View {
     }
 
     private func setAddressBarFocused(_ focused: Bool, reason: String) {
+        if focused, panel.engineType == .chromium, reason != "omnibar.tap" {
+            return
+        }
 #if DEBUG
         if addressBarFocused == focused {
             logBrowserFocusState(
@@ -1612,6 +1644,7 @@ struct BrowserPanelView: View {
     }
 
     private func autoFocusOmnibarIfBlank() {
+        guard panel.engineType != .chromium else { return }
         guard isFocused else {
 #if DEBUG
             logBrowserFocusState(event: "addressBarFocus.autoFocus.skip", detail: "reason=panel_not_focused")
@@ -1682,9 +1715,10 @@ struct BrowserPanelView: View {
     }
 
     private func openDevTools() {
-        #if DEBUG
-        dlog("browser.toggleDevTools panel=\(panel.id.uuidString.prefix(5))")
-        #endif
+        if panel.engineType == .chromium {
+            panel.chromiumBrowserView?.showDevTools()
+            return
+        }
         if !panel.toggleDeveloperTools() {
             NSSound.beep()
         }
