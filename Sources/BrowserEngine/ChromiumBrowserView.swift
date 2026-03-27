@@ -1,33 +1,38 @@
 import AppKit
 import Combine
 import Bonsplit
+import QuartzCore
 
-/// Positions the Content Shell window over this view's area.
+/// Displays Chromium content via CALayerHost.
+/// Content Shell runs as a child process. Its compositor sends a
+/// CAContext ID which we use to create a CALayerHost for zero-copy
+/// display. No NSView reparenting, no separate visible window.
 final class ChromiumBrowserView: NSView {
 
-    private var shellPID: Int32?
-    private var shellWindow: NSWindow?
-    private var observations: [NSObjectProtocol] = []
     private var pendingURL: String?
     private var launched = false
+    private var contextFile: String?
+    private var pollTimer: Timer?
+    private var hostLayer: CALayer? // CALayerHost
 
     @Published private(set) var currentURL: String = ""
+    @Published private(set) var currentTitle: String = ""
     @Published private(set) var canGoBack: Bool = false
     @Published private(set) var canGoForward: Bool = false
-    @Published private(set) var currentTitle: String = ""
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     deinit {
-        detachShellWindow()
-        // Don't kill the process on deinit - it may be reused
+        pollTimer?.invalidate()
+        ChromiumProcess.shared.terminate()
+        if let f = contextFile { try? FileManager.default.removeItem(atPath: f) }
     }
 
     func createBrowser(initialURL: String) {
@@ -41,189 +46,137 @@ final class ChromiumBrowserView: NSView {
         guard !launched, let url = pendingURL else { return }
         launched = true
 
-        // Ensure Content Shell is available (download if needed)
         ChromiumProcess.shared.ensureContentShell { [weak self] ok in
             guard let self, ok else { return }
-            self.shellPID = ChromiumProcess.shared.launch(url: url)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.findAndAttachShellWindow()
-            }
-        }
-        return
-    }
 
-    private func launchShellDirect() {
-        guard let url = pendingURL else { return }
+            // Create temp file for context ID
+            let tmpFile = "/tmp/cmux-ca-context-\(ProcessInfo.processInfo.processIdentifier).txt"
+            self.contextFile = tmpFile
 
-        // Launch Content Shell
-        shellPID = ChromiumProcess.shared.launch(url: url)
+            // Launch Content Shell with hidden window and context file
+            self.launchContentShell(url: url, contextFile: tmpFile)
 
-        // Wait for the Content Shell window to appear, then attach it
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.findAndAttachShellWindow()
+            // Poll for the context ID
+            self.startPolling()
         }
     }
 
-    private func findAndAttachShellWindow() {
-        // Find the Content Shell window by looking at NSApp's windows
-        // (won't work - Content Shell is a separate process)
-        // Instead, use CGWindowList to find it by PID
-        guard let pid = shellPID else { return }
+    private func launchContentShell(url: String, contextFile: String) {
+        guard let path = ChromiumProcess.shared.resolveContentShellPath() else { return }
 
-        let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
-        for windowInfo in windowList {
-            guard let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? Int32,
-                  ownerPID == pid,
-                  let windowNumber = windowInfo[kCGWindowNumber as String] as? Int else {
-                continue
-            }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: path)
+        proc.arguments = [
+            "--no-sandbox",
+            "--content-shell-hide-toolbar",
+            // Start offscreen (way off screen so user doesn't see the window)
+            "--window-position=-10000,-10000",
+            "--window-size=\(Int(bounds.width)),\(Int(bounds.height))",
+            url,
+        ]
+        proc.environment = ProcessInfo.processInfo.environment
+        proc.environment?["CMUX_CA_CONTEXT_FILE"] = contextFile
 
-            // Found the Content Shell window
-            // Use NSWindow(windowRef:) or addChildWindow to attach it
+        do {
+            try proc.run()
+            ChromiumProcess.shared.process = proc
 #if DEBUG
-            dlog("chromium.findWindow: found window \(windowNumber) for pid \(pid)")
+            dlog("chromium.launch pid=\(proc.processIdentifier) url=\(url)")
+#endif
+        } catch {
+#if DEBUG
+            dlog("chromium.launch failed: \(error)")
+#endif
+        }
+    }
+
+    private func startPolling() {
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.checkContextFile()
+        }
+    }
+
+    private func checkContextFile() {
+        guard let file = contextFile,
+              let data = try? String(contentsOfFile: file, encoding: .utf8),
+              let contextId = UInt32(data.trimmingCharacters(in: .whitespacesAndNewlines)),
+              contextId > 0 else { return }
+
+        pollTimer?.invalidate()
+        pollTimer = nil
+
+#if DEBUG
+        dlog("chromium.contextId=\(contextId)")
 #endif
 
-            // Get the NSWindow reference for the Content Shell window
-            // This requires the window to be in the same process - it's not.
-            // For cross-process window management, we need to use
-            // CGWindowListCreateImage for screenshots, or Accessibility API
-            // for positioning. Or use AppleScript.
+        // Create CALayerHost with the context ID
+        attachCALayerHost(contextId: contextId)
+    }
 
-            positionShellWindow(windowNumber: windowNumber)
-            startTrackingPosition()
+    private func attachCALayerHost(contextId: UInt32) {
+        // CALayerHost is a private API. We access it dynamically.
+        guard let layerHostClass = NSClassFromString("CALayerHost") as? CALayer.Type else {
+#if DEBUG
+            dlog("chromium.CALayerHost class not found")
+#endif
             return
         }
 
+        let host = layerHostClass.init()
+        host.setValue(contextId, forKey: "contextId")
+        host.frame = bounds
+        host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+
+        layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
+        layer?.addSublayer(host)
+        hostLayer = host
+
 #if DEBUG
-        dlog("chromium.findWindow: no window found for pid \(pid), retrying...")
+        dlog("chromium.CALayerHost attached contextId=\(contextId)")
 #endif
-        // Retry
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.findAndAttachShellWindow()
-        }
     }
 
-    private func positionShellWindow(windowNumber: Int) {
-        guard let parentWindow = self.window else { return }
+    // MARK: - Navigation (send commands to Content Shell via AppleScript)
 
-        // Convert our bounds to screen coordinates
-        let frameInWindow = convert(bounds, to: nil)
-        let frameOnScreen = parentWindow.convertToScreen(frameInWindow)
-
-        // Position the Content Shell window using AppleScript
-        // (cross-process window positioning)
-        let script = """
-        tell application "System Events"
-            tell process "Content Shell"
-                set position of window 1 to {\(Int(frameOnScreen.origin.x)), \(Int(NSScreen.main!.frame.height - frameOnScreen.maxY))}
-                set size of window 1 to {\(Int(frameOnScreen.width)), \(Int(frameOnScreen.height))}
-            end tell
-        end tell
-        """
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let appleScript = NSAppleScript(source: script)
-            var error: NSDictionary?
-            appleScript?.executeAndReturnError(&error)
-            if let error {
-#if DEBUG
-                DispatchQueue.main.async {
-                    dlog("chromium.position: error \(error)")
-                }
-#endif
-            }
-        }
-    }
-
-    private func startTrackingPosition() {
-        // Track our view's frame changes to reposition the shell window
-        postsFrameChangedNotifications = true
-        let obs = NotificationCenter.default.addObserver(
-            forName: NSView.frameDidChangeNotification,
-            object: self, queue: .main
-        ) { [weak self] _ in
-            guard let self, let pid = self.shellPID else { return }
-            // Re-find and reposition
-            let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
-            for info in windowList {
-                if let ownerPID = info[kCGWindowOwnerPID as String] as? Int32,
-                   ownerPID == pid,
-                   let wn = info[kCGWindowNumber as String] as? Int {
-                    self.positionShellWindow(windowNumber: wn)
-                    break
-                }
-            }
-        }
-        observations.append(obs)
-
-        // Also track parent window move
-        if let parentWindow = window {
-            let moveObs = NotificationCenter.default.addObserver(
-                forName: NSWindow.didMoveNotification,
-                object: parentWindow, queue: .main
-            ) { [weak self] _ in
-                guard let self, let pid = self.shellPID else { return }
-                let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
-                for info in windowList {
-                    if let ownerPID = info[kCGWindowOwnerPID as String] as? Int32,
-                       ownerPID == pid,
-                       let wn = info[kCGWindowNumber as String] as? Int {
-                        self.positionShellWindow(windowNumber: wn)
-                        break
-                    }
-                }
-            }
-            observations.append(moveObs)
-        }
-    }
-
-    private func detachShellWindow() {
-        for obs in observations {
-            NotificationCenter.default.removeObserver(obs)
-        }
-        observations.removeAll()
-    }
-
-    func destroyBrowser() {
-        detachShellWindow()
-        ChromiumProcess.shared.terminate()
-        shellPID = nil
-        launched = false
-    }
-
-    // Navigation via AppleScript (temporary until we add IPC)
-    func loadURL(_ urlString: String) {
-        // For now, just relaunch with new URL
+    func loadURL(_ s: String) {
+        // Relaunch with new URL
         ChromiumProcess.shared.terminate()
         launched = false
-        pendingURL = urlString
+        pendingURL = s
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.launchShell()
         }
     }
 
-    func goBack() { sendKeyToShell(key: "[", modifiers: "command down") }
-    func goForward() { sendKeyToShell(key: "]", modifiers: "command down") }
-    func reload() { sendKeyToShell(key: "r", modifiers: "command down") }
-    func stopLoading() { sendKeyToShell(key: ".", modifiers: "command down") }
+    func goBack() { sendKey(key: "[", modifiers: "command down") }
+    func goForward() { sendKey(key: "]", modifiers: "command down") }
+    func reload() { sendKey(key: "r", modifiers: "command down") }
+    func stopLoading() { sendKey(key: ".", modifiers: "command down") }
+    func showDevTools() { sendKey(key: "i", modifiers: "command down, option down") }
 
-    private func sendKeyToShell(key: String, modifiers: String) {
-        let script = """
-        tell application "System Events"
-            tell process "Content Shell"
-                keystroke "\(key)" using {\(modifiers)}
-            end tell
-        end tell
-        """
+    private func sendKey(key: String, modifiers: String) {
         DispatchQueue.global(qos: .userInitiated).async {
+            let script = """
+            tell application "System Events"
+                tell process "Content Shell"
+                    keystroke "\(key)" using {\(modifiers)}
+                end tell
+            end tell
+            """
             NSAppleScript(source: script)?.executeAndReturnError(nil)
         }
     }
 
-    func showDevTools() { sendKeyToShell(key: "i", modifiers: "command down, option down") }
+    func destroyBrowser() {
+        pollTimer?.invalidate()
+        hostLayer?.removeFromSuperlayer()
+        hostLayer = nil
+        ChromiumProcess.shared.terminate()
+        if let f = contextFile { try? FileManager.default.removeItem(atPath: f) }
+    }
 
-    // View lifecycle
+    // MARK: - View lifecycle
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil, bounds.width > 0, bounds.height > 0, pendingURL != nil, !launched {
@@ -236,5 +189,6 @@ final class ChromiumBrowserView: NSView {
         if !launched, pendingURL != nil, bounds.width > 0, bounds.height > 0, window != nil {
             launchShell()
         }
+        hostLayer?.frame = bounds
     }
 }
