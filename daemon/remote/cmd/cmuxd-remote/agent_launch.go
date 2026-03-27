@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -21,6 +20,11 @@ func runClaudeTeamsRelay(socketPath string, args []string, refreshAddr func() st
 		return 1
 	}
 
+	// Resolve the agent executable BEFORE modifying PATH (so the shim
+	// directory doesn't shadow anything). Matches the Swift CLI behavior.
+	originalPath := os.Getenv("PATH")
+	claudePath := findExecutableInPath("claude", originalPath, shimDir)
+
 	focused := getFocusedContext(rc)
 
 	configureAgentEnvironment(agentConfig{
@@ -35,22 +39,9 @@ func runClaudeTeamsRelay(socketPath string, args []string, refreshAddr func() st
 		},
 	})
 
-	// Build launch arguments
 	launchArgs := claudeTeamsLaunchArgs(args)
 
-	// Find claude executable
-	claudePath := findExecutable("claude", shimDir)
-
-	if claudePath != "" {
-		argv := append([]string{claudePath}, launchArgs...)
-		err := syscall.Exec(claudePath, argv, os.Environ())
-		fmt.Fprintf(os.Stderr, "cmux claude-teams: exec failed: %v\n", err)
-		return 1
-	}
-
-	// Fallback: use PATH lookup
-	claudePath, err = exec.LookPath("claude")
-	if err != nil {
+	if claudePath == "" {
 		fmt.Fprintf(os.Stderr, "cmux claude-teams: claude not found in PATH\n")
 		return 1
 	}
@@ -69,6 +60,10 @@ func runOMORelay(socketPath string, args []string, refreshAddr func() string) in
 		fmt.Fprintf(os.Stderr, "cmux omo: failed to create shim directory: %v\n", err)
 		return 1
 	}
+
+	// Resolve the agent executable BEFORE modifying PATH.
+	originalPath := os.Getenv("PATH")
+	opencodePath := findExecutableInPath("opencode", originalPath, shimDir)
 
 	focused := getFocusedContext(rc)
 
@@ -89,7 +84,6 @@ func runOMORelay(socketPath string, args []string, refreshAddr func() string) in
 
 	// Build launch arguments
 	launchArgs := args
-	// Add --port if not already present
 	hasPort := false
 	for _, arg := range launchArgs {
 		if arg == "--port" || strings.HasPrefix(arg, "--port=") {
@@ -105,17 +99,7 @@ func runOMORelay(socketPath string, args []string, refreshAddr func() string) in
 		launchArgs = append([]string{"--port", port}, launchArgs...)
 	}
 
-	opencodePath := findExecutable("opencode", shimDir)
-
-	if opencodePath != "" {
-		argv := append([]string{opencodePath}, launchArgs...)
-		err := syscall.Exec(opencodePath, argv, os.Environ())
-		fmt.Fprintf(os.Stderr, "cmux omo: exec failed: %v\n", err)
-		return 1
-	}
-
-	opencodePath, err = exec.LookPath("opencode")
-	if err != nil {
+	if opencodePath == "" {
 		fmt.Fprintf(os.Stderr, "cmux omo: opencode not found in PATH\n")
 		return 1
 	}
@@ -305,14 +289,12 @@ func configureAgentEnvironment(cfg agentConfig) {
 
 // --- Executable resolution ---
 
-func findExecutable(name string, shimDir string) string {
-	pathEnv := os.Getenv("PATH")
+// findExecutableInPath searches the given PATH string for an executable,
+// skipping skipDir (the shim directory). Takes an explicit PATH to ensure
+// we search the original PATH before environment modifications.
+func findExecutableInPath(name string, pathEnv string, skipDir string) string {
 	for _, dir := range filepath.SplitList(pathEnv) {
-		if dir == "" {
-			continue
-		}
-		// Skip the shim directory itself
-		if dir == shimDir {
+		if dir == "" || dir == skipDir {
 			continue
 		}
 		candidate := filepath.Join(dir, name)
