@@ -11,13 +11,13 @@ final class ChromiumProcess {
     private var process: Process?
     private var contentShellPath: String?
 
-    /// Resolve the Content Shell app path.
+    /// Resolve the Content Shell app path. Downloads from GitHub if not found.
     func resolveContentShellPath() -> String? {
         if let cached = contentShellPath { return cached }
 
-        // Check common locations
         let candidates = [
             "\(NSHomeDirectory())/chromium/src/out/Release/Content Shell.app/Contents/MacOS/Content Shell",
+            "\(contentShellDir)/Content Shell.app/Contents/MacOS/Content Shell",
             Bundle.main.privateFrameworksPath.map { "\($0)/Content Shell.app/Contents/MacOS/Content Shell" },
             "/Applications/Content Shell.app/Contents/MacOS/Content Shell",
         ].compactMap { $0 }
@@ -29,6 +29,62 @@ final class ChromiumProcess {
             }
         }
         return nil
+    }
+
+    /// Directory for downloaded Content Shell
+    var contentShellDir: String {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.cmuxterm.app"
+        return appSupport.appendingPathComponent(bundleID).appendingPathComponent("ContentShell").path
+    }
+
+    /// Download Content Shell from GitHub releases if not present.
+    func ensureContentShell(completion: @escaping (Bool) -> Void) {
+        if resolveContentShellPath() != nil {
+            completion(true)
+            return
+        }
+
+        let url = URL(string: "https://github.com/manaflow-ai/chromium/releases/download/v0.0.1/chromium-content-shell-arm64-macos.tar.gz")!
+        let destDir = contentShellDir
+
+#if DEBUG
+        dlog("chromium.download: fetching Content Shell from \(url)")
+#endif
+
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, _, error in
+            guard let tempURL, error == nil else {
+#if DEBUG
+                DispatchQueue.main.async { dlog("chromium.download: failed \(error?.localizedDescription ?? "unknown")") }
+#endif
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            do {
+                try FileManager.default.createDirectory(atPath: destDir, withIntermediateDirectories: true)
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+                proc.arguments = ["-xzf", tempURL.path, "-C", destDir]
+                try proc.run()
+                proc.waitUntilExit()
+
+                DispatchQueue.main.async {
+                    self?.contentShellPath = nil // reset cache
+                    let found = self?.resolveContentShellPath() != nil
+#if DEBUG
+                    dlog("chromium.download: extract done, found=\(found)")
+#endif
+                    completion(found)
+                }
+            } catch {
+#if DEBUG
+                DispatchQueue.main.async { dlog("chromium.download: extract error \(error)") }
+#endif
+                DispatchQueue.main.async { completion(false) }
+            }
+        }
+        task.resume()
     }
 
     /// Launch Content Shell with a URL. Returns the PID.

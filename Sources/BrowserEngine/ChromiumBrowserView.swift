@@ -41,6 +41,20 @@ final class ChromiumBrowserView: NSView {
         guard !launched, let url = pendingURL else { return }
         launched = true
 
+        // Ensure Content Shell is available (download if needed)
+        ChromiumProcess.shared.ensureContentShell { [weak self] ok in
+            guard let self, ok else { return }
+            self.shellPID = ChromiumProcess.shared.launch(url: url)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.findAndAttachShellWindow()
+            }
+        }
+        return
+    }
+
+    private func launchShellDirect() {
+        guard let url = pendingURL else { return }
+
         // Launch Content Shell
         shellPID = ChromiumProcess.shared.launch(url: url)
 
