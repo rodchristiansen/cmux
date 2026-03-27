@@ -8,7 +8,7 @@ final class ChromiumProcess {
 
     static let shared = ChromiumProcess()
 
-    private var process: Process?
+    var process: Process?
     private var contentShellPath: String?
 
     /// Resolve the Content Shell app path. Downloads from GitHub if not found.
