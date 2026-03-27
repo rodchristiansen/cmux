@@ -2344,7 +2344,7 @@ struct ContentView: View {
     }
 
     private var effectiveTitlebarPadding: CGFloat {
-        isMinimalMode ? 0 : titlebarPadding
+        isMinimalMode ? -titlebarPadding : titlebarPadding
     }
 
     private var terminalContent: some View {
@@ -2624,31 +2624,19 @@ struct ContentView: View {
     }
 
     var body: some View {
-        let mainLayout: AnyView
-        if isMinimalMode {
-            mainLayout = AnyView(
-                contentAndSidebarLayout
-                    .ignoresSafeArea(.container, edges: .top)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .frame(minWidth: CGFloat(SessionPersistencePolicy.minimumWindowWidth), minHeight: CGFloat(SessionPersistencePolicy.minimumWindowHeight))
-                    .background(Color.clear)
-            )
-        } else {
-            mainLayout = AnyView(
-                contentAndSidebarLayout
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .overlay(alignment: .topLeading) {
-                        if isFullScreen && sidebarState.isVisible {
-                            fullscreenControls
-                                .padding(.leading, 10)
-                                .padding(.top, 4)
-                        }
+        var view = AnyView(
+            contentAndSidebarLayout
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .overlay(alignment: .topLeading) {
+                    if isFullScreen && sidebarState.isVisible && !isMinimalMode {
+                        fullscreenControls
+                            .padding(.leading, 10)
+                            .padding(.top, 4)
                     }
-                    .frame(minWidth: CGFloat(SessionPersistencePolicy.minimumWindowWidth), minHeight: CGFloat(SessionPersistencePolicy.minimumWindowHeight))
-                    .background(Color.clear)
-            )
-        }
-        var view = mainLayout
+                }
+                .frame(minWidth: CGFloat(SessionPersistencePolicy.minimumWindowWidth), minHeight: CGFloat(SessionPersistencePolicy.minimumWindowHeight))
+                .background(Color.clear)
+        )
 
         view = AnyView(view.onAppear {
             tabManager.applyWindowBackgroundForSelectedTab()
