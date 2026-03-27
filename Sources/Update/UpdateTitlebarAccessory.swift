@@ -918,7 +918,13 @@ final class TitlebarControlsAccessoryViewController: NSTitlebarAccessoryViewCont
 
     private func applyWorkspaceTitlebarVisibility() {
         let shouldShow = showsWorkspaceTitlebar
+        // Use both self.isHidden (for AppKit space management) and
+        // view.alphaValue (for visual hiding). Don't zero frames or
+        // preferredContentSize so fittingSize can still return valid
+        // values when switching back to standard mode.
         self.isHidden = !shouldShow
+        view.alphaValue = shouldShow ? 1 : 0
+        view.isHidden = !shouldShow
     }
 
     func toggleNotificationsPopover(animated: Bool = true, externalAnchor: NSView? = nil) {
