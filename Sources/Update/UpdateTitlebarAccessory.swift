@@ -821,7 +821,9 @@ final class TitlebarControlsAccessoryViewController: NSTitlebarAccessoryViewCont
             queue: .main
         ) { [weak self] _ in
             self?.applyWorkspaceTitlebarVisibility()
-            self?.scheduleSizeUpdate(invalidateFittingSize: true)
+            if self?.showsWorkspaceTitlebar == true {
+                self?.restoreSizeAfterMinimalMode()
+            }
         }
 
         applyWorkspaceTitlebarVisibility()
@@ -918,13 +920,25 @@ final class TitlebarControlsAccessoryViewController: NSTitlebarAccessoryViewCont
 
     private func applyWorkspaceTitlebarVisibility() {
         let shouldShow = showsWorkspaceTitlebar
-        // Use both self.isHidden (for AppKit space management) and
-        // view.alphaValue (for visual hiding). Don't zero frames or
-        // preferredContentSize so fittingSize can still return valid
-        // values when switching back to standard mode.
         self.isHidden = !shouldShow
-        view.alphaValue = shouldShow ? 1 : 0
         view.isHidden = !shouldShow
+        view.alphaValue = shouldShow ? 1 : 0
+        if !shouldShow {
+            preferredContentSize = .zero
+        }
+    }
+
+    /// Restore the accessory size after it was zeroed in minimal mode.
+    /// Seeds the hosting view with a non-zero frame so fittingSize returns
+    /// valid values even after the view was collapsed.
+    private func restoreSizeAfterMinimalMode() {
+        guard showsWorkspaceTitlebar else { return }
+        let seed = cachedFittingSize ?? NSSize(width: 200, height: 28)
+        if hostingView.frame.size == .zero || containerView.frame.size == .zero {
+            containerView.frame.size = seed
+            hostingView.frame.size = seed
+        }
+        scheduleSizeUpdate(invalidateFittingSize: true)
     }
 
     func toggleNotificationsPopover(animated: Bool = true, externalAnchor: NSView? = nil) {

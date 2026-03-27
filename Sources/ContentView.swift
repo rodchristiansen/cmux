@@ -7,8 +7,6 @@ import ObjectiveC
 import UniformTypeIdentifiers
 import WebKit
 
-private var _minimalModeDoubleClickMonitorKey: UInt8 = 0
-
 private extension Color {
     init?(hex: String) {
         let hex = hex.trimmingCharacters(in: .init(charactersIn: "#"))
@@ -2647,27 +2645,6 @@ struct ContentView: View {
                 .background(Color.clear)
         )
 
-        // In minimal mode, intercept double-clicks in the tab bar area and perform
-        // the standard titlebar action (zoom/minimize) instead of letting Bonsplit
-        // create a new tab. This monitor is installed via a .background modifier
-        // which SwiftUI processes after the content tree, so it's added after
-        // Bonsplit's monitors. NSEvent local monitors are LIFO, so ours runs first.
-        view = AnyView(view.background(
-            WindowAccessor { window in
-                guard objc_getAssociatedObject(window, &_minimalModeDoubleClickMonitorKey) == nil else { return }
-                let monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
-                    guard event.clickCount >= 2,
-                          WorkspacePresentationModeSettings.isMinimal(),
-                          let eventWindow = event.window else { return event }
-                    let distFromTop = eventWindow.frame.height - event.locationInWindow.y
-                    guard distFromTop <= 40 else { return event }
-                    performStandardTitlebarDoubleClick(window: eventWindow)
-                    return nil
-                }
-                objc_setAssociatedObject(window, &_minimalModeDoubleClickMonitorKey, monitor, .OBJC_ASSOCIATION_RETAIN)
-            }
-            .frame(width: 0, height: 0)
-        ))
         view = AnyView(view.onAppear {
             tabManager.applyWindowBackgroundForSelectedTab()
             reconcileMountedWorkspaceIds()
