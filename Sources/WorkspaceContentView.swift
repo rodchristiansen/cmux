@@ -394,9 +394,6 @@ struct WorkspaceContentView: View {
 
     private func syncSplitButtonsOnHover() {
         let onHover = isMinimalMode
-        #if DEBUG
-        dlog("minimal.splitButtonsOnHover sync isMinimal=\(isMinimalMode) onHover=\(onHover) current=\(workspace.bonsplitController.configuration.appearance.splitButtonsOnHover)")
-        #endif
         if workspace.bonsplitController.configuration.appearance.splitButtonsOnHover != onHover {
             workspace.bonsplitController.configuration.appearance.splitButtonsOnHover = onHover
         }
