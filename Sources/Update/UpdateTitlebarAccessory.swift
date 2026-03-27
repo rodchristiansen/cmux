@@ -1271,6 +1271,13 @@ final class UpdateTitlebarAccessoryController {
         guard currentMode != lastKnownPresentationMode else { return }
         lastKnownPresentationMode = currentMode
 
+        #if DEBUG
+        let env = ProcessInfo.processInfo.environment
+        if env["CMUX_UI_TEST_MODE"] != "1" {
+            dlog("minimal.titlebarAccessory.modeChange mode=\(currentMode) windows=\(NSApp.windows.count)")
+        }
+        #endif
+
         if currentMode == .minimal {
             attachToExistingWindows()
         } else {
@@ -1279,6 +1286,11 @@ final class UpdateTitlebarAccessoryController {
             // UserDefaults change). The accessory needs a valid toolbar/titlebar
             // area to lay out correctly.
             DispatchQueue.main.async { [weak self] in
+                #if DEBUG
+                if env["CMUX_UI_TEST_MODE"] != "1" {
+                    dlog("minimal.titlebarAccessory.reattachDeferred mode=standard")
+                }
+                #endif
                 self?.attachToExistingWindows()
                 // Hide accessories on fullscreen windows (fullscreen uses SwiftUI
                 // overlay controls instead).
