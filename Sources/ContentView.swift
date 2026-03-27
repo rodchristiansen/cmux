@@ -3126,16 +3126,15 @@ struct ContentView: View {
             removeSidebarResizerPointerMonitor()
         })
 
-        view = AnyView(view.background(WindowAccessor { [sidebarBlendMode, bgGlassEnabled, bgGlassTintHex, bgGlassTintOpacity, workspacePresentationMode] window in
+        view = AnyView(view.background(WindowAccessor { [sidebarBlendMode, bgGlassEnabled, bgGlassTintHex, bgGlassTintOpacity] window in
             window.identifier = NSUserInterfaceItemIdentifier(windowIdentifier)
             window.titlebarAppearsTransparent = true
-            let isMinimal = WorkspacePresentationModeSettings.mode(for: workspacePresentationMode) == .minimal
-            // Do not make the entire background draggable; it interferes with
-            // drag gestures like tab reordering. In minimal mode, enable
-            // isMovable so the native titlebar area (overlapping the tab bar via
-            // negative padding) handles drag-to-move from the sidebar strip.
+            // Keep window immovable; the sidebar's WindowDragHandleView handles
+            // drag-to-move via performDrag with temporary movable override.
+            // isMovableByWindowBackground=true breaks tab reordering, and
+            // isMovable=true blocks clicks on sidebar buttons in minimal mode.
             window.isMovableByWindowBackground = false
-            window.isMovable = isMinimal
+            window.isMovable = false
             window.styleMask.insert(.fullSizeContentView)
 
             // Track this window for fullscreen notifications
