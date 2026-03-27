@@ -1278,7 +1278,7 @@ final class UpdateTitlebarAccessoryController {
             // is re-added first (WindowToolbarController also observes the same
             // UserDefaults change). The accessory needs a valid toolbar/titlebar
             // area to lay out correctly.
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.attachToExistingWindows()
                 // Hide accessories on fullscreen windows (fullscreen uses SwiftUI
                 // overlay controls instead).

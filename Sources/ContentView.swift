@@ -2653,7 +2653,7 @@ struct ContentView: View {
                           WorkspacePresentationModeSettings.isMinimal(),
                           let eventWindow = event.window else { return event }
                     let distFromTop = eventWindow.frame.height - event.locationInWindow.y
-                    guard distFromTop <= 30 else { return event }
+                    guard distFromTop <= 40 else { return event }
                     performStandardTitlebarDoubleClick(window: eventWindow)
                     return nil
                 }
@@ -3130,10 +3130,11 @@ struct ContentView: View {
             window.identifier = NSUserInterfaceItemIdentifier(windowIdentifier)
             window.titlebarAppearsTransparent = true
             let isMinimal = WorkspacePresentationModeSettings.mode(for: workspacePresentationMode) == .minimal
-            // In minimal mode enable background dragging so the tab bar area
-            // acts as a window drag handle. In standard mode keep it disabled
-            // to avoid interfering with sidebar tab reordering.
-            window.isMovableByWindowBackground = isMinimal
+            // Do not make the entire background draggable; it interferes with
+            // drag gestures like tab reordering. In minimal mode, enable
+            // isMovable so the native titlebar area (overlapping the tab bar via
+            // negative padding) handles drag-to-move from the sidebar strip.
+            window.isMovableByWindowBackground = false
             window.isMovable = isMinimal
             window.styleMask.insert(.fullSizeContentView)
 
