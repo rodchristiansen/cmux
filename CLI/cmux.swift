@@ -3808,7 +3808,7 @@ struct CMUXCLI {
         }
     }
 
-    func parseSSHCommandOptions(_ commandArgs: [String], localSocketPath: String = "", remoteRelayPort: Int = 0) throws -> SSHCommandOptions {
+    private func parseSSHCommandOptions(_ commandArgs: [String], localSocketPath: String = "", remoteRelayPort: Int = 0) throws -> SSHCommandOptions {
         var destination: String?
         var port: Int?
         var identityFile: String?
