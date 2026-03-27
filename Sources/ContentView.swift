@@ -2348,8 +2348,6 @@ struct ContentView: View {
     }
 
     private var terminalContent: some View {
-        // In minimal mode with sidebar collapsed, add leading inset for traffic lights.
-        let trafficLightInset: CGFloat = (isMinimalMode && !sidebarState.isVisible) ? titlebarLeadingInset : 0
         let mountedWorkspaceIdSet = Set(mountedWorkspaceIds)
         let mountedWorkspaces = tabManager.tabs.filter { mountedWorkspaceIdSet.contains($0.id) }
         let selectedWorkspaceId = tabManager.selectedTabId
@@ -2372,11 +2370,6 @@ struct ContentView: View {
                     // delay handoff completion and make browser returns feel laggy.
                     let isInputActive = isSelectedWorkspace
                     let portalPriority = isSelectedWorkspace ? 2 : (isRetiringWorkspace ? 1 : 0)
-                    let _ = {
-                        if tab.bonsplitController.configuration.appearance.tabBarLeadingInset != trafficLightInset {
-                            tab.bonsplitController.configuration.appearance.tabBarLeadingInset = trafficLightInset
-                        }
-                    }()
                     WorkspaceContentView(
                         workspace: tab,
                         isWorkspaceVisible: presentation.isPanelVisible,
