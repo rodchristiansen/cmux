@@ -1270,24 +1270,20 @@ final class UpdateTitlebarAccessoryController {
         let currentMode = WorkspacePresentationModeSettings.mode()
         guard currentMode != lastKnownPresentationMode else { return }
         lastKnownPresentationMode = currentMode
+        // Ensure accessories exist on all windows. TitlebarControlsAccessoryViewController
+        // handles its own visibility (hidden in minimal, visible in standard) via its
+        // UserDefaults observer, so we just need to make sure it's attached.
+        attachToExistingWindows()
 
-        if currentMode == .minimal {
-            attachToExistingWindows()
-        } else {
-            // When switching back to standard, the WindowAccessor in ContentView
-            // calls attachUpdateAccessory on re-render (workspacePresentationMode
-            // is in its capture list). Do a deferred safety-net scan with enough
-            // delay for the window identifier and toolbar to be fully set up.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self else { return }
-                self.attachToExistingWindows()
-                let controlsId = self.controlsIdentifier
-                for window in NSApp.windows where window.styleMask.contains(.fullScreen) {
-                    for accessory in window.titlebarAccessoryViewControllers
-                        where accessory.view.identifier == controlsId {
-                        accessory.isHidden = true
-                        accessory.view.alphaValue = 0
-                    }
+        // When switching back to standard mode while a window is in fullscreen,
+        // hide the accessories because fullscreen uses SwiftUI overlay controls.
+        if currentMode == .standard {
+            let controlsId = self.controlsIdentifier
+            for window in NSApp.windows where window.styleMask.contains(.fullScreen) {
+                for accessory in window.titlebarAccessoryViewControllers
+                    where accessory.view.identifier == controlsId {
+                    accessory.isHidden = true
+                    accessory.view.alphaValue = 0
                 }
             }
         }
@@ -1348,10 +1344,9 @@ final class UpdateTitlebarAccessoryController {
 
         pendingAttachRetries.removeValue(forKey: ObjectIdentifier(window))
 
-        guard !WorkspacePresentationModeSettings.isMinimal() else {
-            removeAccessoryIfPresent(from: window)
-            return
-        }
+        // Don't remove accessories in minimal mode. TitlebarControlsAccessoryViewController
+        // hides itself and zeros its frame via its own UserDefaults observer. Keeping it
+        // attached avoids fragile remove/re-add cycles on mode toggle.
 
         guard !attachedWindows.contains(window) else { return }
 
