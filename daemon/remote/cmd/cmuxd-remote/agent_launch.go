@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // runClaudeTeamsRelay implements `cmux claude-teams` on the remote side.
@@ -64,6 +67,17 @@ func runOMORelay(socketPath string, args []string, refreshAddr func() string) in
 	// Resolve the agent executable BEFORE modifying PATH.
 	originalPath := os.Getenv("PATH")
 	opencodePath := findExecutableInPath("opencode", originalPath, shimDir)
+	if opencodePath == "" {
+		fmt.Fprintf(os.Stderr, "cmux omo: opencode not found in PATH\n"+
+			"Install it first:\n  npm install -g opencode-ai\n  # or\n  bun install -g opencode-ai\n")
+		return 1
+	}
+
+	// Ensure oh-my-opencode plugin is set up
+	if err := omoEnsurePlugin(originalPath); err != nil {
+		fmt.Fprintf(os.Stderr, "cmux omo: plugin setup: %v\n", err)
+		return 1
+	}
 
 	focused := getFocusedContext(rc)
 
@@ -99,10 +113,6 @@ func runOMORelay(socketPath string, args []string, refreshAddr func() string) in
 		launchArgs = append([]string{"--port", port}, launchArgs...)
 	}
 
-	if opencodePath == "" {
-		fmt.Fprintf(os.Stderr, "cmux omo: opencode not found in PATH\n")
-		return 1
-	}
 	argv := append([]string{opencodePath}, launchArgs...)
 	execErr := syscall.Exec(opencodePath, argv, os.Environ())
 	fmt.Fprintf(os.Stderr, "cmux omo: exec failed: %v\n", execErr)
@@ -188,8 +198,24 @@ type focusedContext struct {
 }
 
 func getFocusedContext(rc *rpcContext) *focusedContext {
-	payload, err := rc.call("system.identify", nil)
-	if err != nil {
+	// Use a goroutine with timeout so a slow/stale relay doesn't block agent launch.
+	type result struct {
+		payload map[string]any
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		p, e := rc.call("system.identify", nil)
+		ch <- result{p, e}
+	}()
+	var payload map[string]any
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			return nil
+		}
+		payload = r.payload
+	case <-time.After(5 * time.Second):
 		return nil
 	}
 	focused, _ := payload["focused"].(map[string]any)
@@ -285,6 +311,202 @@ func configureAgentEnvironment(cfg agentConfig) {
 	for k, v := range cfg.extraEnv {
 		os.Setenv(k, v)
 	}
+}
+
+// --- oh-my-opencode plugin setup ---
+
+const omoPluginName = "oh-my-opencode"
+
+func omoUserConfigDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "opencode")
+}
+
+func omoShadowConfigDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cmuxterm", "omo-config")
+}
+
+// omoEnsurePlugin creates a shadow config directory that layers the
+// oh-my-opencode plugin on top of the user's opencode config, installs
+// the plugin if needed, and sets OPENCODE_CONFIG_DIR.
+func omoEnsurePlugin(searchPath string) error {
+	userDir := omoUserConfigDir()
+	shadowDir := omoShadowConfigDir()
+
+	if err := os.MkdirAll(shadowDir, 0755); err != nil {
+		return fmt.Errorf("create shadow config dir: %w", err)
+	}
+
+	// Read user's opencode.json, add the plugin, write to shadow dir
+	userJsonPath := filepath.Join(userDir, "opencode.json")
+	shadowJsonPath := filepath.Join(shadowDir, "opencode.json")
+
+	var config map[string]any
+	if data, err := os.ReadFile(userJsonPath); err == nil {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("failed to parse %s: fix the JSON syntax and retry", userJsonPath)
+		}
+	} else {
+		config = map[string]any{}
+	}
+
+	// Add oh-my-opencode to the plugins list
+	var plugins []string
+	if raw, ok := config["plugin"].([]any); ok {
+		for _, p := range raw {
+			if s, ok := p.(string); ok {
+				plugins = append(plugins, s)
+			}
+		}
+	}
+	alreadyPresent := false
+	for _, p := range plugins {
+		if p == omoPluginName || strings.HasPrefix(p, omoPluginName+"@") {
+			alreadyPresent = true
+			break
+		}
+	}
+	if !alreadyPresent {
+		plugins = append(plugins, omoPluginName)
+	}
+	config["plugin"] = plugins
+
+	output, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(shadowJsonPath, output, 0644); err != nil {
+		return err
+	}
+
+	// Symlink node_modules from user config dir
+	shadowNodeModules := filepath.Join(shadowDir, "node_modules")
+	userNodeModules := filepath.Join(userDir, "node_modules")
+	if dirExists(userNodeModules) {
+		target, _ := os.Readlink(shadowNodeModules)
+		if target != userNodeModules {
+			os.Remove(shadowNodeModules)
+			os.Symlink(userNodeModules, shadowNodeModules)
+		}
+	}
+
+	// Symlink package.json and bun.lock
+	for _, filename := range []string{"package.json", "bun.lock"} {
+		userFile := filepath.Join(userDir, filename)
+		shadowFile := filepath.Join(shadowDir, filename)
+		if fileExists(userFile) && !fileExists(shadowFile) {
+			os.Symlink(userFile, shadowFile)
+		}
+	}
+
+	// Symlink oh-my-opencode config files
+	for _, filename := range []string{"oh-my-opencode.json", "oh-my-opencode.jsonc"} {
+		userFile := filepath.Join(userDir, filename)
+		shadowFile := filepath.Join(shadowDir, filename)
+		if fileExists(userFile) && !fileExists(shadowFile) {
+			os.Symlink(userFile, shadowFile)
+		}
+	}
+
+	// Install the plugin if not available
+	pluginPackageDir := filepath.Join(shadowNodeModules, omoPluginName)
+	if !dirExists(pluginPackageDir) {
+		installDir := userDir
+		if !dirExists(userNodeModules) {
+			installDir = shadowDir
+			os.Remove(shadowNodeModules) // Remove symlink so we can install directly
+		}
+		os.MkdirAll(installDir, 0755)
+
+		bunPath := findExecutableInPath("bun", searchPath, "")
+		npmPath := findExecutableInPath("npm", searchPath, "")
+		if bunPath == "" && npmPath == "" {
+			return fmt.Errorf("neither bun nor npm found in PATH. Install oh-my-opencode manually: bunx oh-my-opencode install")
+		}
+
+		fmt.Fprintf(os.Stderr, "Installing oh-my-opencode plugin...\n")
+		var cmd *exec.Cmd
+		if bunPath != "" {
+			cmd = exec.Command(bunPath, "add", omoPluginName)
+		} else {
+			cmd = exec.Command(npmPath, "install", omoPluginName)
+		}
+		cmd.Dir = installDir
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to install oh-my-opencode: %v\nTry manually: npm install -g oh-my-opencode", err)
+		}
+		fmt.Fprintf(os.Stderr, "oh-my-opencode plugin installed\n")
+
+		// Re-create symlink if we installed into user dir
+		if installDir == userDir && !fileExists(shadowNodeModules) {
+			os.Symlink(userNodeModules, shadowNodeModules)
+		}
+	}
+
+	// Configure oh-my-opencode.json with tmux settings
+	omoConfigPath := filepath.Join(shadowDir, "oh-my-opencode.json")
+	var omoConfig map[string]any
+	if data, err := os.ReadFile(omoConfigPath); err == nil {
+		json.Unmarshal(data, &omoConfig)
+	}
+	if omoConfig == nil {
+		// Check if user had one we symlinked
+		userOmoConfig := filepath.Join(userDir, "oh-my-opencode.json")
+		if data, err := os.ReadFile(userOmoConfig); err == nil {
+			json.Unmarshal(data, &omoConfig)
+			os.Remove(omoConfigPath) // Remove symlink so we can write our own copy
+		}
+	}
+	if omoConfig == nil {
+		omoConfig = map[string]any{}
+	}
+
+	tmuxConfig, _ := omoConfig["tmux"].(map[string]any)
+	if tmuxConfig == nil {
+		tmuxConfig = map[string]any{}
+	}
+	needsWrite := false
+	if enabled, _ := tmuxConfig["enabled"].(bool); !enabled {
+		tmuxConfig["enabled"] = true
+		needsWrite = true
+	}
+	if tmuxConfig["main_pane_min_width"] == nil {
+		tmuxConfig["main_pane_min_width"] = 60
+		needsWrite = true
+	}
+	if tmuxConfig["agent_pane_min_width"] == nil {
+		tmuxConfig["agent_pane_min_width"] = 30
+		needsWrite = true
+	}
+	if tmuxConfig["main_pane_size"] == nil {
+		tmuxConfig["main_pane_size"] = 50
+		needsWrite = true
+	}
+	if needsWrite {
+		omoConfig["tmux"] = tmuxConfig
+		// Remove symlink if it exists
+		if target, err := os.Readlink(omoConfigPath); err == nil && target != "" {
+			os.Remove(omoConfigPath)
+		}
+		data, _ := json.MarshalIndent(omoConfig, "", "  ")
+		os.WriteFile(omoConfigPath, data, 0644)
+	}
+
+	os.Setenv("OPENCODE_CONFIG_DIR", shadowDir)
+	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // --- Executable resolution ---

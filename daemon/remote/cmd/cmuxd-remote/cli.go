@@ -710,6 +710,7 @@ func socketRoundTripV2(socketPath, method string, params map[string]any, refresh
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadString('\n')
 	if err != nil {
