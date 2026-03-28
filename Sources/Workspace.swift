@@ -7384,7 +7384,13 @@ final class Workspace: Identifiable, ObservableObject {
             preferredPanelId: preferredPanelId,
             inPane: preferredPaneId
         ) {
-            guard let sourceSurface = terminalPanel.surface.surface else { continue }
+            // Pin the panel and its TerminalSurface wrapper for the duration of
+            // this iteration. The raw ghostty_surface_t extracted below is owned
+            // by `surface` (the TerminalSurface) — ARC must not release it while
+            // ghostty_surface_inherited_config or cmuxCurrentSurfaceFontSizePoints
+            // is still reading through the pointer.
+            let surface = terminalPanel.surface
+            guard let sourceSurface = surface.surface else { continue }
             var config = cmuxInheritedSurfaceConfig(
                 sourceSurface: sourceSurface,
                 context: GHOSTTY_SURFACE_CONTEXT_SPLIT
@@ -7397,6 +7403,8 @@ final class Workspace: Identifiable, ObservableObject {
                 config.fontSize = rootedFontPoints
                 terminalInheritanceFontPointsByPanelId[terminalPanel.id] = rootedFontPoints
             }
+            // Prevent ARC from releasing panel/surface before the C calls above complete.
+            withExtendedLifetime((terminalPanel, surface)) {}
             rememberTerminalConfigInheritanceSource(terminalPanel)
             if config.fontSize > 0 {
                 lastTerminalConfigInheritanceFontPoints = config.fontSize

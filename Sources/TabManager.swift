@@ -1208,14 +1208,19 @@ class TabManager: ObservableObject {
         placementOverride: NewWorkspacePlacement? = nil,
         autoWelcomeIfNeeded: Bool = true
     ) -> Workspace {
-        // Extract Workspace-dependent data through `self` BEFORE capturing locals.
-        // Accessing through `self` is safe because the method retains `self` for its
-        // duration, keeping all Workspace objects reachable via `self.tabs`. Local copies
-        // of Workspace references (like a `selectedWorkspace` local) are vulnerable to
-        // Xcode 16.x's aggressive ARC optimizer eliding retains through inlined call
-        // chains (workspace → panel → surface → C pointer), causing use-after-free.
-        let preferredDir = preferredWorkingDirectoryForNewTab()
-        let inheritedFontPoints = inheritedTerminalFontPointsForNewWorkspace()
+        // Pin the selected workspace for the entire pre-extraction phase.
+        // Reading selectedWorkspace multiple times (via helper methods) creates separate
+        // temporary references. With aggressive ARC + whole-module inlining (Xcode 16+),
+        // these can be released before inlined callees finish reading @Published properties
+        // (panels, currentDirectory, panelDirectories) on the workspace, causing a
+        // use-after-free crash in PublishedSubject.value.getter / _platform_memmove.
+        // Extracting once and pinning with withExtendedLifetime prevents this.
+        let sourceWorkspace = selectedWorkspace
+        let (preferredDir, inheritedFontPoints): (String?, Float?) = withExtendedLifetime(sourceWorkspace) {
+            let dir = preferredWorkingDirectoryForNewTab(workspace: sourceWorkspace)
+            let font = inheritedTerminalFontPointsForNewWorkspace(workspace: sourceWorkspace)
+            return (dir, font)
+        }
 
         let capturedTabs = tabs
         let capturedSelectedTabId = selectedTabId
@@ -2288,19 +2293,31 @@ class TabManager: ObservableObject {
     func inheritedTerminalConfigForNewWorkspace(
         workspace: Workspace?
     ) -> CmuxSurfaceConfigTemplate? {
-        if let panel = terminalPanelForWorkspaceConfigInheritanceSource(workspace: workspace),
-           let sourceSurface = panel.surface.surface {
-            return cmuxInheritedSurfaceConfig(
-                sourceSurface: sourceSurface,
-                context: GHOSTTY_SURFACE_CONTEXT_TAB
-            )
+        guard let workspace else { return nil }
+        // Pin the workspace for the duration. The panel and its TerminalSurface
+        // wrapper must also stay alive while we hold the raw ghostty_surface_t
+        // pointer extracted from panel.surface.surface, since that C pointer is
+        // owned by the TerminalSurface and freed when it deallocates.
+        return withExtendedLifetime(workspace) {
+            if let panel = terminalPanelForWorkspaceConfigInheritanceSource(workspace: workspace) {
+                let surface = panel.surface
+                if let sourceSurface = surface.surface {
+                    let config = cmuxInheritedSurfaceConfig(
+                        sourceSurface: sourceSurface,
+                        context: GHOSTTY_SURFACE_CONTEXT_TAB
+                    )
+                    // Prevent ARC from releasing panel/surface before the C call above completes.
+                    withExtendedLifetime((panel, surface)) {}
+                    return config
+                }
+            }
+            if let fallbackFontPoints = workspace.lastRememberedTerminalFontPointsForConfigInheritance() {
+                var config = CmuxSurfaceConfigTemplate()
+                config.fontSize = fallbackFontPoints
+                return config
+            }
+            return nil as CmuxSurfaceConfigTemplate?
         }
-        if let fallbackFontPoints = workspace?.lastRememberedTerminalFontPointsForConfigInheritance() {
-            var config = CmuxSurfaceConfigTemplate()
-            config.fontSize = fallbackFontPoints
-            return config
-        }
-        return nil
     }
 
     private func inheritedTerminalFontPointsForNewWorkspace() -> Float? {
