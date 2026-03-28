@@ -712,6 +712,9 @@ final class NiriCanvasView: NSView {
         nlog("completeDrag srcPanel=\(sourcePi) srcTab=\(sourceTab) target=\(currentDropTarget.map { String(describing: $0.kind) } ?? "nil")")
         guard let target = currentDropTarget else { return }
 
+        // Capture scroll position before drop to stabilize viewport
+        let scrollBefore = scrollOffset
+
         switch target.kind {
         case .inTabBar(let targetLive, let insertIdx):
             let live = liveIndices
@@ -791,6 +794,9 @@ final class NiriCanvasView: NSView {
         }
 
         layoutStrip()
+        // Keep viewport stable: don't scroll unless the focused panel is off-screen
+        scrollOffset = scrollBefore
+        targetOffset = scrollBefore
         scrollToReveal()
         focusCurrentTerminal()
     }
@@ -1379,8 +1385,10 @@ final class NiriCanvasView: NSView {
                 let speed = proximity * (2 + 18 * accel)  // 2-20 px/frame
                 targetOffset += direction * speed
                 scrollOffset += direction * speed
-                targetOffset = max(0, targetOffset)
-                scrollOffset = max(0, scrollOffset)
+                // Clamp: can't scroll past the last panel's right edge
+                let maxScroll = max(0, stripX(forLive: max(0, liveCount - 1)) + pw(for: panels[liveIndices.last!.panel]) - maxW + peekWidth)
+                targetOffset = max(0, min(maxScroll, targetOffset))
+                scrollOffset = max(0, min(maxScroll, scrollOffset))
                 layoutStrip()
                 // Update drop target & overlay to follow scrolled content
                 updateDropTarget(at: pt, srcPi: dragSrcPi, srcTab: dragSrcTab, srcTabCount: dragSrcTabCount)
