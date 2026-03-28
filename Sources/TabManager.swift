@@ -1155,7 +1155,7 @@ class TabManager: ObservableObject {
         title: String,
         workingDirectory: String?,
         portOrdinal: Int,
-        configTemplate: CmuxSurfaceConfigTemplate?,
+        configTemplate: ghostty_surface_config_s?,
         initialTerminalCommand: String?,
         initialTerminalEnvironment: [String: String]
     ) -> Workspace {
@@ -2292,7 +2292,7 @@ class TabManager: ObservableObject {
         return candidates.first
     }
 
-    private func inheritedTerminalConfigForNewWorkspace() -> CmuxSurfaceConfigTemplate? {
+    private func inheritedTerminalConfigForNewWorkspace() -> ghostty_surface_config_s? {
         inheritedTerminalConfigForNewWorkspace(workspace: selectedWorkspace)
     }
 
@@ -2315,12 +2315,12 @@ class TabManager: ObservableObject {
 
     func inheritedTerminalConfigForNewWorkspace(
         workspace: Workspace?
-    ) -> CmuxSurfaceConfigTemplate? {
+    ) -> ghostty_surface_config_s? {
         guard let fontPoints = cachedInheritedTerminalFontPointsForNewWorkspace(workspace: workspace) else {
             return nil
         }
-        var config = CmuxSurfaceConfigTemplate()
-        config.fontSize = fontPoints
+        var config = ghostty_surface_config_new()
+        config.font_size = fontPoints
         return config
     }
 
@@ -2336,14 +2336,15 @@ class TabManager: ObservableObject {
 
     private func workspaceCreationConfigTemplate(
         inheritedTerminalFontPoints: Float?
-    ) -> CmuxSurfaceConfigTemplate? {
+    ) -> ghostty_surface_config_s? {
         guard let inheritedTerminalFontPoints, inheritedTerminalFontPoints > 0 else {
             return nil
         }
-        // Rebuild a clean Swift-owned template instead of carrying over any pointer-backed
-        // inherited config state from the source workspace.
-        var config = CmuxSurfaceConfigTemplate()
-        config.fontSize = inheritedTerminalFontPoints
+        // ghostty_surface_config_s can carry raw C pointers owned by the source surface.
+        // New workspace creation only needs the inherited zoom level, so rebuild a clean
+        // config instead of snapshotting pointer-backed fields across workspace creation.
+        var config = ghostty_surface_config_new()
+        config.font_size = inheritedTerminalFontPoints
         return config
     }
 
