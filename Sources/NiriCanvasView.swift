@@ -479,8 +479,7 @@ final class NiriCanvasView: NSView {
 
     private var dragLayer: CALayer?
     private var currentDropTarget: DropTarget?
-    private var autoScrolledLeft = false
-    private var autoScrolledRight = false
+    // (auto-scroll vars removed — using linear scroll now)
     var suppressHitTestFocus = false  // true during drag to prevent hitTest from stealing focus
 
     enum DropEdge: Equatable { case left, right, top, bottom }
@@ -529,7 +528,7 @@ final class NiriCanvasView: NSView {
 
         let mousePt = convert(event.locationInWindow, from: nil)
         dl.position = CGPoint(x: mousePt.x, y: mousePt.y)
-        autoScrolledLeft = false; autoScrolledRight = false
+        // (linear scroll resets each frame, no debounce needed)
         suppressHitTestFocus = true
 
         // Tracking loop: mouse events + keyboard (Escape to cancel)
@@ -550,30 +549,19 @@ final class NiriCanvasView: NSView {
             dl.position = CGPoint(x: pt.x, y: pt.y)
             CATransaction.commit()
 
-            // Auto-scroll: only when cursor is beyond all visible panels.
-            // If you're over any panel, you have a drop target — no scroll needed.
-            let live = liveIndices
-            if !live.isEmpty {
-                let firstVisible = panels[live.first!.panel].containerView.frame
-                let lastVisible = panels[live.last!.panel].containerView.frame
-
-                if pt.x < firstVisible.minX && !autoScrolledLeft {
-                    // Past the left edge of all visible panels
-                    let prevIdx = max(0, focusedIndex - 1)
-                    if prevIdx < live.count {
-                        ensureVisible(panelStart: stripX(forLive: prevIdx), panelWidth: pw(for: panels[live[prevIdx].panel]))
-                    }
-                    autoScrolledLeft = true; autoScrolledRight = false
-                } else if pt.x > lastVisible.maxX && !autoScrolledRight {
-                    // Past the right edge of all visible panels
-                    let nextIdx = min(liveCount - 1, focusedIndex + 1)
-                    if nextIdx < live.count {
-                        ensureVisible(panelStart: stripX(forLive: nextIdx), panelWidth: pw(for: panels[live[nextIdx].panel]))
-                    }
-                    autoScrolledRight = true; autoScrolledLeft = false
-                } else if pt.x >= firstVisible.minX && pt.x <= lastVisible.maxX {
-                    autoScrolledLeft = false; autoScrolledRight = false
-                }
+            // Linear scroll when dragging near edges of the canvas.
+            // Speed increases as cursor gets closer to the edge.
+            let scrollZone: CGFloat = 80
+            if pt.x < scrollZone {
+                let speed = (scrollZone - pt.x) / scrollZone * 12  // 0-12 px per frame
+                targetOffset = max(0, targetOffset - speed)
+                scrollOffset = max(0, scrollOffset - speed)
+                layoutStrip()
+            } else if pt.x > bounds.width - scrollZone {
+                let speed = (pt.x - (bounds.width - scrollZone)) / scrollZone * 12
+                targetOffset += speed
+                scrollOffset += speed
+                layoutStrip()
             }
 
             // Update drop target
