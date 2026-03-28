@@ -38,18 +38,36 @@ final class NiriTabBarView: NSView {
     override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { true }
 
-    /// Minimum width to fit tab content (title + number hint + padding)
-    private func minContentWidth(for tab: Tab, index: Int) -> CGFloat {
+    private let maxTabW: CGFloat = 150
+    private let minTabW: CGFloat = 40
+    var tabScrollOffset: CGFloat = 0
+
+    /// Width for a specific tab based on its content
+    private func widthForTab(_ tab: Tab, index: Int) -> CGFloat {
         let title = tab.title.isEmpty ? "Shell" : String(tab.title.prefix(20))
-        let titleW = measureText(title, fontSize: 11, fontName: "Helvetica Neue")
-        let hintW: CGFloat = index < 9 ? measureText("\(index + 1)", fontSize: 9, fontName: "Menlo") + 8 : 0
-        return titleW + hintW + 24 // 10px left pad + 6px gap + 8px right pad
+        let titleW = measureText(title, fontSize: 11, fontName: ".AppleSystemUIFont")
+        return min(maxTabW, max(minTabW, titleW + 20))  // 10px padding each side
     }
 
+    /// Total width of all tabs
+    private var totalTabsWidth: CGFloat {
+        tabs.enumerated().reduce(0) { $0 + widthForTab($1.element, index: $1.offset) }
+    }
+
+    /// Whether tabs overflow the bar (need scrolling)
+    var tabsOverflow: Bool { totalTabsWidth > bounds.width }
+
+    /// X position of a tab's left edge (in scrollable content space)
+    private func tabX(at index: Int) -> CGFloat {
+        var x: CGFloat = 0
+        for i in 0..<min(index, tabs.count) { x += widthForTab(tabs[i], index: i) }
+        return x
+    }
+
+    /// Legacy: uniform tab width (used by some callers)
     var tabWidth: CGFloat {
         guard !tabs.isEmpty else { return 0 }
-        let minW = tabs.enumerated().map { minContentWidth(for: $1, index: $0) }.max() ?? 48
-        return max(minW, min(220, bounds.width / CGFloat(max(1, tabs.count))))
+        return min(maxTabW, bounds.width / CGFloat(tabs.count))
     }
 
     override func updateTrackingAreas() {
@@ -67,14 +85,25 @@ final class NiriTabBarView: NSView {
 
     func tabIndex(at point: NSPoint) -> Int? {
         guard !tabs.isEmpty else { return nil }
-        let idx = Int(point.x / tabWidth)
-        return idx >= 0 && idx < tabs.count ? idx : nil
+        let x = point.x + tabScrollOffset
+        var accum: CGFloat = 0
+        for (i, tab) in tabs.enumerated() {
+            let w = widthForTab(tab, index: i)
+            if x >= accum && x < accum + w { return i }
+            accum += w
+        }
+        return nil
     }
 
-    /// Insertion index (0...tabs.count) for drop indicator
     func insertionIndex(at point: NSPoint) -> Int {
-        let raw = point.x / tabWidth
-        return max(0, min(tabs.count, Int(raw + 0.5)))
+        let x = point.x + tabScrollOffset
+        var accum: CGFloat = 0
+        for (i, tab) in tabs.enumerated() {
+            let w = widthForTab(tab, index: i)
+            if x < accum + w / 2 { return i }
+            accum += w
+        }
+        return tabs.count
     }
 
     // MARK: - Mouse: click-to-select + drag-start detection
@@ -102,6 +131,16 @@ final class NiriTabBarView: NSView {
         mouseDownIdx = nil
     }
 
+    override func scrollWheel(with event: NSEvent) {
+        if tabsOverflow {
+            let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
+            tabScrollOffset -= delta
+            tabScrollOffset = max(0, min(totalTabsWidth - bounds.width, tabScrollOffset))
+            needsDisplay = true
+        }
+        // Always consume — don't let scroll pass through to terminal
+    }
+
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
@@ -112,22 +151,35 @@ final class NiriTabBarView: NSView {
         ctx.fill(bounds)
 
         guard !tabs.isEmpty else { return }
-        let tw = tabWidth
-        guard tw > 1 else { return }
 
-        // Hover = slightly lighter than bar bg
         let hoverBg = CGColor(gray: 0.19, alpha: 1)
-        let accent = CGColor(srgbRed: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
-        let sep = CGColor(gray: 0.3, alpha: 1)
+        let sep = CGColor(gray: 0.3, alpha: 0.5)
 
+        // Ensure selected tab is scrolled into view
+        if tabsOverflow {
+            let selX = tabX(at: selectedIndex)
+            let selW = widthForTab(tabs[selectedIndex], index: selectedIndex)
+            if selX < tabScrollOffset { tabScrollOffset = selX }
+            else if selX + selW > tabScrollOffset + bounds.width { tabScrollOffset = selX + selW - bounds.width }
+            tabScrollOffset = max(0, min(totalTabsWidth - bounds.width, tabScrollOffset))
+        } else {
+            tabScrollOffset = 0
+        }
+
+        ctx.saveGState()
+        ctx.clip(to: bounds)
+
+        var xCursor: CGFloat = -tabScrollOffset
         for (i, tab) in tabs.enumerated() {
-            let x = CGFloat(i) * tw
+            let tw = widthForTab(tab, index: i)
+            let x = xCursor
+
+            // Skip if off-screen
+            if x + tw < 0 || x > bounds.width { xCursor += tw; continue }
 
             if i == selectedIndex {
                 ctx.setFillColor(selectedTabColor)
                 ctx.fill(CGRect(x: x, y: 0, width: tw, height: bounds.height))
-                ctx.setFillColor(accent)
-                ctx.fill(CGRect(x: x, y: 0, width: tw, height: 2))
             } else if hoveredIndex == i && mouseDownIdx == nil {
                 ctx.setFillColor(hoverBg)
                 ctx.fill(CGRect(x: x, y: 0, width: tw, height: bounds.height))
@@ -138,26 +190,21 @@ final class NiriTabBarView: NSView {
                 ctx.fill(CGRect(x: x, y: 4, width: 1, height: bounds.height - 8))
             }
 
-            // Title
             let title = tab.title.isEmpty ? "Shell" : String(tab.title.prefix(20))
             let alpha: CGFloat = i == selectedIndex ? 0.9 : 0.5
             drawText(ctx: ctx, text: title, x: x + 10, centerY: bounds.height / 2,
-                     fontSize: 11, fontName: "Helvetica Neue", alpha: alpha)
+                     fontSize: 11, fontName: ".AppleSystemUIFont", alpha: alpha)
 
-            // Tab number hint
-            if i < 9 {
-                let hintW = measureText("\(i + 1)", fontSize: 9, fontName: "Menlo")
-                drawText(ctx: ctx, text: "\(i + 1)", x: x + tw - hintW - 8, centerY: bounds.height / 2,
-                         fontSize: 9, fontName: "Menlo", alpha: 0.25)
-            }
+            xCursor += tw
         }
+        ctx.restoreGState()
 
         // No bottom border (removed)
 
         // Drop indicator (blue line)
         if let dropIdx = dropIndicatorIndex {
-            let dropX = CGFloat(dropIdx) * tw
-            ctx.setFillColor(accent)
+            let dropX = tabX(at: dropIdx) - tabScrollOffset
+            ctx.setFillColor(CGColor(srgbRed: 0, green: 0.48, blue: 1, alpha: 1))
             ctx.fill(CGRect(x: dropX - 1.5, y: 4, width: 3, height: bounds.height - 8))
         }
     }
@@ -695,7 +742,7 @@ final class NiriCanvasView: NSView {
     // MARK: - Geometry
 
     private var maxW: CGFloat { bounds.width - peekWidth * 2 - panelGap * 2 - panelGap }
-    func pw(for p: Panel) -> CGFloat { max(300, maxW * p.currentWidth) }
+    func pw(for p: Panel) -> CGFloat { max(300, (maxW - panelGap) * p.currentWidth) }
 
     /// Returns the live panel index whose container frame contains the given point (in canvas coords).
     func liveIndexAtPoint(_ pt: NSPoint) -> Int? {
@@ -973,7 +1020,20 @@ final class NiriCanvasView: NSView {
         updateTabBarColors()
         focusedIndex += 1
         layoutStrip()
+        logPanelPositions("after splitRight")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.focusCurrentTerminal() }
+    }
+
+    private func logPanelPositions(_ context: String) {
+        let live = liveIndices
+        var parts: [String] = []
+        for (li, entry) in live.enumerated() {
+            let p = panels[entry.panel]
+            let x = p.containerView.frame.minX
+            let w = p.containerView.frame.width
+            parts.append("\(li):x=\(String(format:"%.1f",x)) w=\(String(format:"%.1f",w))")
+        }
+        nlog("positions [\(context)] scroll=\(String(format:"%.1f",scrollOffset)) \(parts.joined(separator: " | "))")
     }
 
     // MARK: - Close / Add
@@ -1004,8 +1064,9 @@ final class NiriCanvasView: NSView {
             } else {
                 focusedIndex = 0
             }
-            scrollToReveal()
             layoutStrip()
+            logPanelPositions("after close-column")
+            scrollToReveal()
             focusCurrentTerminal()
         } else {
             let idx = panels[pi].activeTab
