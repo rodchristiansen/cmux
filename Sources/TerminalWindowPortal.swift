@@ -699,6 +699,10 @@ final class WindowTerminalPortal: NSObject {
         }
     }
 
+    fileprivate func schedulePostLayoutGeometrySynchronize() {
+        scheduleExternalGeometrySynchronize()
+    }
+
     private func synchronizeLayoutHierarchy() {
         installedContainerView?.layoutSubtreeIfNeeded()
         installedReferenceView?.layoutSubtreeIfNeeded()
@@ -1831,6 +1835,10 @@ enum TerminalWindowPortalRegistry {
 
     static func scheduleExternalGeometrySynchronize(for window: NSWindow) {
         existingPortal(for: window)?.scheduleExternalGeometrySynchronize()
+    }
+
+    static func schedulePostLayoutGeometrySynchronize(for window: NSWindow) {
+        existingPortal(for: window)?.schedulePostLayoutGeometrySynchronize()
     }
 
     static func beginInteractiveGeometryResize() {
