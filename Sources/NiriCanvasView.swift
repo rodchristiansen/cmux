@@ -633,10 +633,15 @@ final class NiriCanvasView: NSView {
             let localX = (pt.x - termRect.minX) / termRect.width
             let localY = (pt.y - termRect.minY) / termRect.height
             let edgeRatio: CGFloat = 0.25
+            // Larger drop zone on outer edges (first panel left, last panel right)
+            let isFirstPanel = li == 0
+            let isLastPanel = li == live.count - 1
+            let leftRatio: CGFloat = isFirstPanel ? 0.4 : edgeRatio
+            let rightRatio: CGFloat = isLastPanel ? 0.4 : edgeRatio
 
             let edge: DropEdge?
-            if localX < edgeRatio { edge = .left }
-            else if localX > 1 - edgeRatio { edge = .right }
+            if localX < leftRatio { edge = .left }
+            else if localX > 1 - rightRatio { edge = .right }
             else if localY > 1 - edgeRatio { edge = .top }
             else if localY < edgeRatio { edge = .bottom }
             else { edge = nil }
