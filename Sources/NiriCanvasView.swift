@@ -16,13 +16,18 @@ final class NiriTabBarView: NSView {
     /// Called when user starts dragging a tab. Canvas takes over from here.
     var onDragStart: ((Int, NSEvent) -> Void)?
 
-    static let height: CGFloat = 30
+    static let height: CGFloat = 24
     private var hoveredIndex: Int? { didSet { if oldValue != hoveredIndex { needsDisplay = true } } }
     /// Set by canvas during drag to show drop indicator
     var dropIndicatorIndex: Int? { didSet { if oldValue != dropIndicatorIndex { needsDisplay = true } } }
     private var trackingArea: NSTrackingArea?
     private var mouseDownIdx: Int?
     private var mouseDownX: CGFloat = 0
+
+    /// Background color for the bar (darkened terminal bg)
+    var barBackgroundColor: CGColor = CGColor(gray: 0.15, alpha: 1) { didSet { needsDisplay = true } }
+    /// Background color for the selected tab (terminal bg)
+    var selectedTabColor: CGColor = CGColor(gray: 0.22, alpha: 1) { didSet { needsDisplay = true } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -33,8 +38,18 @@ final class NiriTabBarView: NSView {
     override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { true }
 
+    /// Minimum width to fit tab content (title + number hint + padding)
+    private func minContentWidth(for tab: Tab, index: Int) -> CGFloat {
+        let title = tab.title.isEmpty ? "Shell" : String(tab.title.prefix(20))
+        let titleW = measureText(title, fontSize: 11, fontName: "Helvetica Neue")
+        let hintW: CGFloat = index < 9 ? measureText("\(index + 1)", fontSize: 9, fontName: "Menlo") + 8 : 0
+        return titleW + hintW + 24 // 10px left pad + 6px gap + 8px right pad
+    }
+
     var tabWidth: CGFloat {
-        min(220, max(48, bounds.width / CGFloat(max(1, tabs.count))))
+        guard !tabs.isEmpty else { return 0 }
+        let minW = tabs.enumerated().map { minContentWidth(for: $1, index: $0) }.max() ?? 48
+        return max(minW, min(220, bounds.width / CGFloat(max(1, tabs.count))))
     }
 
     override func updateTrackingAreas() {
@@ -93,14 +108,14 @@ final class NiriTabBarView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         guard bounds.width > 1, bounds.height > 1 else { return }
 
-        ctx.setFillColor(CGColor(gray: 0.15, alpha: 1))
+        ctx.setFillColor(barBackgroundColor)
         ctx.fill(bounds)
 
         guard !tabs.isEmpty else { return }
         let tw = tabWidth
         guard tw > 1 else { return }
 
-        let activeBg = CGColor(gray: 0.22, alpha: 1)
+        // Hover = slightly lighter than bar bg
         let hoverBg = CGColor(gray: 0.19, alpha: 1)
         let accent = CGColor(srgbRed: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
         let sep = CGColor(gray: 0.3, alpha: 1)
@@ -109,7 +124,7 @@ final class NiriTabBarView: NSView {
             let x = CGFloat(i) * tw
 
             if i == selectedIndex {
-                ctx.setFillColor(activeBg)
+                ctx.setFillColor(selectedTabColor)
                 ctx.fill(CGRect(x: x, y: 0, width: tw, height: bounds.height))
                 ctx.setFillColor(accent)
                 ctx.fill(CGRect(x: x, y: 0, width: tw, height: 2))
@@ -120,7 +135,7 @@ final class NiriTabBarView: NSView {
 
             if i > 0 {
                 ctx.setFillColor(sep)
-                ctx.fill(CGRect(x: x, y: 5, width: 1, height: bounds.height - 10))
+                ctx.fill(CGRect(x: x, y: 4, width: 1, height: bounds.height - 8))
             }
 
             // Title
@@ -137,9 +152,7 @@ final class NiriTabBarView: NSView {
             }
         }
 
-        // Bottom border
-        ctx.setFillColor(sep)
-        ctx.fill(CGRect(x: 0, y: 0, width: bounds.width, height: 1))
+        // No bottom border (removed)
 
         // Drop indicator (blue line)
         if let dropIdx = dropIndicatorIndex {
@@ -189,6 +202,14 @@ final class NiriCanvasView: NSView {
         var targetWidth: CGFloat = 0.67
         var tabBar: NiriTabBarView
         var containerView: NSView
+        /// Tracks titles per surface ID (set via ghostty notification)
+        var tabTitles: [UUID: String] = [:]
+        /// ID of the panel this was split from (for instant close width absorption)
+        var splitPartnerId: UUID?
+        /// Width before the split that created this panel
+        var preSplitWidth: CGFloat?
+        /// Unique ID for this panel (for split partner tracking)
+        let panelId: UUID = UUID()
 
         var activeSurface: TerminalSurface? {
             guard activeTab >= 0, activeTab < tabs.count else { return nil }
@@ -196,7 +217,10 @@ final class NiriCanvasView: NSView {
         }
 
         mutating func syncTabBar() {
-            tabBar.tabs = tabs.map { NiriTabBarView.Tab(id: $0.id, title: "Shell") }
+            tabBar.tabs = tabs.map { s in
+                let title = tabTitles[s.id] ?? "Shell"
+                return NiriTabBarView.Tab(id: s.id, title: title)
+            }
             tabBar.selectedIndex = activeTab
         }
     }
@@ -206,12 +230,15 @@ final class NiriCanvasView: NSView {
     private var scrollOffset: CGFloat = 0
     private var targetOffset: CGFloat = 0
     private var displayLink: CVDisplayLink?
+    private var titleObserver: NSObjectProtocol?
+    /// Track last known bounds width for resize detection in tick()
+    private var lastBoundsWidth: CGFloat = 0
 
     /// Blue drop indicator between panels (index = insertion point, 0...panels.count)
     private var panelDropIndex: Int? { didSet { if oldValue != panelDropIndex { needsDisplay = true } } }
 
     private let panelGap: CGFloat = 12
-    private let peekWidth: CGFloat = 60
+    private let peekWidth: CGFloat = 20
     private let springK: CGFloat = 0.16
     let widthPresets: [CGFloat] = [0.33, 0.67, 1.0]
 
@@ -221,10 +248,13 @@ final class NiriCanvasView: NSView {
     private func setup() {
         wantsLayer = true
         layer!.backgroundColor = NSColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 1).cgColor
-        startDisplayLink()
+        // Display link deferred to setSurfaces() to avoid constraint loops on empty canvas
     }
 
-    deinit { if let displayLink { CVDisplayLinkStop(displayLink) } }
+    deinit {
+        if let displayLink { CVDisplayLinkStop(displayLink) }
+        if let obs = titleObserver { NotificationCenter.default.removeObserver(obs) }
+    }
 
     // MARK: - Logging
 
@@ -242,7 +272,58 @@ final class NiriCanvasView: NSView {
         focusedIndex = min(focusedIndex, max(0, liveCount - 1))
         targetOffset = stripX(forLive: focusedIndex)
         scrollOffset = targetOffset
+        if displayLink == nil { startDisplayLink() }
+        updateTabBarColors()
         layoutStrip()
+
+        // Register title observer here (not in setup) to avoid crashes when
+        // the main cmux window instantiates NiriCanvasView without panels.
+        if titleObserver == nil {
+            titleObserver = NotificationCenter.default.addObserver(
+                forName: .ghosttyDidSetTitle,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self else { return }
+                guard let surfaceId = notification.userInfo?[GhosttyNotificationKey.surfaceId] as? UUID,
+                      let title = notification.userInfo?[GhosttyNotificationKey.title] as? String else { return }
+                self.handleTitleChange(surfaceId: surfaceId, title: title)
+            }
+        }
+    }
+
+    private func handleTitleChange(surfaceId: UUID, title: String) {
+        // Extract last path component for cleaner display
+        let displayTitle: String
+        if title.hasPrefix("/") || title.contains("/") {
+            displayTitle = (title as NSString).lastPathComponent
+        } else {
+            displayTitle = title
+        }
+        for i in 0..<panels.count {
+            if panels[i].tabs.contains(where: { $0.id == surfaceId }) {
+                panels[i].tabTitles[surfaceId] = displayTitle
+                panels[i].syncTabBar()
+            }
+        }
+    }
+
+    /// Update tab bar colors from the ghostty theme
+    private func updateTabBarColors() {
+        let termBg = GhosttyApp.shared.defaultBackgroundColor
+        let cgTermBg = termBg.cgColor
+        // Bar bg = terminal bg darkened 15%
+        let barBg: CGColor
+        if let comps = cgTermBg.components, cgTermBg.numberOfComponents >= 3 {
+            let factor: CGFloat = 0.85
+            barBg = CGColor(srgbRed: comps[0] * factor, green: comps[1] * factor, blue: comps[2] * factor, alpha: 1)
+        } else {
+            barBg = CGColor(gray: 0.12, alpha: 1)
+        }
+        for p in panels {
+            p.tabBar.barBackgroundColor = barBg
+            p.tabBar.selectedTabColor = cgTermBg
+        }
     }
 
     /// Container that prioritizes the tab bar for hit testing.
@@ -613,7 +694,7 @@ final class NiriCanvasView: NSView {
 
     // MARK: - Geometry
 
-    private var maxW: CGFloat { bounds.width - peekWidth * 2 - panelGap * 2 }
+    private var maxW: CGFloat { bounds.width - peekWidth * 2 - panelGap * 2 - panelGap }
     func pw(for p: Panel) -> CGFloat { max(300, maxW * p.currentWidth) }
 
     /// Returns the live panel index whose container frame contains the given point (in canvas coords).
@@ -641,7 +722,7 @@ final class NiriCanvasView: NSView {
     private func layoutStrip() {
         let viewH = bounds.height
         let tabH = NiriTabBarView.height
-        let ph = max(300, viewH - 20)
+        let ph = max(300, viewH - 4)
         let termH = ph - tabH
         let topY = (viewH - ph) / 2
         var xCursor: CGFloat = 0; var li = 0
@@ -679,8 +760,6 @@ final class NiriCanvasView: NSView {
         }
     }
 
-    override func layout() { super.layout(); layoutStrip() }
-
     // Top-level hitTest: check ALL tab bars first before anything else.
     // This bypasses the entire subview hitTest chain so ghostty views can't steal the hit.
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -710,7 +789,7 @@ final class NiriCanvasView: NSView {
         let live = liveIndices
         guard !live.isEmpty else { return }
 
-        let ph = max(300, bounds.height - 20)
+        let ph = max(300, bounds.height - 4)
         let topY = (bounds.height - ph) / 2
 
         // Compute the X position for the drop indicator
@@ -748,8 +827,10 @@ final class NiriCanvasView: NSView {
             if ch == "r" { cycleResize(); return true }
         }
         if ctrl && !cmd && !opt {
-            if let n = Int(ch), n >= 1, n <= 9 { switchToTab(n - 1); return true }
+            if ch == "9" { switchToLastTab(); return true }
+            if let n = Int(ch), n >= 1, n <= 8 { switchToTab(n - 1); return true }
         }
+        if cmd && !ctrl && !opt && !shift && ch == "d" { splitRight(); return true }
         if cmd && !ctrl && !opt && !shift && ch == "w" { closeActiveTab(); return true }
         if cmd && !ctrl && !opt && !shift && ch == "t" { addNewTab(); return true }
         if cmd && !ctrl && !opt && !shift && ch == "n" { addNewPanel(); return true }
@@ -787,11 +868,23 @@ final class NiriCanvasView: NSView {
 
     private func ensureVisible(panelStart: CGFloat, panelWidth w: CGFloat) {
         let vp = maxW
+        let peek: CGFloat = 100 // extra peek when scrolling to reveal
         if w >= vp { targetOffset = panelStart }
         else {
-            let minO = panelStart + w - vp; let maxO = panelStart
-            if targetOffset > maxO { targetOffset = maxO }
-            else if targetOffset < minO { targetOffset = minO }
+            // Use 99% visibility threshold (fractional) instead of pixel tolerance.
+            // Check against scrollOffset (current position) not targetOffset.
+            let visibleLeft = max(panelStart, scrollOffset)
+            let visibleRight = min(panelStart + w, scrollOffset + vp)
+            let visibleAmount = max(0, visibleRight - visibleLeft)
+            let fraction = w > 0 ? visibleAmount / w : 1.0
+            if fraction < 0.99 {
+                // Not fully visible, scroll to show it with peek
+                let minO = panelStart + w - vp + peek
+                let maxO = panelStart - peek
+                if scrollOffset > maxO { targetOffset = max(0, maxO) }
+                else if scrollOffset < minO { targetOffset = minO }
+                else { targetOffset = scrollOffset }
+            }
         }
         targetOffset = max(0, targetOffset)
     }
@@ -799,6 +892,7 @@ final class NiriCanvasView: NSView {
     // MARK: - Tab Navigation
 
     func switchToTabPublic(_ idx: Int) { switchToTab(idx) }
+    func switchToLastTabPublic() { switchToLastTab() }
 
     private func switchToTab(_ idx: Int) {
         let live = liveIndices
@@ -806,6 +900,25 @@ final class NiriCanvasView: NSView {
         let pi = live[focusedIndex].panel
         guard idx < panels[pi].tabs.count else { return }
         selectTab(idx, inPanel: ObjectIdentifier(panels[pi].containerView))
+    }
+
+    private func switchToLastTab() {
+        let live = liveIndices
+        guard focusedIndex < live.count else { return }
+        let pi = live[focusedIndex].panel
+        guard !panels[pi].tabs.isEmpty else { return }
+        selectTab(panels[pi].tabs.count - 1, inPanel: ObjectIdentifier(panels[pi].containerView))
+    }
+
+    func cycleTab(reverse: Bool) {
+        let live = liveIndices
+        guard focusedIndex < live.count else { return }
+        let pi = live[focusedIndex].panel
+        let count = panels[pi].tabs.count
+        guard count > 1 else { return }
+        let cur = panels[pi].activeTab
+        let next = reverse ? (cur - 1 + count) % count : (cur + 1) % count
+        selectTab(next, inPanel: ObjectIdentifier(panels[pi].containerView))
     }
 
     // MARK: - Resize
@@ -820,6 +933,49 @@ final class NiriCanvasView: NSView {
         scrollToRevealTarget()
     }
 
+    // MARK: - Split
+
+    func splitRight() {
+        nlog("splitRight")
+        let live = liveIndices
+        guard focusedIndex < live.count else { return }
+        let ci = live[focusedIndex].panel
+        guard GhosttyApp.shared.app != nil else { return }
+
+        let originalWidth = panels[ci].targetWidth
+        let originalPx = pw(for: panels[ci])
+        let halfPx = (originalPx - panelGap) / 2.0
+        let halfWidth = halfPx / (maxW - panelGap)
+
+        let verifyPx = max(300, (maxW - panelGap) * halfWidth)
+        nlog("splitRight originalW=\(String(format:"%.4f",originalWidth)) originalPx=\(String(format:"%.1f",originalPx)) halfPx=\(String(format:"%.1f",halfPx)) halfW=\(String(format:"%.4f",halfWidth)) verifyPx=\(String(format:"%.1f",verifyPx)) gap=\(panelGap) maxW=\(String(format:"%.1f",maxW)) total=\(String(format:"%.1f", verifyPx * 2 + panelGap))")
+
+        // Track split partnership for instant close width absorption
+        let originalPanelId = panels[ci].panelId
+        panels[ci].preSplitWidth = originalWidth
+        panels[ci].targetWidth = halfWidth
+        panels[ci].currentWidth = halfWidth
+        panels[ci].presetIndex = -1
+
+        let surface = TerminalSurface(tabId: UUID(), context: GHOSTTY_SURFACE_CONTEXT_SPLIT, configTemplate: nil)
+        var newCol = makePanel(with: [surface])
+        newCol.targetWidth = halfWidth
+        newCol.currentWidth = halfWidth
+        newCol.presetIndex = -1
+        newCol.splitPartnerId = originalPanelId
+        newCol.preSplitWidth = originalWidth
+
+        // Also set the original panel's partner to the new panel
+        panels[ci].splitPartnerId = newCol.panelId
+
+        panels.insert(newCol, at: ci + 1)
+        addSubview(newCol.containerView)
+        updateTabBarColors()
+        focusedIndex += 1
+        layoutStrip()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.focusCurrentTerminal() }
+    }
+
     // MARK: - Close / Add
 
     func closeActiveTab() {
@@ -828,13 +984,29 @@ final class NiriCanvasView: NSView {
         guard !live.isEmpty, focusedIndex < live.count else { return }
         let pi = live[focusedIndex].panel
         if panels[pi].tabs.count <= 1 {
-            panels[pi].closing = true
+            // Close the entire column instantly (no animation)
+            let closingPanelId = panels[pi].panelId
+            let closingWidth = panels[pi].currentWidth
             if let s = panels[pi].activeSurface?.surface { ghostty_surface_request_close(s) }
-            if liveCount > 0 {
-                focusedIndex = min(focusedIndex, liveCount - 1)
-                scrollToReveal()
-                focusCurrentTerminal()
+            panels[pi].containerView.removeFromSuperview()
+            panels.remove(at: pi)
+
+            // Absorb width into split partner if one exists
+            absorbWidthIntoPartner(closingPanelId: closingPanelId, closingWidth: closingWidth)
+
+            if liveCount == 0 { window?.close(); return }
+
+            // Focus neighbor with least scroll cost
+            let newLive = liveIndices
+            if !newLive.isEmpty {
+                let best = leastScrollCostNeighbor(near: focusedIndex)
+                focusedIndex = best
+            } else {
+                focusedIndex = 0
             }
+            scrollToReveal()
+            layoutStrip()
+            focusCurrentTerminal()
         } else {
             let idx = panels[pi].activeTab
             let surface = panels[pi].tabs[idx]
@@ -849,6 +1021,36 @@ final class NiriCanvasView: NSView {
             }
             layoutStrip(); scrollToReveal(); focusCurrentTerminal()
         }
+    }
+
+    /// Absorb width from a closing panel back into its split partner
+    private func absorbWidthIntoPartner(closingPanelId: UUID, closingWidth: CGFloat) {
+        for i in 0..<panels.count {
+            if panels[i].splitPartnerId == closingPanelId, let preW = panels[i].preSplitWidth {
+                panels[i].targetWidth = preW
+                panels[i].currentWidth = preW
+                panels[i].splitPartnerId = nil
+                panels[i].preSplitWidth = nil
+                return
+            }
+        }
+    }
+
+    /// Find the live neighbor with least scroll cost
+    private func leastScrollCostNeighbor(near oldFocus: Int) -> Int {
+        let count = liveCount
+        guard count > 0 else { return 0 }
+        let clamped = min(oldFocus, count - 1)
+        // Prefer the same index (right neighbor) or left neighbor
+        let candidates = [clamped, max(0, clamped - 1)]
+        var best = clamped
+        var bestCost = CGFloat.infinity
+        for c in candidates where c < count {
+            let ps = stripX(forLive: c)
+            let cost = abs(ps - scrollOffset)
+            if cost < bestCost { bestCost = cost; best = c }
+        }
+        return best
     }
 
     func addNewTab() {
@@ -878,6 +1080,7 @@ final class NiriCanvasView: NSView {
         let insertAt = focusedIndex < live.count ? live[focusedIndex].panel + 1 : panels.count
         panels.insert(panel, at: insertAt)
         addSubview(panel.containerView)
+        updateTabBarColors()
         focusedIndex += 1; scrollToReveal(); layoutStrip()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.focusCurrentTerminal() }
     }
@@ -940,6 +1143,14 @@ final class NiriCanvasView: NSView {
     }
 
     private func tick() {
+        guard !panels.isEmpty, bounds.width > 1 else { return }
+        // Detect window resize (replaces override func layout())
+        let currentWidth = bounds.width
+        if currentWidth != lastBoundsWidth && currentWidth > 0 {
+            lastBoundsWidth = currentWidth
+            scrollToReveal()
+        }
+
         var anyResizing = false
         for i in 0..<panels.count {
             let d = panels[i].targetWidth - panels[i].currentWidth
@@ -980,6 +1191,16 @@ final class NiriCanvasWindow: NSWindow {
     weak var canvasView: NiriCanvasView?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs (keyCode 48 = Tab).
+        // Must intercept here before ghostty can swallow it.
+        if event.keyCode == 48 {
+            let f = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if f.contains(.control) && !f.contains(.command) && !f.contains(.option) {
+                let reverse = f.contains(.shift)
+                canvasView?.cycleTab(reverse: reverse)
+                return true
+            }
+        }
         if let c = canvasView, c.performKeyEquivalent(with: event) { return true }
         return super.performKeyEquivalent(with: event)
     }
@@ -1005,7 +1226,10 @@ final class NiriCanvasWindow: NSWindow {
             if ctrl && !cmd && !opt && (ch == "d" || event.characters == "\u{04}") {
                 canvasView?.handleCtrlD(); return
             }
-            if ctrl && !cmd && !opt, let n = Int(ch), n >= 1, n <= 9 {
+            if ctrl && !cmd && !opt && ch == "9" {
+                canvasView?.switchToLastTabPublic(); return
+            }
+            if ctrl && !cmd && !opt, let n = Int(ch), n >= 1, n <= 8 {
                 canvasView?.switchToTabPublic(n - 1); return
             }
             if (cmd || ctrl), let canvas = canvasView, canvas.performKeyEquivalent(with: event) { return }
@@ -1021,10 +1245,6 @@ final class NiriCanvasWindowController: NSWindowController {
     private let canvasView: NiriCanvasView
 
     init() {
-        NSSetUncaughtExceptionHandler { exception in
-            NSLog("niri.UNCAUGHT: \(exception.name) reason=\(exception.reason ?? "nil")")
-            NSLog("niri.UNCAUGHT.stack: \(exception.callStackSymbols.joined(separator: "\n"))")
-        }
         let scr = NSScreen.main!.frame
         let win = NiriCanvasWindow(
             contentRect: NSRect(x: scr.midX - 700, y: scr.midY - 350, width: 1400, height: 700),
