@@ -296,8 +296,12 @@ func configureAgentEnvironment(cfg agentConfig) {
 	os.Setenv("CMUX_SOCKET_PATH", cfg.socketPath)
 	os.Setenv("CMUX_SOCKET", cfg.socketPath)
 
-	// Unset TERM_PROGRAM to prevent terminal detection conflicts
-	os.Unsetenv("TERM_PROGRAM")
+	// Preserve COLORTERM for truecolor support in subagent panes.
+	// The cmux ssh bootstrap sets COLORTERM=truecolor; keep it so
+	// split-pane shells detect color capabilities correctly.
+	if os.Getenv("COLORTERM") == "" {
+		os.Setenv("COLORTERM", "truecolor")
+	}
 
 	// Set workspace/surface IDs from focused context
 	if cfg.focused != nil {

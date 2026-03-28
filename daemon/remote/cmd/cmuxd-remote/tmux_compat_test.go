@@ -360,9 +360,9 @@ func TestConfigureAgentEnvironment(t *testing.T) {
 	if os.Getenv("CMUX_SOCKET_PATH") != "127.0.0.1:54321" {
 		t.Errorf("CMUX_SOCKET_PATH = %q", os.Getenv("CMUX_SOCKET_PATH"))
 	}
-	// Verify TERM_PROGRAM is unset
-	if os.Getenv("TERM_PROGRAM") != "" {
-		t.Error("TERM_PROGRAM should be unset")
+	// Verify COLORTERM is set for truecolor support
+	if os.Getenv("COLORTERM") != "truecolor" {
+		t.Errorf("COLORTERM = %q, want truecolor", os.Getenv("COLORTERM"))
 	}
 	// Verify workspace/surface IDs
 	if os.Getenv("CMUX_WORKSPACE_ID") != "ws-abc" {
