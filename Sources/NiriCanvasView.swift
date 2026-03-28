@@ -482,10 +482,19 @@ final class NiriCanvasView: NSView {
     private var lastAutoScrolledLive: Int = -1
     var suppressHitTestFocus = false  // true during drag to prevent hitTest from stealing focus
 
+    enum DropEdge: Equatable { case left, right, top, bottom }
+
     struct DropTarget {
-        enum Kind: Equatable { case inTabBar(livePanel: Int, insertionIndex: Int); case betweenPanels(insertionIndex: Int) }
+        enum Kind: Equatable {
+            case inTabBar(livePanel: Int, insertionIndex: Int)
+            case betweenPanels(insertionIndex: Int)
+            case terminalEdge(livePanel: Int, edge: DropEdge)
+            case terminalCenter(livePanel: Int)
+        }
         let kind: Kind
     }
+
+    private var dropZoneLayer: CALayer?
 
     private func beginTabDrag(tabIndex: Int, fromPanel panelId: ObjectIdentifier, event: NSEvent) {
         nlog("beginTabDrag tab=\(tabIndex) panel=\(panelIndex(for: panelId) ?? -1)")
@@ -565,6 +574,7 @@ final class NiriCanvasView: NSView {
         for p in panels { p.tabBar.dropIndicatorIndex = nil }
         panelDropIndex = nil
         currentDropTarget = nil
+        hideDropZoneOverlay()
 
         let live = liveIndices
         let isSingleTab = srcTabCount <= 1
@@ -605,10 +615,81 @@ final class NiriCanvasView: NSView {
             if abs(pt.x - gapX) < 25 {
                 panelDropIndex = li
                 currentDropTarget = .init(kind: .betweenPanels(insertionIndex: li))
+                hideDropZoneOverlay()
                 needsDisplay = true
                 return
             }
         }
+
+        // 3. Check terminal areas for edge/center drop zones
+        for (li, entry) in live.enumerated() {
+            let p = panels[entry.panel]
+            let cf = p.containerView.frame
+            guard cf.contains(pt) else { continue }
+
+            // Terminal area (below tab bar)
+            let termRect = CGRect(x: cf.minX, y: cf.minY,
+                                  width: cf.width, height: cf.height - NiriTabBarView.height)
+            guard termRect.contains(pt) else { continue }
+
+            let localX = (pt.x - termRect.minX) / termRect.width
+            let localY = (pt.y - termRect.minY) / termRect.height
+            let edgeRatio: CGFloat = 0.25
+
+            let edge: DropEdge?
+            if localX < edgeRatio { edge = .left }
+            else if localX > 1 - edgeRatio { edge = .right }
+            else if localY > 1 - edgeRatio { edge = .top }
+            else if localY < edgeRatio { edge = .bottom }
+            else { edge = nil }
+
+            if let edge {
+                currentDropTarget = .init(kind: .terminalEdge(livePanel: li, edge: edge))
+                showDropZoneOverlay(in: termRect, edge: edge)
+            } else {
+                currentDropTarget = .init(kind: .terminalCenter(livePanel: li))
+                showDropZoneOverlay(in: termRect, edge: nil)
+            }
+            return
+        }
+
+        hideDropZoneOverlay()
+    }
+
+    private func showDropZoneOverlay(in rect: CGRect, edge: DropEdge?) {
+        if dropZoneLayer == nil {
+            let l = CALayer()
+            l.zPosition = 500
+            layer?.addSublayer(l)
+            dropZoneLayer = l
+        }
+        guard let l = dropZoneLayer else { return }
+
+        let pad: CGFloat = 4
+        let targetRect: CGRect
+        if let edge {
+            switch edge {
+            case .left:   targetRect = CGRect(x: rect.minX + pad, y: rect.minY + pad, width: rect.width * 0.5 - pad * 2, height: rect.height - pad * 2)
+            case .right:  targetRect = CGRect(x: rect.midX + pad, y: rect.minY + pad, width: rect.width * 0.5 - pad * 2, height: rect.height - pad * 2)
+            case .top:    targetRect = CGRect(x: rect.minX + pad, y: rect.midY + pad, width: rect.width - pad * 2, height: rect.height * 0.5 - pad * 2)
+            case .bottom: targetRect = CGRect(x: rect.minX + pad, y: rect.minY + pad, width: rect.width - pad * 2, height: rect.height * 0.5 - pad * 2)
+            }
+        } else {
+            targetRect = rect.insetBy(dx: pad, dy: pad)
+        }
+
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        l.frame = targetRect
+        l.backgroundColor = CGColor(srgbRed: 0, green: 0.48, blue: 1, alpha: 0.15)
+        l.borderColor = CGColor(srgbRed: 0, green: 0.48, blue: 1, alpha: 0.6)
+        l.borderWidth = 2
+        l.cornerRadius = 4
+        l.isHidden = false
+        CATransaction.commit()
+    }
+
+    private func hideDropZoneOverlay() {
+        dropZoneLayer?.isHidden = true
     }
 
     private func gapScreenX(atLive li: Int, live: [(panel: Int, live: Int)]) -> CGFloat {
@@ -647,16 +728,83 @@ final class NiriCanvasView: NSView {
 
         case .betweenPanels(let insertLive):
             moveTabToNewPanel(fromPanel: sourcePi, tabIndex: sourceTab, atLiveIndex: insertLive)
+
+        case .terminalCenter(let targetLive):
+            // Add as tab in the target panel
+            let live = liveIndices
+            guard targetLive < live.count else { break }
+            let targetPi = live[targetLive].panel
+            moveTab(fromPanel: sourcePi, tabIndex: sourceTab, toPanel: targetPi, insertAt: panels[targetPi].tabs.count)
+            let newLive = liveIndices
+            focusedIndex = newLive.first(where: { $0.panel == targetPi })?.live ?? min(targetLive, liveCount - 1)
+
+        case .terminalEdge(let targetLive, let edge):
+            let live = liveIndices
+            guard targetLive < live.count else { break }
+            let targetPi = live[targetLive].panel
+            guard sourceTab < panels[sourcePi].tabs.count else { break }
+            let surface = panels[sourcePi].tabs[sourceTab]
+            // Remove from source
+            panels[sourcePi].activeSurface?.hostedView.removeFromSuperview()
+            panels[sourcePi].tabs.remove(at: sourceTab)
+            if panels[sourcePi].tabs.isEmpty {
+                panels[sourcePi].containerView.removeFromSuperview()
+                panels.remove(at: sourcePi)
+            } else {
+                panels[sourcePi].activeTab = min(panels[sourcePi].activeTab, panels[sourcePi].tabs.count - 1)
+                panels[sourcePi].syncTabBar()
+                if let s = panels[sourcePi].activeSurface {
+                    s.hostedView.removeFromSuperview()
+                    panels[sourcePi].containerView.addSubview(s.hostedView)
+                }
+            }
+
+            // Recompute targetPi after potential removal
+            let newLive2 = liveIndices
+            switch edge {
+            case .left:
+                let insertPi = newLive2.first(where: { $0.live == targetLive })?.panel ?? targetPi
+                var newCol = makePanel(with: [surface])
+                newCol.targetWidth = panels[min(insertPi, panels.count - 1)].targetWidth / 2
+                newCol.currentWidth = newCol.targetWidth
+                newCol.presetIndex = -1
+                if insertPi < panels.count { panels[insertPi].targetWidth /= 2; panels[insertPi].currentWidth = panels[insertPi].targetWidth; panels[insertPi].presetIndex = -1 }
+                panels.insert(newCol, at: insertPi)
+                addSubview(newCol.containerView)
+            case .right:
+                let insertPi = (newLive2.first(where: { $0.live == targetLive })?.panel ?? targetPi) + 1
+                let refPi = min(insertPi - 1, panels.count - 1)
+                var newCol = makePanel(with: [surface])
+                newCol.targetWidth = panels[refPi].targetWidth / 2
+                newCol.currentWidth = newCol.targetWidth
+                newCol.presetIndex = -1
+                panels[refPi].targetWidth /= 2; panels[refPi].currentWidth = panels[refPi].targetWidth; panels[refPi].presetIndex = -1
+                panels.insert(newCol, at: insertPi)
+                addSubview(newCol.containerView)
+            case .top, .bottom:
+                // For now, top/bottom creates a new column to the right (same as right edge)
+                let insertPi = (newLive2.first(where: { $0.live == targetLive })?.panel ?? targetPi) + 1
+                var newCol = makePanel(with: [surface])
+                newCol.targetWidth = panels[min(insertPi - 1, panels.count - 1)].targetWidth
+                newCol.currentWidth = newCol.targetWidth
+                newCol.presetIndex = -1
+                panels.insert(newCol, at: min(insertPi, panels.count))
+                addSubview(newCol.containerView)
+            }
+            let finalLive = liveIndices
+            focusedIndex = min(focusedIndex, max(0, finalLive.count - 1))
         }
 
-        scrollToReveal()
         layoutStrip()
+        scrollToReveal()
         focusCurrentTerminal()
     }
 
     private func cleanupDrag() {
         dragLayer?.removeFromSuperlayer()
         dragLayer = nil
+        dropZoneLayer?.removeFromSuperlayer()
+        dropZoneLayer = nil
         for p in panels { p.tabBar.dropIndicatorIndex = nil }
         panelDropIndex = nil
         currentDropTarget = nil
