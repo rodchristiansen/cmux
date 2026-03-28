@@ -480,7 +480,11 @@ final class NiriCanvasView: NSView {
     private var dragLayer: CALayer?
     private var currentDropTarget: DropTarget?
     private var isDragging = false
-    private var dragMousePt: NSPoint = .zero  // current mouse position during drag
+    private var dragMousePt: NSPoint = .zero
+    private var dragScrollDwell: CGFloat = 0  // seconds in the scroll zone
+    private var dragSrcPi: Int = 0
+    private var dragSrcTab: Int = 0
+    private var dragSrcTabCount: Int = 0
     var suppressHitTestFocus = false
 
     enum DropEdge: Equatable { case left, right, top, bottom }
@@ -531,6 +535,10 @@ final class NiriCanvasView: NSView {
         dl.position = CGPoint(x: mousePt.x, y: mousePt.y)
         isDragging = true
         dragMousePt = mousePt
+        dragScrollDwell = 0
+        dragSrcPi = srcPi
+        dragSrcTab = tabIndex
+        dragSrcTabCount = srcTabCount
         suppressHitTestFocus = true
 
         // Tracking loop: mouse events + keyboard (Escape to cancel)
@@ -1342,18 +1350,42 @@ final class NiriCanvasView: NSView {
     private func tick() {
         guard !panels.isEmpty, bounds.width > 1 else { return }
 
-        // Linear scroll during drag (runs every frame, even when mouse is stationary)
+        // Accelerating scroll during drag (runs every frame)
         if isDragging {
-            let scrollZone: CGFloat = 80
+            let scrollZone: CGFloat = 100
             let pt = dragMousePt
+            let dt: CGFloat = 1.0 / 120.0
+            let inZone: Bool
+            var direction: CGFloat = 0
+            var proximity: CGFloat = 0
+
             if pt.x < scrollZone && pt.x >= 0 {
-                let speed = (scrollZone - pt.x) / scrollZone * 8
-                targetOffset = max(0, targetOffset - speed)
-                scrollOffset = max(0, scrollOffset - speed)
+                proximity = (scrollZone - pt.x) / scrollZone
+                direction = -1
+                inZone = true
             } else if pt.x > bounds.width - scrollZone && pt.x <= bounds.width {
-                let speed = (pt.x - (bounds.width - scrollZone)) / scrollZone * 8
-                targetOffset += speed
-                scrollOffset += speed
+                proximity = (pt.x - (bounds.width - scrollZone)) / scrollZone
+                direction = 1
+                inZone = true
+            } else {
+                inZone = false
+            }
+
+            if inZone {
+                dragScrollDwell += dt
+                // Acceleration: ramps up over 0.4s, quadratic ease-in
+                let t = min(1.0, dragScrollDwell / 0.4)
+                let accel = t * t  // 0 → 1 over 0.4s
+                let speed = proximity * (2 + 18 * accel)  // 2-20 px/frame
+                targetOffset += direction * speed
+                scrollOffset += direction * speed
+                targetOffset = max(0, targetOffset)
+                scrollOffset = max(0, scrollOffset)
+                layoutStrip()
+                // Update drop target & overlay to follow scrolled content
+                updateDropTarget(at: pt, srcPi: dragSrcPi, srcTab: dragSrcTab, srcTabCount: dragSrcTabCount)
+            } else {
+                dragScrollDwell = 0
             }
         }
 
