@@ -139,10 +139,30 @@ final class GhosttyRuntime {
         guard !FileManager.default.fileExists(atPath: configFile.path) else { return }
 
         let defaultConfig = """
-        theme = dark:Monokai Classic
         font-size = 14
         cursor-style = bar
         cursor-style-blink = true
+        background = #272822
+        foreground = #fdfff1
+        cursor-color = #c0c1b5
+        selection-background = #57584f
+        selection-foreground = #fdfff1
+        palette = 0=#272822
+        palette = 1=#f92672
+        palette = 2=#a6e22e
+        palette = 3=#e6db74
+        palette = 4=#fd971f
+        palette = 5=#ae81ff
+        palette = 6=#66d9ef
+        palette = 7=#fdfff1
+        palette = 8=#6e7066
+        palette = 9=#f92672
+        palette = 10=#a6e22e
+        palette = 11=#e6db74
+        palette = 12=#fd971f
+        palette = 13=#ae81ff
+        palette = 14=#66d9ef
+        palette = 15=#fdfff1
         """
 
         try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)

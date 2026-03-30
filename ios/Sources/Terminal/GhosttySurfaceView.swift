@@ -365,6 +365,7 @@ final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
     }
 
     func processOutput(_ data: Data) {
+        NSLog("📱 processOutput: bytes=%d surface=%d window=%d bounds=%dx%d", data.count, surface != nil ? 1 : 0, window != nil ? 1 : 0, Int(bounds.width), Int(bounds.height))
         guard let surface else { return }
         liveAnchormuxLog("surface.processOutput bytes=\(data.count) window=\(window != nil) bounds=\(Int(bounds.width))x\(Int(bounds.height))")
         data.withUnsafeBytes { buffer in
