@@ -1349,11 +1349,45 @@ class GhosttyApp {
         #endif
     }
 
+    private func loadInlineGhosttyConfig(
+        _ contents: String,
+        into config: ghostty_config_t,
+        prefix: String,
+        logLabel: String
+    ) {
+        let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString).conf")
+        do {
+            try trimmed.write(to: tmpURL, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: tmpURL) }
+            tmpURL.path.withCString { path in
+                ghostty_config_load_file(config, path)
+            }
+        } catch {
+            #if DEBUG
+            dlog("ghostty.config.inlineLoad.failed label=\(logLabel) error=\(error.localizedDescription)")
+            #endif
+        }
+    }
+
+    private func loadCopyOnSelectOverride(_ config: ghostty_config_t) {
+        loadInlineGhosttyConfig(
+            TerminalCopyOnSelectSettings.overrideConfigLine(),
+            into: config,
+            prefix: "cmux-copy-on-select",
+            logLabel: "copy-on-select override"
+        )
+    }
+
     private func loadDefaultConfigFilesWithLegacyFallback(_ config: ghostty_config_t) {
         ghostty_config_load_default_files(config)
         loadLegacyGhosttyConfigIfNeeded(config)
         ghostty_config_load_recursive_files(config)
         loadCmuxAppSupportGhosttyConfigIfNeeded(config)
+        loadCopyOnSelectOverride(config)
         loadCJKFontFallbackIfNeeded(config)
         ghostty_config_finalize(config)
     }
@@ -1376,20 +1410,12 @@ class GhosttyApp {
         let lines = mappings.map { range, font in
             "font-codepoint-map = \(range)=\(font)"
         }.joined(separator: "\n")
-
-        let tmpURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-cjk-font-fallback-\(UUID().uuidString).conf")
-        do {
-            try lines.write(to: tmpURL, atomically: true, encoding: .utf8)
-            defer { try? FileManager.default.removeItem(at: tmpURL) }
-            tmpURL.path.withCString { path in
-                ghostty_config_load_file(config, path)
-            }
-        } catch {
-            #if DEBUG
-            Self.initLog("failed to write CJK font fallback config: \(error)")
-            #endif
-        }
+        loadInlineGhosttyConfig(
+            lines,
+            into: config,
+            prefix: "cmux-cjk-font-fallback",
+            logLabel: "CJK font fallback"
+        )
     }
 
     /// Unicode ranges shared by all CJK languages (Han ideographs, symbols, fullwidth forms).
@@ -3368,6 +3394,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
     }
 
+    private func allowsRuntimeSurfaceCreation() -> Bool {
+        portalLifecycleState == .live
+    }
+
     func beginPortalCloseLifecycle(reason: String) {
         guard portalLifecycleState != .closed else { return }
         guard portalLifecycleState != .closing else { return }
@@ -3433,12 +3463,16 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
     }
 
-    #if DEBUG
+#if DEBUG
     private static let surfaceLogPath = "/tmp/cmux-ghostty-surface.log"
     private static let sizeLogPath = "/tmp/cmux-ghostty-size.log"
 
     func debugCurrentPixelSize() -> (width: UInt32, height: UInt32) {
         (lastPixelWidth, lastPixelHeight)
+    }
+
+    func debugDesiredFocusState() -> Bool {
+        desiredFocusState
     }
 
     private static func surfaceLog(_ message: String) {
@@ -3538,6 +3572,15 @@ final class TerminalSurface: Identifiable, ObservableObject {
         // If surface doesn't exist yet, create it once the view is in a real window so
         // content scale and pixel geometry are derived from the actual backing context.
         if surface == nil {
+            guard allowsRuntimeSurfaceCreation() else {
+#if DEBUG
+                dlog(
+                    "surface.attach.skip surface=\(id.uuidString.prefix(5)) " +
+                    "reason=lifecycle.\(portalLifecycleState.rawValue)"
+                )
+#endif
+                return
+            }
             guard view.window != nil else {
 #if DEBUG
                 dlog(
@@ -3567,6 +3610,18 @@ final class TerminalSurface: Identifiable, ObservableObject {
     }
 
     private func createSurface(for view: GhosttyNSView) {
+        guard allowsRuntimeSurfaceCreation() else {
+#if DEBUG
+            dlog(
+                "surface.create.skip surface=\(id.uuidString.prefix(5)) " +
+                "reason=lifecycle.\(portalLifecycleState.rawValue)"
+            )
+            Self.surfaceLog(
+                "createSurface SKIPPED surface=\(id.uuidString) tab=\(tabId.uuidString) lifecycle=\(portalLifecycleState.rawValue)"
+            )
+#endif
+            return
+        }
         #if DEBUG
         let resourcesDir = getenv("GHOSTTY_RESOURCES_DIR").flatMap { String(cString: $0) } ?? "(unset)"
         let terminfo = getenv("TERMINFO").flatMap { String(cString: $0) } ?? "(unset)"
@@ -4114,6 +4169,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return
         }
 
+        guard allowsRuntimeSurfaceCreation() else { return }
         guard surface == nil, attachedView != nil else { return }
         guard !backgroundSurfaceStartQueued else { return }
         backgroundSurfaceStartQueued = true
@@ -4121,6 +4177,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.backgroundSurfaceStartQueued = false
+            guard self.allowsRuntimeSurfaceCreation() else { return }
             guard self.surface == nil, let view = self.attachedView else { return }
             #if DEBUG
             let startedAt = ProcessInfo.processInfo.systemUptime
@@ -5010,6 +5067,16 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         return surface
     }
 
+    private func requestInputRecoveryAfterSurfaceMiss(reason: String) {
+        terminalSurface?.requestBackgroundSurfaceStartIfNeeded()
+#if DEBUG
+        dlog(
+            "focus.input_recovery surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "reason=\(reason) inWindow=\(window != nil ? 1 : 0)"
+        )
+#endif
+    }
+
     func performBindingAction(_ action: String) -> Bool {
         guard let surface = surface else { return false }
         return action.withCString { cString in
@@ -5440,12 +5507,12 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         let result = super.resignFirstResponder()
         if result {
             desiredFocus = false
+            terminalSurface?.recordExternalFocusState(false)
         }
         if result, let surface = surface {
             let now = CACurrentMediaTime()
             let deltaMs = (now - lastScrollEventTime) * 1000
             Self.focusLog("resignFirstResponder: surface=\(terminalSurface?.id.uuidString ?? "nil") deltaSinceScrollMs=\(String(format: "%.2f", deltaMs))")
-            terminalSurface?.recordExternalFocusState(false)
             ghostty_surface_set_focus(surface, false)
         }
         return result
@@ -5669,6 +5736,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         let ensureSurfaceStart = ProcessInfo.processInfo.systemUptime
 #endif
         guard let surface = ensureSurfaceReadyForInput() else {
+            requestInputRecoveryAfterSurfaceMiss(reason: "keyDown.missingSurface")
 #if DEBUG
             ensureSurfaceMs = (ProcessInfo.processInfo.systemUptime - ensureSurfaceStart) * 1000.0
 #endif
@@ -6512,19 +6580,31 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
         let menu = NSMenu()
         if onTriggerFlash != nil {
-            let flashItem = menu.addItem(withTitle: "Trigger Flash", action: #selector(triggerFlash(_:)), keyEquivalent: "")
+            let flashItem = menu.addItem(
+                withTitle: String(localized: "terminalContextMenu.triggerFlash", defaultValue: "Trigger Flash"),
+                action: #selector(triggerFlash(_:)),
+                keyEquivalent: ""
+            )
             flashItem.target = self
             menu.addItem(.separator())
         }
         if ghostty_surface_has_selection(surface) {
-            let item = menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+            let item = menu.addItem(
+                withTitle: String(localized: "terminalContextMenu.copy", defaultValue: "Copy"),
+                action: #selector(copy(_:)),
+                keyEquivalent: ""
+            )
             item.target = self
         }
-        let pasteItem = menu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        let pasteItem = menu.addItem(
+            withTitle: String(localized: "terminalContextMenu.paste", defaultValue: "Paste"),
+            action: #selector(paste(_:)),
+            keyEquivalent: ""
+        )
         pasteItem.target = self
         menu.addItem(.separator())
         let splitHorizontallyItem = menu.addItem(
-            withTitle: "Split Horizontally",
+            withTitle: String(localized: "terminalContextMenu.splitHorizontally", defaultValue: "Split Horizontally"),
             action: #selector(splitHorizontally(_:)),
             keyEquivalent: "d"
         )
@@ -6536,7 +6616,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         )
 
         let splitVerticallyItem = menu.addItem(
-            withTitle: "Split Vertically",
+            withTitle: String(localized: "terminalContextMenu.splitVertically", defaultValue: "Split Vertically"),
             action: #selector(splitVertically(_:)),
             keyEquivalent: "d"
         )
@@ -6544,6 +6624,17 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         splitVerticallyItem.keyEquivalentModifierMask = [.command]
         splitVerticallyItem.image = NSImage(
             systemSymbolName: "rectangle.righthalf.inset.filled",
+            accessibilityDescription: nil
+        )
+        menu.addItem(.separator())
+        let resetTerminalItem = menu.addItem(
+            withTitle: String(localized: "terminalContextMenu.resetTerminal", defaultValue: "Reset Terminal"),
+            action: #selector(resetTerminal(_:)),
+            keyEquivalent: ""
+        )
+        resetTerminalItem.target = self
+        resetTerminalItem.image = NSImage(
+            systemSymbolName: "arrow.trianglehead.2.clockwise",
             accessibilityDescription: nil
         )
         return menu
@@ -6581,6 +6672,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     @objc private func triggerFlash(_ sender: Any?) {
         onTriggerFlash?()
+    }
+
+    @objc private func resetTerminal(_ sender: Any?) {
+        _ = performBindingAction("reset")
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -8937,6 +9032,33 @@ final class GhosttySurfaceScrollView: NSView {
 
     func clearSuppressReparentFocus() {
         surfaceView.suppressingReparentFocus = false
+        let hasUsablePortalGeometry: Bool = {
+            let size = bounds.size
+            return size.width > 1 && size.height > 1
+        }()
+        let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
+        let surfaceShort = surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil"
+
+        guard surfaceView.desiredFocus else { return }
+        guard isSurfaceViewFirstResponder() else { return }
+        guard isActive else { return }
+        guard surfaceView.isVisibleInUI else { return }
+        guard let window, window.isKeyWindow else { return }
+        guard !isHiddenForFocus, hasUsablePortalGeometry else {
+#if DEBUG
+            dlog(
+                "focus.reparent.resume.defer surface=\(surfaceShort) " +
+                "reason=hidden_or_tiny hidden=\(isHiddenForFocus ? 1 : 0) " +
+                "frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height))"
+            )
+#endif
+            scheduleAutomaticFirstResponderApply(reason: "clearSuppressReparentFocus.hiddenOrTiny")
+            return
+        }
+#if DEBUG
+        dlog("focus.reparent.resume surface=\(surfaceShort) firstResponder=\(String(describing: window.firstResponder))")
+#endif
+        reassertTerminalSurfaceFocus(reason: "clearSuppressReparentFocus")
     }
 
     /// Returns true if the terminal's actual Ghostty surface view is (or contains) the window first responder.
@@ -8963,6 +9085,9 @@ final class GhosttySurfaceScrollView: NSView {
 
     private func reassertTerminalSurfaceFocus(reason: String) {
         guard let terminalSurface = surfaceView.terminalSurface else { return }
+        if terminalSurface.surface == nil {
+            terminalSurface.requestBackgroundSurfaceStartIfNeeded()
+        }
 #if DEBUG
         dlog("focus.surface.reassert surface=\(terminalSurface.id.uuidString.prefix(5)) reason=\(reason)")
 #endif
