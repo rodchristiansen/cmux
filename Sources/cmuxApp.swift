@@ -3825,6 +3825,85 @@ enum TelemetrySettings {
     static let enabledForCurrentLaunch = isEnabled()
 }
 
+enum PreferredEditor: String, CaseIterable, Identifiable {
+    case system
+    case cursor
+    case vscode
+    case windsurf
+    case zed
+    case sublimeText
+    case xcode
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system:
+            return String(localized: "preferredEditor.system", defaultValue: "System Default")
+        case .cursor:
+            return String(localized: "preferredEditor.cursor", defaultValue: "Cursor")
+        case .vscode:
+            return String(localized: "preferredEditor.vscode", defaultValue: "VS Code")
+        case .windsurf:
+            return String(localized: "preferredEditor.windsurf", defaultValue: "Windsurf")
+        case .zed:
+            return String(localized: "preferredEditor.zed", defaultValue: "Zed")
+        case .sublimeText:
+            return String(localized: "preferredEditor.sublimeText", defaultValue: "Sublime Text")
+        case .xcode:
+            return String(localized: "preferredEditor.xcode", defaultValue: "Xcode")
+        }
+    }
+
+    func applicationURL() -> URL? {
+        switch self {
+        case .system: return nil
+        case .cursor: return TerminalDirectoryOpenTarget.cursor.applicationURL()
+        case .vscode: return TerminalDirectoryOpenTarget.vscode.applicationURL()
+        case .windsurf: return TerminalDirectoryOpenTarget.windsurf.applicationURL()
+        case .zed: return TerminalDirectoryOpenTarget.zed.applicationURL()
+        case .sublimeText:
+            let candidates = [
+                "/Applications/Sublime Text.app",
+                "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/Sublime Text.app",
+            ]
+            for path in candidates where FileManager.default.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path, isDirectory: true)
+            }
+            return NSWorkspace.shared.fullPath(forApplication: "Sublime Text")
+                .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        case .xcode: return TerminalDirectoryOpenTarget.xcode.applicationURL()
+        }
+    }
+}
+
+enum PreferredEditorSettings {
+    static let key = "preferredEditor"
+    static let defaultEditor: PreferredEditor = .system
+
+    static func editor(defaults: UserDefaults = .standard) -> PreferredEditor {
+        guard let raw = defaults.string(forKey: key),
+              let editor = PreferredEditor(rawValue: raw) else {
+            return defaultEditor
+        }
+        return editor
+    }
+
+    /// Open a file URL with the user's preferred editor, falling back to system default.
+    static func open(_ url: URL) {
+        let editor = editor()
+        if editor != .system, let appURL = editor.applicationURL() {
+            NSWorkspace.shared.open(
+                [url],
+                withApplicationAt: appURL,
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
 struct SettingsView: View {
     private let contentTopInset: CGFloat = 8
     private let pickerColumnWidth: CGFloat = 196
@@ -3840,6 +3919,7 @@ struct SettingsView: View {
     private var claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
     @AppStorage(TelemetrySettings.sendAnonymousTelemetryKey)
     private var sendAnonymousTelemetry = TelemetrySettings.defaultSendAnonymousTelemetry
+    @AppStorage(PreferredEditorSettings.key) private var preferredEditor = PreferredEditorSettings.defaultEditor.rawValue
     @AppStorage("cmuxPortBase") private var cmuxPortBase = 9100
     @AppStorage("cmuxPortRange") private var cmuxPortRange = 10
     @AppStorage(BrowserSearchSettings.searchEngineKey) private var browserSearchEngine = BrowserSearchSettings.defaultSearchEngine.rawValue
@@ -4503,6 +4583,19 @@ struct SettingsView: View {
                                 .accessibilityLabel(
                                     String(localized: "settings.app.paneFirstClickFocus", defaultValue: "Focus Pane on First Click")
                                 )
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsPickerRow(
+                            String(localized: "settings.app.preferredEditor", defaultValue: "Open Files With"),
+                            subtitle: String(localized: "settings.app.preferredEditor.subtitle", defaultValue: "App used when Cmd-clicking filenames in terminal output."),
+                            controlWidth: pickerColumnWidth,
+                            selection: $preferredEditor
+                        ) {
+                            ForEach(PreferredEditor.allCases) { editor in
+                                Text(editor.displayName).tag(editor.rawValue)
+                            }
                         }
 
                         SettingsCardDivider()
