@@ -8,7 +8,7 @@ final class SidebarResizeUITests: XCTestCase {
 
     func testSidebarResizerTracksCursor() {
         let app = XCUIApplication()
-        app.launch()
+        launchAndAllowBackground(app)
 
         let elements = app.descendants(matching: .any)
         let resizer = elements["SidebarResizer"]
@@ -39,7 +39,7 @@ final class SidebarResizeUITests: XCTestCase {
 
     func testSidebarResizerAllowsSmallerMinimumWidth() {
         let app = XCUIApplication()
-        app.launch()
+        launchAndAllowBackground(app)
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5.0))
@@ -63,7 +63,7 @@ final class SidebarResizeUITests: XCTestCase {
 
     func testSidebarResizerHasMaximumWidthCap() {
         let app = XCUIApplication()
-        app.launch()
+        launchAndAllowBackground(app)
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5.0))
@@ -99,5 +99,19 @@ final class SidebarResizeUITests: XCTestCase {
             object: NSObject()
         )
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func launchAndAllowBackground(_ app: XCUIApplication) {
+        app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
+
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        XCTExpectFailure("App activation may fail on headless CI runners", options: options) {
+            app.launch()
+        }
+
+        if app.state == .runningBackground {
+            app.activate()
+        }
     }
 }
