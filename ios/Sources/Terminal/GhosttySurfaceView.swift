@@ -542,12 +542,47 @@ final class TerminalInputTextView: UITextView {
         )
     }
 
-    private lazy var terminalAccessoryToolbar: UIToolbar = {
-        let toolbar = UIToolbar()
-        toolbar.items = makeAccessoryToolbarItems()
-        toolbar.sizeToFit()
-        return toolbar
+    private lazy var terminalAccessoryToolbar: UIView = {
+        let scrollView = UIScrollView()
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.alwaysBounceHorizontal = true
+
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.spacing = 6
+        stack.alignment = .center
+
+        for action in TerminalInputAccessoryAction.allCases {
+            let button = UIButton(type: .system)
+            button.setTitle(action.title, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+            button.tag = action.rawValue
+            button.addTarget(self, action: #selector(handleAccessoryButton(_:)), for: .touchUpInside)
+            button.accessibilityIdentifier = action.accessibilityIdentifier
+            button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+            button.backgroundColor = UIColor.secondarySystemFill
+            button.layer.cornerRadius = 6
+            stack.addArrangedSubview(button)
+        }
+
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -8),
+            stack.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
+        ])
+
+        scrollView.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 44)
+        accessoryStackView = stack
+        return scrollView
     }()
+
+    private weak var accessoryStackView: UIStackView?
 
     init() {
         super.init(frame: .zero, textContainer: nil)
@@ -666,29 +701,14 @@ final class TerminalInputTextView: UITextView {
         }
     }
 
-    private func makeAccessoryToolbarItems() -> [UIBarButtonItem] {
-        var items: [UIBarButtonItem] = []
-
-        for (index, action) in TerminalInputAccessoryAction.allCases.enumerated() {
-            let item = UIBarButtonItem(
-                title: action.title,
-                style: isAccessoryActionArmed(action) ? .prominent : .plain,
-                target: self,
-                action: #selector(handleAccessoryButton(_:))
-            )
-            if isAccessoryActionArmed(action) {
-                item.tintColor = .systemBlue
-            }
-            item.tag = action.rawValue
-            item.accessibilityIdentifier = action.accessibilityIdentifier
-            items.append(item)
-
-            if index != TerminalInputAccessoryAction.allCases.index(before: TerminalInputAccessoryAction.allCases.endIndex) {
-                items.append(UIBarButtonItem.flexibleSpace())
-            }
+    private func refreshAccessoryButtonStyles() {
+        guard let stack = accessoryStackView else { return }
+        for case let button as UIButton in stack.arrangedSubviews {
+            guard let action = TerminalInputAccessoryAction(rawValue: button.tag) else { continue }
+            let armed = isAccessoryActionArmed(action)
+            button.backgroundColor = armed ? .systemBlue : UIColor.secondarySystemFill
+            button.setTitleColor(armed ? .white : .label, for: .normal)
         }
-
-        return items
     }
 
     private func handleTextChange(currentText: String, isComposing: Bool) {
@@ -765,13 +785,13 @@ final class TerminalInputTextView: UITextView {
     private func setControlAccessoryArmed(_ armed: Bool) {
         guard controlAccessoryArmed != armed else { return }
         controlAccessoryArmed = armed
-        terminalAccessoryToolbar.items = makeAccessoryToolbarItems()
+        refreshAccessoryButtonStyles()
     }
 
     private func setAlternateAccessoryArmed(_ armed: Bool) {
         guard alternateAccessoryArmed != armed else { return }
         alternateAccessoryArmed = armed
-        terminalAccessoryToolbar.items = makeAccessoryToolbarItems()
+        refreshAccessoryButtonStyles()
     }
 }
 

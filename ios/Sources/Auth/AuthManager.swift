@@ -156,6 +156,14 @@ class AuthManager: ObservableObject {
             return
         }
 
+        #if DEBUG
+        if let creds = debugPasswordCredentials {
+            print("🔐 AuthManager: Auto-login with persisted debug credentials")
+            await performAutoLogin(AuthAutoLoginCredentials(email: creds.email, password: creds.password))
+            return
+        }
+        #endif
+
         clearAuthState()
         await ConvexClientManager.shared.clearAuth()
     }
@@ -220,8 +228,20 @@ class AuthManager: ObservableObject {
     private struct DebugCredentials {
         let email: String
         let password: String
+
+        func persist() {
+            UserDefaults.standard.set(email, forKey: "cmux.debug.auth.email")
+            UserDefaults.standard.set(password, forKey: "cmux.debug.auth.password")
+        }
+
+        static func load() -> DebugCredentials? {
+            guard let email = UserDefaults.standard.string(forKey: "cmux.debug.auth.email"),
+                  let password = UserDefaults.standard.string(forKey: "cmux.debug.auth.password"),
+                  !email.isEmpty, !password.isEmpty else { return nil }
+            return DebugCredentials(email: email, password: password)
+        }
     }
-    private var debugPasswordCredentials: DebugCredentials?
+    private var debugPasswordCredentials: DebugCredentials? = DebugCredentials.load()
     #endif
 
     func sendCode(to email: String) async throws {
@@ -232,6 +252,7 @@ class AuthManager: ObservableObject {
         if email.trimmingCharacters(in: .whitespacesAndNewlines) == "42" {
             let creds = DebugCredentials(email: "l@l.com", password: "abc123")
             try await signInWithPassword(email: creds.email, password: creds.password, setLoading: false)
+            creds.persist()
             debugPasswordCredentials = creds
             return
         }

@@ -369,11 +369,19 @@ final class TerminalSidebarStore: ObservableObject {
             return existing
         }
 
-        guard let host = server(for: workspace.hostID) else {
+        guard var host = server(for: workspace.hostID) else {
             let controller = TerminalSessionController.unavailable(workspaceID: workspace.id)
             controllers[workspace.id] = controller
             return controller
         }
+
+        applyDebugWebSocketConfig(&host)
+        if let idx = hosts.firstIndex(where: { $0.id == host.id }), hosts[idx].wsPort != host.wsPort {
+            hosts[idx] = host
+        }
+        #if DEBUG
+        NSLog("📱 controller(for:) host=%@ wsPort=%@ hasWS=%d", host.hostname, String(describing: host.wsPort), host.hasWebSocketEndpoint ? 1 : 0)
+        #endif
 
         let controller = makeController(for: workspace, host: host)
         controllers[workspace.id] = controller
@@ -459,6 +467,10 @@ final class TerminalSidebarStore: ObservableObject {
             mergedHosts.append(preservedHost)
         }
 
+        for index in mergedHosts.indices {
+            applyDebugWebSocketConfig(&mergedHosts[index])
+        }
+
         hosts = mergedHosts.sorted(by: { $0.sortIndex < $1.sortIndex })
 
         for index in workspaces.indices {
@@ -490,7 +502,11 @@ final class TerminalSidebarStore: ObservableObject {
     private func rebuildControllers() {
         controllers.removeAll()
         for workspace in workspaces {
-            guard let host = server(for: workspace.hostID) else { continue }
+            guard var host = server(for: workspace.hostID) else { continue }
+            applyDebugWebSocketConfig(&host)
+            if let idx = hosts.firstIndex(where: { $0.id == host.id }), hosts[idx].wsPort != host.wsPort {
+                hosts[idx] = host
+            }
             controllers[workspace.id] = makeController(for: workspace, host: host)
         }
     }
@@ -772,16 +788,16 @@ final class TerminalSidebarStore: ObservableObject {
         #if DEBUG
         if host.wsPort == nil {
             host.wsPort = 9444
-            // In DEBUG on simulator, read the desktop app's WS secret from the host filesystem.
-            // The simulator process can read host paths directly (it runs on the host).
-            let hostSecretPath = NSHomeDirectory()
-                .components(separatedBy: "/Library/Developer/CoreSimulator")
-                .first
-                .map { $0 + "/Library/Application Support/cmux/mobile-ws-secret" }
-            if let path = hostSecretPath,
-               let secret = try? String(contentsOfFile: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+            let home = NSHomeDirectory()
+            let hostHome = home.components(separatedBy: "/Library/Developer/CoreSimulator").first ?? home
+            let secretPath = hostHome + "/Library/Application Support/cmux/mobile-ws-secret"
+            NSLog("📱 WS debug: home=%@ hostHome=%@ secretPath=%@ exists=%d", home, hostHome, secretPath, FileManager.default.fileExists(atPath: secretPath) ? 1 : 0)
+            if let secret = try? String(contentsOfFile: secretPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
                !secret.isEmpty {
                 host.wsSecret = secret
+                NSLog("📱 WS debug: secret loaded (%d chars)", secret.count)
+            } else {
+                NSLog("📱 WS debug: failed to load secret")
             }
             host.hostname = "127.0.0.1"
         }
