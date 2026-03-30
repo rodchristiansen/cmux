@@ -9959,9 +9959,47 @@ struct GhosttyTerminalView: NSViewRepresentable {
             onGeometryChanged?()
         }
 
+        private static func rectApproximatelyEqual(
+            _ lhs: CGRect,
+            _ rhs: CGRect,
+            epsilon: CGFloat = 0.5
+        ) -> Bool {
+            abs(lhs.origin.x - rhs.origin.x) <= epsilon &&
+                abs(lhs.origin.y - rhs.origin.y) <= epsilon &&
+                abs(lhs.size.width - rhs.size.width) <= epsilon &&
+                abs(lhs.size.height - rhs.size.height) <= epsilon
+        }
+
+        @discardableResult
+        func synchronizeDirectHostedView(reason: String) -> Bool {
+            guard let directHostedView else { return false }
+
+            let targetFrame = bounds
+            let frameChanged = !Self.rectApproximatelyEqual(directHostedView.frame, targetFrame)
+            if frameChanged {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                directHostedView.frame = targetFrame
+                CATransaction.commit()
+            }
+
+            guard window != nil,
+                  targetFrame.width > 1,
+                  targetFrame.height > 1 else {
+                return frameChanged
+            }
+
+            let reconciled = directHostedView.reconcileGeometryNow()
+            if frameChanged || reconciled {
+                directHostedView.refreshSurfaceNow(reason: "workspace.directHost.\(reason)")
+            }
+            return frameChanged || reconciled
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onDidMoveToWindow?()
+            _ = synchronizeDirectHostedView(reason: "viewDidMoveToWindow")
             notifyGeometryChangedIfNeeded()
         }
 
@@ -9972,7 +10010,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
 
         override func layout() {
             super.layout()
-            directHostedView?.frame = bounds
+            _ = synchronizeDirectHostedView(reason: "layout")
             notifyGeometryChangedIfNeeded()
         }
 
@@ -10095,8 +10133,25 @@ struct GhosttyTerminalView: NSViewRepresentable {
 
         if let hostContainer = nsView as? HostContainerView {
             let forwardedDropZone = isVisibleInUI ? paneDropZone : nil
+            let requiresReparent = hostedView.superview !== hostContainer
 
             hostContainer.directHostedView = hostedView
+            if requiresReparent {
+#if DEBUG
+                dlog(
+                    "ws.directHost.attach surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                    "pane=\(paneId.id.uuidString.prefix(5)) " +
+                    "hostWindow=\(hostContainer.window != nil ? 1 : 0) " +
+                    "hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
+                    "hasSuperview=\(hostedView.superview != nil ? 1 : 0)"
+                )
+#endif
+                hostedView.removeFromSuperview()
+                hostedView.frame = hostContainer.bounds
+                hostedView.autoresizingMask = [.width, .height]
+                hostContainer.addSubview(hostedView)
+            }
+
             hostedView.attachSurface(terminalSurface)
             hostedView.setFocusHandler { onFocus?(terminalSurface.id) }
             hostedView.setTriggerFlashHandler(onTriggerFlash)
@@ -10114,20 +10169,15 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 hostedView.setDropZoneOverlay(zone: forwardedDropZone)
             }
 
-            if hostedView.superview !== hostContainer {
-#if DEBUG
-                dlog(
-                    "ws.directHost.attach surface=\(terminalSurface.id.uuidString.prefix(5)) " +
-                    "pane=\(paneId.id.uuidString.prefix(5)) " +
-                    "hostWindow=\(hostContainer.window != nil ? 1 : 0) " +
-                    "hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
-                    "hasSuperview=\(hostedView.superview != nil ? 1 : 0)"
+            if hostContainer.window != nil,
+               hostContainer.bounds.width > 1,
+               hostContainer.bounds.height > 1 {
+                _ = hostContainer.synchronizeDirectHostedView(
+                    reason: requiresReparent ? "attach" : "update"
                 )
-#endif
-                hostedView.removeFromSuperview()
-                hostedView.frame = hostContainer.bounds
-                hostedView.autoresizingMask = [.width, .height]
-                hostContainer.addSubview(hostedView)
+                if terminalSurface.surface == nil {
+                    terminalSurface.requestBackgroundSurfaceStartIfNeeded()
+                }
             }
 
             hostedView.setVisibleInUI(isVisibleInUI)
