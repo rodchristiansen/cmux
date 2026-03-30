@@ -68,6 +68,46 @@ private func cmuxScalarHex(_ value: String?) -> String {
         .map { String(format: "%04X", $0.value) }
         .joined(separator: ",")
 }
+
+private enum CmuxTerminalHostDebugLog {
+    private static let logURL = URL(fileURLWithPath: "/tmp/cmux-terminal-host-debug.log")
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let lock = NSLock()
+    private static let launchUptime = ProcessInfo.processInfo.systemUptime
+    private static var sequence: UInt64 = 0
+
+    static func log(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        sequence &+= 1
+        let seq = sequence
+
+        let monoMs = (ProcessInfo.processInfo.systemUptime - launchUptime) * 1000.0
+        let line =
+            "[\(timestampFormatter.string(from: Date()))] " +
+            "seq=\(seq) mono_ms=\(String(format: "%.2f", monoMs)) " +
+            "\(message)\n"
+
+        if let handle = FileHandle(forWritingAtPath: logURL.path) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(
+                atPath: logURL.path,
+                contents: Data(line.utf8)
+            )
+        }
+    }
+
+    static func rect(_ rect: CGRect) -> String {
+        String(format: "%.1f,%.1f %.1fx%.1f", rect.origin.x, rect.origin.y, rect.width, rect.height)
+    }
+}
 #endif
 
 enum GhosttyPasteboardHelper {
@@ -3495,6 +3535,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     func attachToView(_ view: GhosttyNSView) {
 #if DEBUG
+        CmuxTerminalHostDebugLog.log(
+            "h1.surface.attach.enter surface=\(id.uuidString.prefix(5)) " +
+            "view=\(Unmanaged.passUnretained(view).toOpaque()) " +
+            "attached=\(attachedView != nil ? 1 : 0) hasSurface=\(surface != nil ? 1 : 0) " +
+            "inWindow=\(view.window != nil ? 1 : 0) bounds=\(CmuxTerminalHostDebugLog.rect(view.bounds))"
+        )
         dlog(
             "surface.attach surface=\(id.uuidString.prefix(5)) view=\(Unmanaged.passUnretained(view).toOpaque()) " +
             "attached=\(attachedView != nil ? 1 : 0) hasSurface=\(surface != nil ? 1 : 0) inWindow=\(view.window != nil ? 1 : 0)"
@@ -3511,6 +3557,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
         // itself is unchanged.
         if attachedView === view && surface != nil {
 #if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.surface.attach.reuse surface=\(id.uuidString.prefix(5)) " +
+                "view=\(Unmanaged.passUnretained(view).toOpaque()) inWindow=\(view.window != nil ? 1 : 0)"
+            )
             dlog("surface.attach.reuse surface=\(id.uuidString.prefix(5)) view=\(Unmanaged.passUnretained(view).toOpaque())")
 #endif
             if let screen = view.window?.screen ?? NSScreen.main,
@@ -3524,6 +3574,11 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         if let attachedView, attachedView !== view {
 #if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.surface.attach.skip surface=\(id.uuidString.prefix(5)) " +
+                "reason=alreadyAttachedToDifferentView current=\(Unmanaged.passUnretained(attachedView).toOpaque()) " +
+                "new=\(Unmanaged.passUnretained(view).toOpaque())"
+            )
             dlog(
                 "surface.attach.skip surface=\(id.uuidString.prefix(5)) reason=alreadyAttachedToDifferentView " +
                 "current=\(Unmanaged.passUnretained(attachedView).toOpaque()) new=\(Unmanaged.passUnretained(view).toOpaque())"
@@ -3539,6 +3594,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
         if surface == nil {
             guard view.window != nil else {
 #if DEBUG
+                CmuxTerminalHostDebugLog.log(
+                    "h1.surface.attach.defer surface=\(id.uuidString.prefix(5)) " +
+                    "reason=noWindow bounds=\(CmuxTerminalHostDebugLog.rect(view.bounds))"
+                )
                 dlog(
                     "surface.attach.defer surface=\(id.uuidString.prefix(5)) reason=noWindow " +
                     "bounds=\(String(format: "%.1fx%.1f", view.bounds.width, view.bounds.height))"
@@ -3547,10 +3606,17 @@ final class TerminalSurface: Identifiable, ObservableObject {
                 return
             }
 #if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.surface.attach.create surface=\(id.uuidString.prefix(5)) " +
+                "view=\(Unmanaged.passUnretained(view).toOpaque()) inWindow=\(view.window != nil ? 1 : 0)"
+            )
             dlog("surface.attach.create surface=\(id.uuidString.prefix(5))")
 #endif
             createSurface(for: view)
 #if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.surface.attach.create.done surface=\(id.uuidString.prefix(5)) hasSurface=\(surface != nil ? 1 : 0)"
+            )
             dlog("surface.attach.create.done surface=\(id.uuidString.prefix(5)) hasSurface=\(surface != nil ? 1 : 0)")
 #endif
         } else if let screen = view.window?.screen ?? NSScreen.main,
@@ -3560,6 +3626,9 @@ final class TerminalSurface: Identifiable, ObservableObject {
             // Surface exists but we're (re)attaching after a view hierarchy move; ensure display id.
             ghostty_surface_set_display_id(s, displayID)
 #if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.surface.attach.displayId surface=\(id.uuidString.prefix(5)) display=\(displayID)"
+            )
             dlog("surface.attach.displayId surface=\(id.uuidString.prefix(5)) display=\(displayID)")
 #endif
         }
@@ -4116,6 +4185,13 @@ final class TerminalSurface: Identifiable, ObservableObject {
         guard surface == nil, attachedView != nil else { return }
         guard !backgroundSurfaceStartQueued else { return }
         backgroundSurfaceStartQueued = true
+#if DEBUG
+        CmuxTerminalHostDebugLog.log(
+            "h1.backgroundStart.queue surface=\(id.uuidString.prefix(5)) " +
+            "attachedView=\(Unmanaged.passUnretained(attachedView!).toOpaque()) " +
+            "inWindow=\(attachedView?.window != nil ? 1 : 0)"
+        )
+#endif
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -4127,6 +4203,11 @@ final class TerminalSurface: Identifiable, ObservableObject {
             self.createSurface(for: view)
             #if DEBUG
             let elapsedMs = (ProcessInfo.processInfo.systemUptime - startedAt) * 1000.0
+            CmuxTerminalHostDebugLog.log(
+                "h1.backgroundStart.run surface=\(self.id.uuidString.prefix(5)) " +
+                "inWindow=\(view.window != nil ? 1 : 0) ready=\(self.surface != nil ? 1 : 0) " +
+                "bounds=\(CmuxTerminalHostDebugLog.rect(view.bounds)) ms=\(String(format: "%.2f", elapsedMs))"
+            )
             dlog(
                 "surface.background_start surface=\(self.id.uuidString.prefix(8)) inWindow=\(view.window != nil ? 1 : 0) ready=\(self.surface != nil ? 1 : 0) ms=\(String(format: "%.2f", elapsedMs))"
             )
@@ -4642,6 +4723,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     func attachSurface(_ surface: TerminalSurface) {
         let isSameSurface = terminalSurface === surface
         let isAlreadyAttached = surface.isAttached(to: self)
+#if DEBUG
+        CmuxTerminalHostDebugLog.log(
+            "h1.surfaceView.attachSurface.enter surface=\(surface.id.uuidString.prefix(5)) " +
+            "sameSurface=\(isSameSurface ? 1 : 0) alreadyAttached=\(isAlreadyAttached ? 1 : 0) " +
+            "runtime=\(surface.surface != nil ? 1 : 0) viewWindow=\(window != nil ? 1 : 0) " +
+            "bounds=\(CmuxTerminalHostDebugLog.rect(bounds))"
+        )
+#endif
         if !isSameSurface {
             appliedColorScheme = nil
         }
@@ -4656,6 +4745,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         }
         applySurfaceBackground()
         applySurfaceColorScheme(force: !isSameSurface || !isAlreadyAttached)
+#if DEBUG
+        CmuxTerminalHostDebugLog.log(
+            "h1.surfaceView.attachSurface.exit surface=\(surface.id.uuidString.prefix(5)) " +
+            "runtime=\(surface.surface != nil ? 1 : 0) viewWindow=\(window != nil ? 1 : 0) " +
+            "pending=\(String(format: "%.1fx%.1f", pendingSurfaceSize?.width ?? 0, pendingSurfaceSize?.height ?? 0)) " +
+            "bounds=\(CmuxTerminalHostDebugLog.rect(bounds))"
+        )
+#endif
     }
 
     override func viewDidMoveToWindow() {
@@ -4675,6 +4772,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
         // If the surface creation was deferred while detached, create/attach it now.
         terminalSurface?.attachToView(self)
+#if DEBUG
+        CmuxTerminalHostDebugLog.log(
+            "h1.surfaceView.windowMove.afterAttach surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "runtime=\(terminalSurface?.surface != nil ? 1 : 0) " +
+            "inWindow=\(self.window != nil ? 1 : 0) bounds=\(CmuxTerminalHostDebugLog.rect(bounds))"
+        )
+#endif
         if let terminalSurface {
             NotificationCenter.default.post(
                 name: .terminalSurfaceHostedViewDidMoveToWindow,
@@ -4705,6 +4809,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         superview?.layoutSubtreeIfNeeded()
         layoutSubtreeIfNeeded()
         updateSurfaceSize()
+#if DEBUG
+        CmuxTerminalHostDebugLog.log(
+            "h2.surfaceView.windowMove.afterSize surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "runtime=\(terminalSurface?.surface != nil ? 1 : 0) " +
+            "pending=\(String(format: "%.1fx%.1f", pendingSurfaceSize?.width ?? 0, pendingSurfaceSize?.height ?? 0)) " +
+            "bounds=\(CmuxTerminalHostDebugLog.rect(bounds))"
+        )
+#endif
         applySurfaceBackground()
         applySurfaceColorScheme(force: true)
         GhosttyApp.shared.synchronizeThemeWithAppearance(
@@ -7209,6 +7321,10 @@ final class GhosttySurfaceScrollView: NSView {
     var debugSurfaceId: UUID? {
         surfaceView.terminalSurface?.id
     }
+
+    var debugRuntimeSurfaceReady: Bool {
+        surfaceView.terminalSurface?.surface != nil
+    }
 #endif
 
     func portalBindingGuardState() -> (surfaceId: UUID?, generation: UInt64?, state: String) {
@@ -7656,7 +7772,21 @@ final class GhosttySurfaceScrollView: NSView {
         synchronizeScrollView()
         synchronizeSurfaceView()
         let didCoreSurfaceChange = synchronizeCoreSurface()
-        return !sizeApproximatelyEqual(previousSurfaceSize, targetSize) || didCoreSurfaceChange
+        let sizeChanged = !sizeApproximatelyEqual(previousSurfaceSize, targetSize)
+#if DEBUG
+        if sizeChanged || didCoreSurfaceChange {
+            CmuxTerminalHostDebugLog.log(
+                "h2.hosted.sync surface=\(debugSurfaceId?.uuidString.prefix(5) ?? "nil") " +
+                "runtime=\(debugRuntimeSurfaceReady ? 1 : 0) " +
+                "inWindow=\(window != nil ? 1 : 0) " +
+                "bounds=\(CmuxTerminalHostDebugLog.rect(bounds)) " +
+                "oldSurface=\(String(format: "%.1fx%.1f", previousSurfaceSize.width, previousSurfaceSize.height)) " +
+                "targetSurface=\(String(format: "%.1fx%.1f", targetSize.width, targetSize.height)) " +
+                "coreChanged=\(didCoreSurfaceChange ? 1 : 0)"
+            )
+        }
+#endif
+        return sizeChanged || didCoreSurfaceChange
     }
 
     @discardableResult
@@ -9986,6 +10116,17 @@ struct GhosttyTerminalView: NSViewRepresentable {
             guard window != nil,
                   targetFrame.width > 1,
                   targetFrame.height > 1 else {
+#if DEBUG
+                CmuxTerminalHostDebugLog.log(
+                    "h2.host.sync.defer reason=\(reason) " +
+                    "host=\(instanceSerial) surface=\(directHostedView.debugSurfaceId?.uuidString.prefix(5) ?? "nil") " +
+                    "runtime=\(directHostedView.debugRuntimeSurfaceReady ? 1 : 0) " +
+                    "hostWindow=\(window != nil ? 1 : 0) " +
+                    "bounds=\(CmuxTerminalHostDebugLog.rect(targetFrame)) " +
+                    "hostedFrame=\(CmuxTerminalHostDebugLog.rect(directHostedView.frame)) " +
+                    "frameChanged=\(frameChanged ? 1 : 0)"
+                )
+#endif
                 return frameChanged
             }
 
@@ -9993,6 +10134,17 @@ struct GhosttyTerminalView: NSViewRepresentable {
             if frameChanged || reconciled {
                 directHostedView.refreshSurfaceNow(reason: "workspace.directHost.\(reason)")
             }
+#if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h2.host.sync reason=\(reason) " +
+                "host=\(instanceSerial) surface=\(directHostedView.debugSurfaceId?.uuidString.prefix(5) ?? "nil") " +
+                "runtime=\(directHostedView.debugRuntimeSurfaceReady ? 1 : 0) " +
+                "hostWindow=\(window != nil ? 1 : 0) " +
+                "bounds=\(CmuxTerminalHostDebugLog.rect(targetFrame)) " +
+                "hostedFrame=\(CmuxTerminalHostDebugLog.rect(directHostedView.frame)) " +
+                "frameChanged=\(frameChanged ? 1 : 0) reconciled=\(reconciled ? 1 : 0)"
+            )
+#endif
             return frameChanged || reconciled
         }
 
@@ -10000,6 +10152,17 @@ struct GhosttyTerminalView: NSViewRepresentable {
             super.viewDidMoveToWindow()
             onDidMoveToWindow?()
             _ = synchronizeDirectHostedView(reason: "viewDidMoveToWindow")
+#if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.host.windowMove host=\(instanceSerial) " +
+                "surface=\(directHostedView?.debugSurfaceId?.uuidString.prefix(5) ?? "nil") " +
+                "runtime=\(directHostedView?.debugRuntimeSurfaceReady == true ? 1 : 0) " +
+                "hostWindow=\(window != nil ? 1 : 0) " +
+                "bounds=\(CmuxTerminalHostDebugLog.rect(bounds)) " +
+                "hostedSuperview=\(directHostedView?.superview != nil ? 1 : 0) " +
+                "hostedWindow=\(directHostedView?.window != nil ? 1 : 0)"
+            )
+#endif
             notifyGeometryChangedIfNeeded()
         }
 
@@ -10136,6 +10299,16 @@ struct GhosttyTerminalView: NSViewRepresentable {
             let requiresReparent = hostedView.superview !== hostContainer
 
             hostContainer.directHostedView = hostedView
+#if DEBUG
+            CmuxTerminalHostDebugLog.log(
+                "h1.directHost.update.enter surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                "pane=\(paneId.id.uuidString.prefix(5)) host=\(hostContainer.instanceSerial) " +
+                "requiresReparent=\(requiresReparent ? 1 : 0) runtime=\(terminalSurface.surface != nil ? 1 : 0) " +
+                "hostWindow=\(hostContainer.window != nil ? 1 : 0) hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
+                "hostBounds=\(CmuxTerminalHostDebugLog.rect(hostContainer.bounds)) " +
+                "hostedFrame=\(CmuxTerminalHostDebugLog.rect(hostedView.frame))"
+            )
+#endif
             if requiresReparent {
 #if DEBUG
                 dlog(
@@ -10150,6 +10323,15 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 hostedView.frame = hostContainer.bounds
                 hostedView.autoresizingMask = [.width, .height]
                 hostContainer.addSubview(hostedView)
+#if DEBUG
+                CmuxTerminalHostDebugLog.log(
+                    "h1.directHost.update.reparented surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                    "pane=\(paneId.id.uuidString.prefix(5)) host=\(hostContainer.instanceSerial) " +
+                    "hostWindow=\(hostContainer.window != nil ? 1 : 0) hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
+                    "hostBounds=\(CmuxTerminalHostDebugLog.rect(hostContainer.bounds)) " +
+                    "hostedFrame=\(CmuxTerminalHostDebugLog.rect(hostedView.frame))"
+                )
+#endif
             }
 
             hostedView.attachSurface(terminalSurface)
@@ -10172,11 +10354,27 @@ struct GhosttyTerminalView: NSViewRepresentable {
             if hostContainer.window != nil,
                hostContainer.bounds.width > 1,
                hostContainer.bounds.height > 1 {
-                _ = hostContainer.synchronizeDirectHostedView(
+                let didSynchronize = hostContainer.synchronizeDirectHostedView(
                     reason: requiresReparent ? "attach" : "update"
                 )
+#if DEBUG
+                CmuxTerminalHostDebugLog.log(
+                    "h2.directHost.update.afterSync surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                    "pane=\(paneId.id.uuidString.prefix(5)) host=\(hostContainer.instanceSerial) " +
+                    "runtime=\(terminalSurface.surface != nil ? 1 : 0) synchronized=\(didSynchronize ? 1 : 0) " +
+                    "hostWindow=\(hostContainer.window != nil ? 1 : 0) hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
+                    "hostBounds=\(CmuxTerminalHostDebugLog.rect(hostContainer.bounds)) " +
+                    "hostedFrame=\(CmuxTerminalHostDebugLog.rect(hostedView.frame))"
+                )
+#endif
                 if terminalSurface.surface == nil {
                     terminalSurface.requestBackgroundSurfaceStartIfNeeded()
+#if DEBUG
+                    CmuxTerminalHostDebugLog.log(
+                        "h1.directHost.update.backgroundStartRequested surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                        "pane=\(paneId.id.uuidString.prefix(5)) host=\(hostContainer.instanceSerial)"
+                    )
+#endif
                 }
             }
 
