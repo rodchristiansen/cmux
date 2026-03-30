@@ -1839,7 +1839,11 @@ struct CMUXCLI {
             let payload = try client.sendV2(method: "surface.close", params: params)
             if let closedWorkspaceId = (payload["workspace_id"] as? String) ?? wsId,
                let closedSurfaceId = (payload["surface_id"] as? String) ?? sfId {
-                try? tmuxPruneCompatSurfaceState(workspaceId: closedWorkspaceId, surfaceId: closedSurfaceId)
+                try? tmuxPruneCompatSurfaceState(
+                    workspaceId: closedWorkspaceId,
+                    surfaceId: closedSurfaceId,
+                    client: client
+                )
             }
             printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat))
 
@@ -9094,12 +9098,13 @@ struct CMUXCLI {
             let callerSurface = tmuxCallerSurfaceHandle()
             let canonicalCallerPane = callerPane.flatMap { try? tmuxCanonicalPaneId($0, workspaceId: resolved.workspaceId, client: client) }
             let paneMatch = callerPane != nil && (resolved.paneId == callerPane! || resolved.paneId == canonicalCallerPane)
-            if paneMatch, let callerSurface {
-                let surfaceId = try tmuxCanonicalSurfaceId(
+            if paneMatch,
+               let callerSurface,
+               let surfaceId = try? tmuxCanonicalSurfaceId(
                     callerSurface,
                     workspaceId: resolved.workspaceId,
                     client: client
-                )
+               ) {
                 return (resolved.workspaceId, resolved.paneId, surfaceId)
             }
             let surfaceId = try tmuxSelectedSurfaceId(
@@ -9113,12 +9118,12 @@ struct CMUXCLI {
         let workspaceId = try tmuxResolveWorkspaceTarget(tmuxWindowSelector(from: raw), client: client)
         if tmuxWindowSelector(from: raw) == nil,
            tmuxResolvedCallerWorkspaceId(client: client) == workspaceId,
-           let callerSurface = tmuxCallerSurfaceHandle() {
-            let surfaceId = try tmuxCanonicalSurfaceId(
+           let callerSurface = tmuxCallerSurfaceHandle(),
+           let surfaceId = try? tmuxCanonicalSurfaceId(
                 callerSurface,
                 workspaceId: workspaceId,
                 client: client
-            )
+           ) {
             return (workspaceId, nil, surfaceId)
         }
         let surfaceId = try resolveSurfaceId(nil, workspaceId: workspaceId, client: client)
@@ -10376,7 +10381,11 @@ struct CMUXCLI {
                 "workspace_id": target.workspaceId,
                 "surface_id": target.surfaceId
             ])
-            try? tmuxPruneCompatSurfaceState(workspaceId: target.workspaceId, surfaceId: target.surfaceId)
+            try? tmuxPruneCompatSurfaceState(
+                workspaceId: target.workspaceId,
+                surfaceId: target.surfaceId,
+                client: client
+            )
             // Re-equalize the agent column after removing a pane
             _ = try? client.sendV2(method: "workspace.equalize_splits", params: [
                 "workspace_id": target.workspaceId,
@@ -10721,7 +10730,85 @@ struct CMUXCLI {
         }
     }
 
-    private func tmuxPruneCompatSurfaceState(workspaceId: String, surfaceId: String) throws {
+    private func tmuxCompatPaneAnchorSurfaceId(_ pane: [String: Any]) -> String? {
+        if let selected = pane["selected_surface_id"] as? String, !selected.isEmpty {
+            return selected
+        }
+        let surfaceIds = pane["surface_ids"] as? [String] ?? []
+        return surfaceIds.first
+    }
+
+    private func tmuxCompatPanePixelFrame(_ pane: [String: Any]) -> (x: Double, y: Double)? {
+        guard let frame = pane["pixel_frame"] as? [String: Any],
+              let x = doubleFromAny(frame["x"]),
+              let y = doubleFromAny(frame["y"]) else {
+            return nil
+        }
+        return (x, y)
+    }
+
+    private func tmuxReplacementColumnSurfaceId(
+        workspaceId: String,
+        layout: MainVerticalState,
+        client: SocketClient
+    ) -> String? {
+        guard let payload = try? client.sendV2(method: "pane.list", params: ["workspace_id": workspaceId]) else {
+            return nil
+        }
+        let panes = payload["panes"] as? [[String: Any]] ?? []
+        guard !panes.isEmpty else { return nil }
+
+        guard let mainPane = panes.first(where: { pane in
+            let surfaceIds = pane["surface_ids"] as? [String] ?? []
+            if surfaceIds.contains(layout.mainSurfaceId) {
+                return true
+            }
+            return (pane["selected_surface_id"] as? String) == layout.mainSurfaceId
+        }) else {
+            return nil
+        }
+
+        let mainPaneId = mainPane["id"] as? String
+        let nonMainPanes = panes.filter { ($0["id"] as? String) != mainPaneId }
+        guard !nonMainPanes.isEmpty else { return nil }
+
+        let candidatePanes: [[String: Any]]
+        if let mainFrame = tmuxCompatPanePixelFrame(mainPane) {
+            let rightColumn = nonMainPanes.filter { pane in
+                guard let frame = tmuxCompatPanePixelFrame(pane) else { return false }
+                return frame.x > mainFrame.x + 0.5
+            }
+            candidatePanes = rightColumn.isEmpty ? nonMainPanes : rightColumn
+        } else {
+            candidatePanes = nonMainPanes
+        }
+
+        let bottomMostPane = candidatePanes.max { lhs, rhs in
+            let lhsFrame = tmuxCompatPanePixelFrame(lhs)
+            let rhsFrame = tmuxCompatPanePixelFrame(rhs)
+            switch (lhsFrame, rhsFrame) {
+            case let (.some(lhsFrame), .some(rhsFrame)):
+                if lhsFrame.y == rhsFrame.y {
+                    return lhsFrame.x < rhsFrame.x
+                }
+                return lhsFrame.y < rhsFrame.y
+            case (.none, .some):
+                return true
+            case (.some, .none):
+                return false
+            case (.none, .none):
+                return false
+            }
+        }
+
+        return bottomMostPane.flatMap { tmuxCompatPaneAnchorSurfaceId($0) }
+    }
+
+    private func tmuxPruneCompatSurfaceState(
+        workspaceId: String,
+        surfaceId: String,
+        client: SocketClient
+    ) throws {
         var store = loadTmuxCompatStore()
         var changed = false
 
@@ -10737,8 +10824,18 @@ struct CMUXCLI {
                 changed = true
             } else if layout.lastColumnSurfaceId == surfaceId {
                 var updatedLayout = layout
-                updatedLayout.lastColumnSurfaceId = nil
+                let replacementSurfaceId = tmuxReplacementColumnSurfaceId(
+                    workspaceId: workspaceId,
+                    layout: layout,
+                    client: client
+                )
+                updatedLayout.lastColumnSurfaceId = replacementSurfaceId
                 store.mainVerticalLayouts[workspaceId] = updatedLayout
+                if let replacementSurfaceId {
+                    store.lastSplitSurface[workspaceId] = replacementSurfaceId
+                } else {
+                    store.lastSplitSurface.removeValue(forKey: workspaceId)
+                }
                 changed = true
             }
         }
