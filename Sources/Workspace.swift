@@ -9187,7 +9187,9 @@ final class Workspace: Identifiable, ObservableObject {
         flushWorkspaceWindowLayouts()
 
         let geometryPendingBefore = layoutFollowUpNeedsGeometryPass
-        let terminalPortalPendingBefore = terminalPortalVisibilityNeedsFollowUp()
+        let terminalPortalPendingBefore = usesLegacyWorkspaceTerminalPortals
+            ? terminalPortalVisibilityNeedsFollowUp()
+            : false
         let browserVisibilityPendingBefore = browserPortalVisibilityNeedsFollowUp()
         let terminalFocusPendingBefore = terminalFocusNeedsFollowUp()
         let browserPanelPendingBefore = browserPanelNeedsFollowUp()
@@ -9209,8 +9211,12 @@ final class Workspace: Identifiable, ObservableObject {
             }
         }
 
-        reconcileTerminalPortalVisibilityForCurrentRenderedLayout()
-        let terminalPortalPending = terminalPortalVisibilityNeedsFollowUp()
+        if usesLegacyWorkspaceTerminalPortals {
+            reconcileTerminalPortalVisibilityForCurrentRenderedLayout()
+        }
+        let terminalPortalPending = usesLegacyWorkspaceTerminalPortals
+            ? terminalPortalVisibilityNeedsFollowUp()
+            : false
 
         let reason = layoutFollowUpReason ?? "workspace.layout"
         reconcileBrowserPortalVisibilityForCurrentRenderedLayout(reason: reason)
@@ -9355,8 +9361,14 @@ final class Workspace: Identifiable, ObservableObject {
         return visiblePanelIds
     }
 
+    /// Workspace terminal panes are direct-mounted from `WorkspaceSplitNativeHost`.
+    /// The split host is now the sole owner of terminal hosted-view visibility/active state.
+    /// Keep the legacy portal machinery dormant unless a non-workspace path needs it again.
+    private var usesLegacyWorkspaceTerminalPortals: Bool { false }
+
     @discardableResult
     private func reconcileTerminalPortalVisibilityForCurrentRenderedLayout() -> Bool {
+        guard usesLegacyWorkspaceTerminalPortals else { return false }
         let visiblePanelIds = renderedVisiblePanelIdsForCurrentLayout()
         var didChange = false
 
@@ -9382,6 +9394,7 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     private func terminalPortalVisibilityNeedsFollowUp() -> Bool {
+        guard usesLegacyWorkspaceTerminalPortals else { return false }
         let visiblePanelIds = renderedVisiblePanelIdsForCurrentLayout()
 
         for panel in panels.values {

@@ -420,11 +420,16 @@ struct WorkspaceContentView: View {
         }
 
         Group {
-            if isMinimalMode {
-                splitView
-                    .ignoresSafeArea(.container, edges: .top)
+            if isWorkspaceVisible {
+                if isMinimalMode {
+                    splitView
+                        .ignoresSafeArea(.container, edges: .top)
+                } else {
+                    splitView
+                }
             } else {
-                splitView
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
