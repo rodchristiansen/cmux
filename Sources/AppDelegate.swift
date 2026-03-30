@@ -5993,6 +5993,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             backing: .buffered,
             defer: false
         )
+        // Match Terminal.app: when a cmux window is in native fullscreen, keep
+        // newly created windows out of that fullscreen tile so they open on a
+        // separate Space/Desktop instead of overlaying the fullscreen window.
+        window.collectionBehavior.insert(.fullScreenDisallowsTiling)
         window.title = ""
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true

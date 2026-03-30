@@ -98,6 +98,28 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertEqual(secondManager.tabs.count, secondCount + 1, "Cmd+N should add workspace to the event's window")
     }
 
+    func testCreateMainWindowDisallowsFullScreenTiling() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer {
+            closeWindow(withId: windowId)
+        }
+
+        guard let window = window(withId: windowId) else {
+            XCTFail("Expected test window")
+            return
+        }
+
+        XCTAssertTrue(
+            window.collectionBehavior.contains(.fullScreenDisallowsTiling),
+            "Main windows should opt out of fullscreen tiling so new windows do not join an existing fullscreen Space"
+        )
+    }
+
     func testAddWorkspaceInPreferredMainWindowIgnoresStaleTabManagerPointer() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
