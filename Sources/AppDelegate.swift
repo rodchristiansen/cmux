@@ -1915,7 +1915,21 @@ func shouldRouteBrowserFindCommandEquivalentThroughWebContentFirst(
     _ event: NSEvent,
     owningWebView: CmuxWebView? = nil
 ) -> Bool {
-    browserFindCommandEquivalent(for: event) != nil
+    guard let shortcut = browserFindCommandEquivalent(for: event) else {
+        return false
+    }
+
+    if shortcut.keepsCmuxBrowserFindBarOwnershipWhenVisible,
+       let owningWebView {
+        let browserFindBarIsVisible = MainActor.assumeIsolated {
+            AppDelegate.shared?.browserFindBarIsVisible(for: owningWebView) == true
+        }
+        if browserFindBarIsVisible {
+            return false
+        }
+    }
+
+    return true
 }
 
 func cmuxOwningGhosttyView(for responder: NSResponder?) -> GhosttyNSView? {
@@ -11331,6 +11345,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func browserPanel(for panelId: UUID) -> BrowserPanel? {
         return tabManager?.selectedWorkspace?.browserPanel(for: panelId)
+    }
+
+    fileprivate func browserFindBarIsVisible(for webView: CmuxWebView) -> Bool {
+        browserPanelOwning(webView)?.searchState != nil
+    }
+
+    private func browserPanelOwning(_ webView: CmuxWebView) -> BrowserPanel? {
+        var candidateManagers: [TabManager] = []
+        var seenManagers = Set<ObjectIdentifier>()
+
+        func appendCandidate(_ manager: TabManager?) {
+            guard let manager else { return }
+            let identifier = ObjectIdentifier(manager)
+            guard seenManagers.insert(identifier).inserted else { return }
+            candidateManagers.append(manager)
+        }
+
+        if let window = webView.window,
+           let context = contextForMainWindow(window) {
+            appendCandidate(context.tabManager)
+        }
+        appendCandidate(tabManager)
+        for context in mainWindowContexts.values {
+            appendCandidate(context.tabManager)
+        }
+
+        for manager in candidateManagers {
+            if let panel = browserPanelOwning(webView, in: manager) {
+                return panel
+            }
+        }
+        return nil
+    }
+
+    private func browserPanelOwning(_ webView: CmuxWebView, in manager: TabManager) -> BrowserPanel? {
+        for workspace in manager.tabs {
+            if let panel = workspace.panels.values
+                .compactMap({ $0 as? BrowserPanel })
+                .first(where: { $0.webView === webView }) {
+                return panel
+            }
+        }
+        return nil
     }
 
     private func setActiveMainWindow(_ window: NSWindow) {
