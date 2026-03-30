@@ -276,10 +276,12 @@ struct WorkspaceContentView: View {
             }
         }()
 
-        let splitView = WorkspaceSplitView(controller: workspace.splitController) { tab, paneId in
-            // Content for each tab in WorkspaceSplit
-            let _ = Self.debugPanelLookup(tab: tab, workspace: workspace)
-            if let panel = workspace.panel(for: tab.id) {
+        let splitView = WorkspaceSplitView(
+            controller: workspace.splitController,
+            nativeContent: { tab, paneId in
+                let _ = Self.debugPanelLookup(tab: tab, workspace: workspace)
+                guard let panel = workspace.panel(for: tab.id) as? TerminalPanel else { return nil }
+
                 let isFocused = isWorkspaceInputActive && workspace.focusedPanelId == panel.id
                 let isSelectedInPane = workspace.splitController.selectedTab(inPane: paneId)?.id == tab.id
                 let isVisibleInUI = Self.panelVisibleInUI(
@@ -294,33 +296,75 @@ struct WorkspaceContentView: View {
                     ),
                     isManuallyUnread: workspace.manualUnreadPanelIds.contains(panel.id)
                 )
-                PanelContentView(
-                    panel: panel,
-                    paneId: paneId,
-                    isFocused: isFocused,
-                    isSelectedInPane: isSelectedInPane,
-                    isVisibleInUI: isVisibleInUI,
-                    portalPriority: workspacePortalPriority,
-                    isSplit: isSplit,
-                    appearance: appearance,
-                    hasUnreadNotification: showsNotificationRing && !usesWorkspacePaneOverlay,
-                    onFocus: {
-                        // Keep WorkspaceSplit focus in sync with the AppKit first responder for the
-                        // active workspace. This prevents divergence between the blue focused-tab
-                        // indicator and where keyboard input/flash-focus actually lands.
-                        guard isWorkspaceInputActive else { return }
-                        guard workspace.panels[panel.id] != nil else { return }
-                        workspace.focusPanel(panel.id, trigger: .terminalFirstResponder)
-                    },
-                    onRequestPanelFocus: {
-                        guard isWorkspaceInputActive else { return }
-                        guard workspace.panels[panel.id] != nil else { return }
-                        workspace.focusPanel(panel.id)
-                    },
-                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+
+                return .terminal(
+                    WorkspaceTerminalPaneContent(
+                        panel: panel,
+                        isFocused: isFocused,
+                        isVisibleInUI: isVisibleInUI,
+                        isSplit: isSplit,
+                        appearance: appearance,
+                        hasUnreadNotification: showsNotificationRing && !usesWorkspacePaneOverlay,
+                        onFocus: {
+                            guard isWorkspaceInputActive else { return }
+                            guard workspace.panels[panel.id] != nil else { return }
+                            workspace.focusPanel(panel.id, trigger: .terminalFirstResponder)
+                        },
+                        onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+                    )
                 )
-                .onTapGesture {
-                    workspace.splitController.focusPane(paneId)
+            }
+        ) { tab, paneId in
+            // Workspace terminal panes are mounted directly by the AppKit split host.
+            // The SwiftUI content path remains for non-terminal panel types.
+            let _ = Self.debugPanelLookup(tab: tab, workspace: workspace)
+            if let panel = workspace.panel(for: tab.id) {
+                if panel is TerminalPanel {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    let isFocused = isWorkspaceInputActive && workspace.focusedPanelId == panel.id
+                    let isSelectedInPane = workspace.splitController.selectedTab(inPane: paneId)?.id == tab.id
+                    let isVisibleInUI = Self.panelVisibleInUI(
+                        isWorkspaceVisible: isWorkspaceVisible,
+                        isSelectedInPane: isSelectedInPane,
+                        isFocused: isFocused
+                    )
+                    let showsNotificationRing = Workspace.shouldShowUnreadIndicator(
+                        hasUnreadNotification: notificationStore.hasVisibleNotificationIndicator(
+                            forTabId: workspace.id,
+                            surfaceId: panel.id
+                        ),
+                        isManuallyUnread: workspace.manualUnreadPanelIds.contains(panel.id)
+                    )
+                    PanelContentView(
+                        panel: panel,
+                        paneId: paneId,
+                        isFocused: isFocused,
+                        isSelectedInPane: isSelectedInPane,
+                        isVisibleInUI: isVisibleInUI,
+                        portalPriority: workspacePortalPriority,
+                        isSplit: isSplit,
+                        appearance: appearance,
+                        hasUnreadNotification: showsNotificationRing && !usesWorkspacePaneOverlay,
+                        onFocus: {
+                            // Keep WorkspaceSplit focus in sync with the AppKit first responder for the
+                            // active workspace. This prevents divergence between the blue focused-tab
+                            // indicator and where keyboard input/flash-focus actually lands.
+                            guard isWorkspaceInputActive else { return }
+                            guard workspace.panels[panel.id] != nil else { return }
+                            workspace.focusPanel(panel.id, trigger: .terminalFirstResponder)
+                        },
+                        onRequestPanelFocus: {
+                            guard isWorkspaceInputActive else { return }
+                            guard workspace.panels[panel.id] != nil else { return }
+                            workspace.focusPanel(panel.id)
+                        },
+                        onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+                    )
+                    .onTapGesture {
+                        workspace.splitController.focusPane(paneId)
+                    }
                 }
             } else {
                 // Fallback for tabs without panels (shouldn't happen normally)
