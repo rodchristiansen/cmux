@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Regression test: `cmux __tmux-compat split-window` resolves caller workspace/surface
- refs before calling `surface.split`.
+Regression tests for `cmux __tmux-compat split-window`.
 """
 
 from __future__ import annotations
@@ -99,6 +98,17 @@ class FakeCmuxState:
                 "surface_id": NEW_SURFACE_ID,
                 "pane_id": NEW_PANE_ID,
             }
+        if method == "surface.close":
+            target_surface = str(params.get("surface_id") or "")
+            if target_surface != NEW_SURFACE_ID:
+                raise RuntimeError(
+                    f"expected close target {NEW_SURFACE_ID}, got {target_surface!r}"
+                )
+            self.split_created = False
+            return {
+                "workspace_id": WORKSPACE_ID,
+                "surface_id": NEW_SURFACE_ID,
+            }
         if method == "workspace.equalize_splits":
             return {"ok": True}
         raise RuntimeError(f"Unsupported fake cmux method: {method}")
@@ -137,6 +147,75 @@ class FakeCmuxUnixServer(socketserver.ThreadingUnixStreamServer):
         super().__init__(socket_path, FakeCmuxHandler)
 
 
+def run_cli(
+    cli_path: str,
+    socket_path: Path,
+    fake_home: Path,
+    args: list[str],
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["CMUX_SOCKET_PATH"] = str(socket_path)
+    env["CMUX_WORKSPACE_ID"] = "workspace:1"
+    env["CMUX_SURFACE_ID"] = "surface:1"
+    env["TMUX_PANE"] = "%pane:1"
+    env["HOME"] = str(fake_home)
+    return subprocess.run(
+        [cli_path, "--socket", str(socket_path), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=30,
+    )
+
+
+def assert_successful_split(
+    cli_path: str,
+    socket_path: Path,
+    fake_home: Path,
+    label: str,
+) -> None:
+    proc = run_cli(
+        cli_path,
+        socket_path,
+        fake_home,
+        ["__tmux-compat", "split-window", "-h", "-P", "-F", "#{pane_id}"],
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"{label} returned non-zero\n"
+            f"stdout={proc.stdout.strip()}\n"
+            f"stderr={proc.stderr.strip()}"
+        )
+    if proc.stdout.strip() != f"%{NEW_PANE_ID}":
+        raise AssertionError(
+            f"{label} expected %{NEW_PANE_ID}, got {proc.stdout.strip()!r}"
+        )
+
+
+def assert_resplit_after_close(
+    cli_path: str,
+    socket_path: Path,
+    fake_home: Path,
+) -> None:
+    assert_successful_split(cli_path, socket_path, fake_home, "initial split-window")
+
+    closed = run_cli(
+        cli_path,
+        socket_path,
+        fake_home,
+        ["close-surface", "--workspace", "workspace:1", "--surface", "surface:2"],
+    )
+    if closed.returncode != 0:
+        raise AssertionError(
+            "close-surface returned non-zero\n"
+            f"stdout={closed.stdout.strip()}\n"
+            f"stderr={closed.stderr.strip()}"
+        )
+
+    assert_successful_split(cli_path, socket_path, fake_home, "second split-window")
+
+
 def main() -> int:
     try:
         cli_path = resolve_cmux_cli()
@@ -144,58 +223,30 @@ def main() -> int:
         print(f"FAIL: {exc}")
         return 1
 
-    with tempfile.TemporaryDirectory(prefix="cmux-tmux-surface-ref-") as td:
-        tmp = Path(td)
-        socket_path = tmp / "fake-cmux.sock"
-        state = FakeCmuxState()
-        server = FakeCmuxUnixServer(str(socket_path), state)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+    try:
+        with tempfile.TemporaryDirectory(prefix="cmux-tmux-surface-ref-") as td:
+            tmp = Path(td)
+            socket_path = tmp / "fake-cmux.sock"
+            state = FakeCmuxState()
+            server = FakeCmuxUnixServer(str(socket_path), state)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            fake_home = tmp / "home"
+            fake_home.mkdir(parents=True, exist_ok=True)
 
-        env = os.environ.copy()
-        env["CMUX_SOCKET_PATH"] = str(socket_path)
-        env["CMUX_WORKSPACE_ID"] = "workspace:1"
-        env["CMUX_SURFACE_ID"] = "surface:1"
-        env["TMUX_PANE"] = "%pane:1"
-        fake_home = tmp / "home"
-        fake_home.mkdir(parents=True, exist_ok=True)
-        env["HOME"] = str(fake_home)
+            try:
+                assert_resplit_after_close(cli_path, socket_path, fake_home)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+    except AssertionError as exc:
+        print(f"FAIL: {exc}")
+        return 1
 
-        try:
-            proc = subprocess.run(
-                [
-                    cli_path,
-                    "--socket",
-                    str(socket_path),
-                    "__tmux-compat",
-                    "split-window",
-                    "-h",
-                    "-P",
-                    "-F",
-                    "#{pane_id}",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
-                timeout=30,
-            )
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=2)
-
-        if proc.returncode != 0:
-            print("FAIL: split-window returned non-zero")
-            print(f"stdout={proc.stdout.strip()}")
-            print(f"stderr={proc.stderr.strip()}")
-            return 1
-
-        if proc.stdout.strip() != f"%{NEW_PANE_ID}":
-            print(f"FAIL: expected %{NEW_PANE_ID}, got {proc.stdout.strip()!r}")
-            return 1
-
-    print("PASS: tmux-compat split-window canonicalizes caller surface refs")
+    print(
+        "PASS: tmux-compat split-window handles caller refs and close/re-split flows"
+    )
     return 0
 
 
