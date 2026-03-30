@@ -383,6 +383,18 @@ func tmuxCallerSurfaceHandle() string {
 	return strings.TrimSpace(os.Getenv("CMUX_SURFACE_ID"))
 }
 
+func tmuxResolvedCallerWorkspaceId(rc *rpcContext) string {
+	caller := tmuxCallerWorkspaceHandle()
+	if caller == "" {
+		return ""
+	}
+	wsId, err := tmuxResolveWorkspaceId(rc, caller)
+	if err != nil {
+		return ""
+	}
+	return wsId
+}
+
 func tmuxCallerPaneHandle() string {
 	for _, key := range []string{"TMUX_PANE", "CMUX_PANE_ID"} {
 		v := strings.TrimSpace(os.Getenv(key))
@@ -571,9 +583,6 @@ func tmuxCanonicalPaneId(rc *rpcContext, handle string, workspaceId string) (str
 }
 
 func tmuxCanonicalSurfaceId(rc *rpcContext, handle string, workspaceId string) (string, error) {
-	if isUUIDish(handle) {
-		return handle, nil
-	}
 	payload, err := rc.call("surface.list", map[string]any{"workspace_id": workspaceId})
 	if err != nil {
 		return "", err
@@ -674,7 +683,7 @@ func tmuxResolvePaneTarget(rc *rpcContext, raw string) (workspaceId string, pane
 		if err != nil {
 			return "", "", err
 		}
-	} else if callerWs := tmuxCallerWorkspaceHandle(); callerWs == workspaceId {
+	} else if callerWs := tmuxResolvedCallerWorkspaceId(rc); callerWs == workspaceId {
 		if callerPane := tmuxCallerPaneHandle(); callerPane != "" {
 			if pid, err2 := tmuxCanonicalPaneId(rc, callerPane, workspaceId); err2 == nil {
 				paneId = pid
@@ -751,7 +760,7 @@ func tmuxResolveSurfaceTarget(rc *rpcContext, raw string) (workspaceId string, p
 
 	// When no explicit target and caller workspace matches, use caller's surface
 	if winSel == "" {
-		if callerWs := tmuxCallerWorkspaceHandle(); callerWs == workspaceId {
+		if callerWs := tmuxResolvedCallerWorkspaceId(rc); callerWs == workspaceId {
 			if callerSurface := tmuxCallerSurfaceHandle(); callerSurface != "" {
 				surfaceId, err = tmuxCanonicalSurfaceId(rc, callerSurface, workspaceId)
 				if err == nil {
@@ -806,22 +815,13 @@ type tmuxSplitAnchor struct {
 }
 
 func tmuxAnchoredSplitTarget(rc *rpcContext, workspaceId string) *tmuxSplitAnchor {
-	callerSurface := tmuxCallerSurfaceHandle()
-	if callerSurface == "" {
-		return nil
-	}
-	callerSurfaceId, err := tmuxCanonicalSurfaceId(rc, callerSurface, workspaceId)
-	if err != nil {
-		return nil
-	}
-
 	store := loadTmuxCompatStore()
 	if mvState, ok := store.MainVerticalLayouts[workspaceId]; ok && mvState.LastColumnSurfaceId != "" {
 		lastColumnId, err := tmuxCanonicalSurfaceId(rc, mvState.LastColumnSurfaceId, workspaceId)
 		if err == nil {
 			return &tmuxSplitAnchor{
 				targetSurfaceId: lastColumnId,
-				callerSurfaceId: callerSurfaceId,
+				callerSurfaceId: "",
 				direction:       "down",
 			}
 		}
@@ -834,11 +834,30 @@ func tmuxAnchoredSplitTarget(rc *rpcContext, workspaceId string) *tmuxSplitAncho
 		_ = saveTmuxCompatStore(store)
 	}
 
-	return &tmuxSplitAnchor{
-		targetSurfaceId: callerSurfaceId,
-		callerSurfaceId: callerSurfaceId,
-		direction:       "right",
+	candidateAnchors := []string{tmuxCallerSurfaceHandle()}
+	if mvState, ok := store.MainVerticalLayouts[workspaceId]; ok && mvState.MainSurfaceId != "" {
+		candidateAnchors = append(candidateAnchors, mvState.MainSurfaceId)
 	}
+	for _, candidate := range candidateAnchors {
+		if candidate == "" {
+			continue
+		}
+		anchorSurfaceId, err := tmuxCanonicalSurfaceId(rc, candidate, workspaceId)
+		if err == nil {
+			return &tmuxSplitAnchor{
+				targetSurfaceId: anchorSurfaceId,
+				callerSurfaceId: anchorSurfaceId,
+				direction:       "right",
+			}
+		}
+	}
+
+	if _, ok := store.MainVerticalLayouts[workspaceId]; ok {
+		delete(store.MainVerticalLayouts, workspaceId)
+		delete(store.LastSplitSurface, workspaceId)
+		_ = saveTmuxCompatStore(store)
+	}
+	return nil
 }
 
 // --- TmuxCompatStore (local JSON state) ---
@@ -904,6 +923,47 @@ func saveTmuxCompatStore(store tmuxCompatStore) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+func tmuxPruneCompatWorkspaceState(workspaceId string) error {
+	store := loadTmuxCompatStore()
+	changed := false
+	if _, ok := store.MainVerticalLayouts[workspaceId]; ok {
+		delete(store.MainVerticalLayouts, workspaceId)
+		changed = true
+	}
+	if _, ok := store.LastSplitSurface[workspaceId]; ok {
+		delete(store.LastSplitSurface, workspaceId)
+		changed = true
+	}
+	if changed {
+		return saveTmuxCompatStore(store)
+	}
+	return nil
+}
+
+func tmuxPruneCompatSurfaceState(workspaceId string, surfaceId string) error {
+	store := loadTmuxCompatStore()
+	changed := false
+	if lastSplit := store.LastSplitSurface[workspaceId]; lastSplit == surfaceId {
+		delete(store.LastSplitSurface, workspaceId)
+		changed = true
+	}
+	if layout, ok := store.MainVerticalLayouts[workspaceId]; ok {
+		if layout.MainSurfaceId == surfaceId {
+			delete(store.MainVerticalLayouts, workspaceId)
+			delete(store.LastSplitSurface, workspaceId)
+			changed = true
+		} else if layout.LastColumnSurfaceId == surfaceId {
+			layout.LastColumnSurfaceId = ""
+			store.MainVerticalLayouts[workspaceId] = layout
+			changed = true
+		}
+	}
+	if changed {
+		return saveTmuxCompatStore(store)
+	}
+	return nil
 }
 
 // --- Special key translation ---
@@ -1246,7 +1306,11 @@ func tmuxKillWindow(rc *rpcContext, args []string) error {
 		return err
 	}
 	_, err = rc.call("workspace.close", map[string]any{"workspace_id": wsId})
-	return err
+	if err != nil {
+		return err
+	}
+	_ = tmuxPruneCompatWorkspaceState(wsId)
+	return nil
 }
 
 func tmuxKillPane(rc *rpcContext, args []string) error {
@@ -1259,6 +1323,7 @@ func tmuxKillPane(rc *rpcContext, args []string) error {
 	if err != nil {
 		return err
 	}
+	_ = tmuxPruneCompatSurfaceState(wsId, surfId)
 	// Re-equalize after removal
 	rc.call("workspace.equalize_splits", map[string]any{"workspace_id": wsId, "orientation": "vertical"})
 	return nil
@@ -1644,19 +1709,7 @@ func tmuxSelectLayout(rc *rpcContext, args []string) error {
 			saveTmuxCompatStore(store)
 		}
 	} else if layoutName != "" {
-		store := loadTmuxCompatStore()
-		changed := false
-		if _, ok := store.MainVerticalLayouts[wsId]; ok {
-			delete(store.MainVerticalLayouts, wsId)
-			changed = true
-		}
-		if _, ok := store.LastSplitSurface[wsId]; ok {
-			delete(store.LastSplitSurface, wsId)
-			changed = true
-		}
-		if changed {
-			saveTmuxCompatStore(store)
-		}
+		_ = tmuxPruneCompatWorkspaceState(wsId)
 	}
 
 	return nil
