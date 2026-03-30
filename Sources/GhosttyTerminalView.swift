@@ -6385,7 +6385,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         dlog("link.wordFallback resolved=\(resolvedPath)")
         #endif
 
-        NSWorkspace.shared.open(URL(fileURLWithPath: resolvedPath))
+        PreferredEditorSettings.open(URL(fileURLWithPath: resolvedPath))
     }
 
     /// Check if the word under the mouse cursor resolves to an existing file/directory
