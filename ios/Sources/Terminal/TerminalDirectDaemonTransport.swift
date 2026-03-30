@@ -53,9 +53,7 @@ final class TerminalDirectDaemonTransport: @unchecked Sendable, TerminalTranspor
             TerminalRemoteDaemonSessionTransport(
                 client: TerminalRemoteDaemonClient(transport: transport),
                 command: command,
-                preferredSessionID: sessionName,
-                resumeState: resumeState,
-                attachmentMode: .observer
+                resumeState: resumeState
             )
         },
         fallbackTransportFactory: @escaping @Sendable (

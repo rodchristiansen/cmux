@@ -8,6 +8,7 @@ extension Notification.Name {
     static let socketListenerDidStart = Notification.Name("cmux.socketListenerDidStart")
     static let terminalSurfaceDidBecomeReady = Notification.Name("cmux.terminalSurfaceDidBecomeReady")
     static let terminalSurfaceHostedViewDidMoveToWindow = Notification.Name("cmux.terminalSurfaceHostedViewDidMoveToWindow")
+    static let terminalSurfaceShellActivityDidChange = Notification.Name("cmux.terminalSurfaceShellActivityDidChange")
     static let mainWindowContextsDidChange = Notification.Name("cmux.mainWindowContextsDidChange")
     static let browserDownloadEventDidArrive = Notification.Name("cmux.browserDownloadEventDidArrive")
 }

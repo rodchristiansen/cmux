@@ -10,6 +10,7 @@ protocol GhosttySurfaceViewDelegate: AnyObject {
 protocol TerminalSurfaceHosting: AnyObject {
     var currentGridSize: TerminalGridSize { get }
     func processOutput(_ data: Data)
+    func focusInput()
 }
 
 final class GhosttySurfaceBridge {

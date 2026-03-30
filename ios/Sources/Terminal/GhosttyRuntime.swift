@@ -192,7 +192,6 @@ final class GhosttyRuntime {
         let runtime = Unmanaged<GhosttyRuntime>.fromOpaque(userdata).takeUnretainedValue()
         Task { @MainActor in
             runtime.tick()
-            GhosttySurfaceView.drawVisibleSurfacesForWakeup()
         }
     }
 

@@ -770,14 +770,20 @@ final class TerminalSidebarStore: ObservableObject {
 
     private func applyDebugWebSocketConfig(_ host: inout TerminalHost) {
         #if DEBUG
-        if host.wsPort == nil,
-           let portStr = ProcessInfo.processInfo.environment["CMUX_DEBUG_WS_PORT"],
-           let port = Int(portStr) {
-            host.wsPort = port
-            host.wsSecret = ProcessInfo.processInfo.environment["CMUX_DEBUG_WS_SECRET"] ?? ""
-            if let wsHost = ProcessInfo.processInfo.environment["CMUX_DEBUG_WS_HOST"] {
-                host.hostname = wsHost
+        if host.wsPort == nil {
+            host.wsPort = 9444
+            // In DEBUG on simulator, read the desktop app's WS secret from the host filesystem.
+            // The simulator process can read host paths directly (it runs on the host).
+            let hostSecretPath = NSHomeDirectory()
+                .components(separatedBy: "/Library/Developer/CoreSimulator")
+                .first
+                .map { $0 + "/Library/Application Support/cmux/mobile-ws-secret" }
+            if let path = hostSecretPath,
+               let secret = try? String(contentsOfFile: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+               !secret.isEmpty {
+                host.wsSecret = secret
             }
+            host.hostname = "127.0.0.1"
         }
         #endif
     }
