@@ -1837,6 +1837,10 @@ struct CMUXCLI {
             let sfId = try normalizeSurfaceHandle(surfaceRaw, client: client, workspaceHandle: wsId)
             if let sfId { params["surface_id"] = sfId }
             let payload = try client.sendV2(method: "surface.close", params: params)
+            if let closedWorkspaceId = (payload["workspace_id"] as? String) ?? wsId,
+               let closedSurfaceId = (payload["surface_id"] as? String) ?? sfId {
+                try? tmuxPruneCompatSurfaceState(workspaceId: closedWorkspaceId, surfaceId: closedSurfaceId)
+            }
             printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat))
 
         case "drag-surface-to-split":
@@ -1979,6 +1983,9 @@ struct CMUXCLI {
             let wsId = try normalizeWorkspaceHandle(workspaceRaw, client: client)
             if let wsId { params["workspace_id"] = wsId }
             let payload = try client.sendV2(method: "workspace.close", params: params)
+            if let closedWorkspaceId = (payload["workspace_id"] as? String) ?? wsId {
+                try? tmuxPruneCompatWorkspaceState(workspaceId: closedWorkspaceId)
+            }
             printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["workspace"]))
 
         case "select-workspace":
@@ -8890,6 +8897,13 @@ struct CMUXCLI {
         normalizedTmuxTarget(ProcessInfo.processInfo.environment["CMUX_SURFACE_ID"])
     }
 
+    private func tmuxResolvedCallerWorkspaceId(client: SocketClient) -> String? {
+        guard let callerWorkspace = tmuxCallerWorkspaceHandle() else {
+            return nil
+        }
+        return try? resolveWorkspaceId(callerWorkspace, client: client)
+    }
+
     private func tmuxCanonicalPaneId(
         _ handle: String,
         workspaceId: String,
@@ -8925,10 +8939,6 @@ struct CMUXCLI {
         workspaceId: String,
         client: SocketClient
     ) throws -> String {
-        if isUUID(handle) {
-            return handle
-        }
-
         let payload = try client.sendV2(method: "surface.list", params: ["workspace_id": workspaceId])
         let surfaces = payload["surfaces"] as? [[String: Any]] ?? []
         for surface in surfaces {
@@ -9040,7 +9050,7 @@ struct CMUXCLI {
         let paneId: String
         if let paneSelector {
             paneId = try tmuxCanonicalPaneId(paneSelector, workspaceId: workspaceId, client: client)
-        } else if tmuxCallerWorkspaceHandle() == workspaceId,
+        } else if tmuxResolvedCallerWorkspaceId(client: client) == workspaceId,
                   let callerPane = tmuxCallerPaneHandle(),
                   let callerPaneId = try? tmuxCanonicalPaneId(callerPane, workspaceId: workspaceId, client: client) {
             paneId = callerPaneId
@@ -9102,7 +9112,7 @@ struct CMUXCLI {
 
         let workspaceId = try tmuxResolveWorkspaceTarget(tmuxWindowSelector(from: raw), client: client)
         if tmuxWindowSelector(from: raw) == nil,
-           tmuxCallerWorkspaceHandle() == workspaceId,
+           tmuxResolvedCallerWorkspaceId(client: client) == workspaceId,
            let callerSurface = tmuxCallerSurfaceHandle() {
             let surfaceId = try tmuxCanonicalSurfaceId(
                 callerSurface,
@@ -9138,16 +9148,26 @@ struct CMUXCLI {
             try? saveTmuxCompatStore(store)
         }
 
-        guard let callerSurface = tmuxCallerSurfaceHandle(),
-              let callerSurfaceId = try? tmuxCanonicalSurfaceId(
-                callerSurface,
+        let candidateAnchors = [
+            tmuxCallerSurfaceHandle(),
+            store.mainVerticalLayouts[workspaceId]?.mainSurfaceId
+        ].compactMap { $0 }
+        for candidate in candidateAnchors {
+            if let anchorSurfaceId = try? tmuxCanonicalSurfaceId(
+                candidate,
                 workspaceId: workspaceId,
                 client: client
-              ) else {
-            return nil
+            ) {
+                return (anchorSurfaceId, anchorSurfaceId, "right")
+            }
         }
 
-        return (callerSurfaceId, callerSurfaceId, "right")
+        let removedLayout = store.mainVerticalLayouts.removeValue(forKey: workspaceId) != nil
+        let removedSplit = store.lastSplitSurface.removeValue(forKey: workspaceId) != nil
+        if removedLayout || removedSplit {
+            try? saveTmuxCompatStore(store)
+        }
+        return nil
     }
 
     private func tmuxRenderFormat(
@@ -10347,6 +10367,7 @@ struct CMUXCLI {
             let parsed = try parseTmuxArguments(rawArgs, valueFlags: ["-t"], boolFlags: [])
             let workspaceId = try tmuxResolveWorkspaceTarget(parsed.value("-t"), client: client)
             _ = try client.sendV2(method: "workspace.close", params: ["workspace_id": workspaceId])
+            try? tmuxPruneCompatWorkspaceState(workspaceId: workspaceId)
 
         case "kill-pane", "killp":
             let parsed = try parseTmuxArguments(rawArgs, valueFlags: ["-t"], boolFlags: [])
@@ -10355,6 +10376,7 @@ struct CMUXCLI {
                 "workspace_id": target.workspaceId,
                 "surface_id": target.surfaceId
             ])
+            try? tmuxPruneCompatSurfaceState(workspaceId: target.workspaceId, surfaceId: target.surfaceId)
             // Re-equalize the agent column after removing a pane
             _ = try? client.sendV2(method: "workspace.equalize_splits", params: [
                 "workspace_id": target.workspaceId,
@@ -10618,12 +10640,7 @@ struct CMUXCLI {
             } else if !layoutName.isEmpty {
                 // Non-main-vertical layout selected: clear stale state so
                 // future splits don't incorrectly redirect to the old column.
-                var store = loadTmuxCompatStore()
-                let removedLayout = store.mainVerticalLayouts.removeValue(forKey: workspaceId) != nil
-                let removedSplit = store.lastSplitSurface.removeValue(forKey: workspaceId) != nil
-                if removedLayout || removedSplit {
-                    try saveTmuxCompatStore(store)
-                }
+                try tmuxPruneCompatWorkspaceState(workspaceId: workspaceId)
             }
 
         case "set-option", "set", "set-window-option", "setw", "source-file", "refresh-client", "attach-session", "detach-client":
@@ -10693,6 +10710,42 @@ struct CMUXCLI {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true, attributes: nil)
         let data = try JSONEncoder().encode(store)
         try data.write(to: url, options: .atomic)
+    }
+
+    private func tmuxPruneCompatWorkspaceState(workspaceId: String) throws {
+        var store = loadTmuxCompatStore()
+        let removedLayout = store.mainVerticalLayouts.removeValue(forKey: workspaceId) != nil
+        let removedSplit = store.lastSplitSurface.removeValue(forKey: workspaceId) != nil
+        if removedLayout || removedSplit {
+            try saveTmuxCompatStore(store)
+        }
+    }
+
+    private func tmuxPruneCompatSurfaceState(workspaceId: String, surfaceId: String) throws {
+        var store = loadTmuxCompatStore()
+        var changed = false
+
+        if store.lastSplitSurface[workspaceId] == surfaceId {
+            store.lastSplitSurface.removeValue(forKey: workspaceId)
+            changed = true
+        }
+
+        if let layout = store.mainVerticalLayouts[workspaceId] {
+            if layout.mainSurfaceId == surfaceId {
+                store.mainVerticalLayouts.removeValue(forKey: workspaceId)
+                store.lastSplitSurface.removeValue(forKey: workspaceId)
+                changed = true
+            } else if layout.lastColumnSurfaceId == surfaceId {
+                var updatedLayout = layout
+                updatedLayout.lastColumnSurfaceId = nil
+                store.mainVerticalLayouts[workspaceId] = updatedLayout
+                changed = true
+            }
+        }
+
+        if changed {
+            try saveTmuxCompatStore(store)
+        }
     }
 
     private func runShellCommand(_ command: String, stdinText: String) throws -> (status: Int32, stdout: String, stderr: String) {
