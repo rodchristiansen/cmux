@@ -248,10 +248,12 @@ final class CmuxWebView: WKWebView {
             return result
         }
 
+        var replayedBrowserFindShortcutIntoWebContent = false
         if shouldRouteBrowserFindCommandEquivalentThroughWebContentFirst(
             event,
             owningWebView: self
         ) {
+            replayedBrowserFindShortcutIntoWebContent = true
             let result = super.performKeyEquivalent(with: event)
 #if DEBUG
             handled = result
@@ -286,7 +288,14 @@ final class CmuxWebView: WKWebView {
             return true
         }
 
-        let result = super.performKeyEquivalent(with: event)
+        let result: Bool
+        if replayedBrowserFindShortcutIntoWebContent {
+            // A browser-first Find preflight has already exposed this shortcut to WebKit once.
+            // Avoid a second `super.performKeyEquivalent` replay when menu/app fallback does not claim it.
+            result = false
+        } else {
+            result = super.performKeyEquivalent(with: event)
+        }
 #if DEBUG
         handled = result
 #endif
