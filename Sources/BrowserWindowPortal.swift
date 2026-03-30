@@ -3501,6 +3501,8 @@ final class WindowBrowserPortal: NSObject {
         let presentationUpdateKind = HostedWebViewPresentationUpdateKind.resolve(
             reasons: refreshReasons
         )
+        let shouldReapplyHostedInspectorPostRefresh =
+            presentationUpdateKind == .refresh && requiresRenderingStateReattach
         if !shouldHide, containerOwnsWebView, presentationUpdateKind != .none {
             if presentationUpdateKind == .refresh &&
                 hostedInspectorAdjustedDuringSync &&
@@ -3533,9 +3535,12 @@ final class WindowBrowserPortal: NSObject {
                 }
             }
         }
-        if containerOwnsWebView, !hostedInspectorAdjustedDuringSync {
+        if containerOwnsWebView,
+           (!hostedInspectorAdjustedDuringSync || shouldReapplyHostedInspectorPostRefresh) {
             // Keep the existing post-sync pass for cases where the inspector candidate
-            // appears only after WebKit settles, but avoid a second apply when sync already clamped it.
+            // appears only after WebKit settles. Re-run it after rendering-state reattach
+            // refreshes as well, because WebKit's enter/unhide relayout can overwrite the
+            // preferred divider position we already clamped during portal.sync.
             _ = hostView.reapplyHostedInspectorDividerIfNeeded(in: containerView, reason: "portal.sync.postRefresh")
         }
 #if DEBUG
