@@ -3825,82 +3825,49 @@ enum TelemetrySettings {
     static let enabledForCurrentLaunch = isEnabled()
 }
 
-enum PreferredEditor: String, CaseIterable, Identifiable {
-    case system
-    case cursor
-    case vscode
-    case windsurf
-    case zed
-    case sublimeText
-    case xcode
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .system:
-            return String(localized: "preferredEditor.system", defaultValue: "System Default")
-        case .cursor:
-            return String(localized: "preferredEditor.cursor", defaultValue: "Cursor")
-        case .vscode:
-            return String(localized: "preferredEditor.vscode", defaultValue: "VS Code")
-        case .windsurf:
-            return String(localized: "preferredEditor.windsurf", defaultValue: "Windsurf")
-        case .zed:
-            return String(localized: "preferredEditor.zed", defaultValue: "Zed")
-        case .sublimeText:
-            return String(localized: "preferredEditor.sublimeText", defaultValue: "Sublime Text")
-        case .xcode:
-            return String(localized: "preferredEditor.xcode", defaultValue: "Xcode")
-        }
-    }
-
-    func applicationURL() -> URL? {
-        switch self {
-        case .system: return nil
-        case .cursor: return TerminalDirectoryOpenTarget.cursor.applicationURL()
-        case .vscode: return TerminalDirectoryOpenTarget.vscode.applicationURL()
-        case .windsurf: return TerminalDirectoryOpenTarget.windsurf.applicationURL()
-        case .zed: return TerminalDirectoryOpenTarget.zed.applicationURL()
-        case .sublimeText:
-            let candidates = [
-                "/Applications/Sublime Text.app",
-                "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/Sublime Text.app",
-            ]
-            for path in candidates where FileManager.default.fileExists(atPath: path) {
-                return URL(fileURLWithPath: path, isDirectory: true)
-            }
-            return NSWorkspace.shared.fullPath(forApplication: "Sublime Text")
-                .map { URL(fileURLWithPath: $0, isDirectory: true) }
-        case .xcode: return TerminalDirectoryOpenTarget.xcode.applicationURL()
-        }
-    }
-}
-
 enum PreferredEditorSettings {
-    static let key = "preferredEditor"
-    static let defaultEditor: PreferredEditor = .system
+    static let key = "preferredEditorCommand"
 
-    static func editor(defaults: UserDefaults = .standard) -> PreferredEditor {
-        guard let raw = defaults.string(forKey: key),
-              let editor = PreferredEditor(rawValue: raw) else {
-            return defaultEditor
+    /// Returns the configured editor command, falling back to $VISUAL, then $EDITOR.
+    /// Returns nil if all are empty (use system default).
+    static func resolvedCommand(defaults: UserDefaults = .standard) -> String? {
+        if let stored = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            return stored
         }
-        return editor
+        if let visual = ProcessInfo.processInfo.environment["VISUAL"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !visual.isEmpty {
+            return visual
+        }
+        if let editor = ProcessInfo.processInfo.environment["EDITOR"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !editor.isEmpty {
+            return editor
+        }
+        return nil
     }
 
-    /// Open a file URL with the user's preferred editor, falling back to system default.
+    /// Open a file path with the user's preferred editor, falling back to system default.
     static func open(_ url: URL) {
-        let editor = editor()
-        if editor != .system, let appURL = editor.applicationURL() {
-            NSWorkspace.shared.open(
-                [url],
-                withApplicationAt: appURL,
-                configuration: NSWorkspace.OpenConfiguration()
-            )
-        } else {
+        guard let command = resolvedCommand() else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        let path = url.path
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "\(command) \(shellQuote(path))"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            // Fall back to system default if the command fails to launch
             NSWorkspace.shared.open(url)
         }
+    }
+
+    private static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
 
@@ -3919,7 +3886,7 @@ struct SettingsView: View {
     private var claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
     @AppStorage(TelemetrySettings.sendAnonymousTelemetryKey)
     private var sendAnonymousTelemetry = TelemetrySettings.defaultSendAnonymousTelemetry
-    @AppStorage(PreferredEditorSettings.key) private var preferredEditor = PreferredEditorSettings.defaultEditor.rawValue
+    @AppStorage(PreferredEditorSettings.key) private var preferredEditorCommand = ""
     @AppStorage("cmuxPortBase") private var cmuxPortBase = 9100
     @AppStorage("cmuxPortRange") private var cmuxPortRange = 10
     @AppStorage(BrowserSearchSettings.searchEngineKey) private var browserSearchEngine = BrowserSearchSettings.defaultSearchEngine.rawValue
@@ -4587,15 +4554,16 @@ struct SettingsView: View {
 
                         SettingsCardDivider()
 
-                        SettingsPickerRow(
+                        SettingsCardRow(
                             String(localized: "settings.app.preferredEditor", defaultValue: "Open Files With"),
-                            subtitle: String(localized: "settings.app.preferredEditor.subtitle", defaultValue: "App used when Cmd-clicking filenames in terminal output."),
-                            controlWidth: pickerColumnWidth,
-                            selection: $preferredEditor
+                            subtitle: String(localized: "settings.app.preferredEditor.subtitle", defaultValue: "Command to open files on Cmd-click (e.g. code, zed, subl). Falls back to $VISUAL, $EDITOR, then system default.")
                         ) {
-                            ForEach(PreferredEditor.allCases) { editor in
-                                Text(editor.displayName).tag(editor.rawValue)
-                            }
+                            TextField(
+                                String(localized: "settings.app.preferredEditor.placeholder", defaultValue: "e.g. code, zed, subl"),
+                                text: $preferredEditorCommand
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 200)
                         }
 
                         SettingsCardDivider()
