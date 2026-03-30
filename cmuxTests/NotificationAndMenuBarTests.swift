@@ -754,6 +754,187 @@ final class NotificationDockBadgeTests: XCTestCase {
         XCTAssertEqual(store.unreadCount(forTabId: tab), 0)
         XCTAssertNil(store.latestNotification(forTabId: tab))
     }
+
+    func testWorkspaceWideNotificationActionsTrackActiveAndArchivedState() {
+        let tabA = UUID()
+        let tabB = UUID()
+        let notificationA = TerminalNotification(
+            id: UUID(),
+            tabId: tabA,
+            surfaceId: nil,
+            title: "A",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: false
+        )
+        let notificationB = TerminalNotification(
+            id: UUID(),
+            tabId: tabB,
+            surfaceId: nil,
+            title: "B",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: false
+        )
+
+        let store = TerminalNotificationStore.shared
+        store.replaceNotificationsForTesting([notificationA, notificationB])
+        defer {
+            store.unmuteWorkspace(tabId: tabA)
+            store.unmuteWorkspace(tabId: tabB)
+            store.replaceNotificationsForTesting([])
+        }
+
+        XCTAssertTrue(store.hasActiveNotifications(forTabId: tabA))
+        XCTAssertTrue(store.hasAnyNotifications(forTabId: tabA))
+        XCTAssertTrue(store.hasActiveNotifications(forTabIds: [tabA]))
+        XCTAssertTrue(store.hasAnyNotifications(forTabIds: [tabA]))
+        XCTAssertFalse(store.areAllWorkspacesMuted([tabA, tabB]))
+
+        store.hideNotifications(forTabId: tabA)
+
+        XCTAssertFalse(store.hasActiveNotifications(forTabId: tabA))
+        XCTAssertTrue(store.hasAnyNotifications(forTabId: tabA))
+        XCTAssertTrue(store.hasActiveNotifications(forTabId: tabB))
+        XCTAssertEqual(
+            store.archivedNotifications.first(where: { $0.id == notificationA.id })?.archivedReason,
+            .hidden
+        )
+        XCTAssertEqual(
+            store.workspaceNotificationSidebarStatus(forTabId: tabA),
+            WorkspaceNotificationSidebarStatus(
+                isMuted: false,
+                bookmarkedCount: 0,
+                hiddenCount: 1,
+                snoozedCount: 0
+            )
+        )
+
+        store.muteWorkspace(tabId: tabA, label: "Workspace A")
+        XCTAssertTrue(store.areAllWorkspacesMuted([tabA]))
+        XCTAssertFalse(store.areAllWorkspacesMuted([tabA, tabB]))
+        XCTAssertEqual(
+            store.workspaceNotificationSidebarStatus(forTabId: tabA),
+            WorkspaceNotificationSidebarStatus(
+                isMuted: true,
+                bookmarkedCount: 0,
+                hiddenCount: 1,
+                snoozedCount: 0
+            )
+        )
+
+        store.muteWorkspace(tabId: tabB, label: "Workspace B")
+        XCTAssertTrue(store.areAllWorkspacesMuted([tabA, tabB]))
+    }
+
+    func testWorkspaceWideBookmarkAndSnoozeTargetOnlySelectedWorkspace() {
+        let tabA = UUID()
+        let tabB = UUID()
+        let notificationA = TerminalNotification(
+            id: UUID(),
+            tabId: tabA,
+            surfaceId: nil,
+            title: "A",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: false
+        )
+        let notificationB = TerminalNotification(
+            id: UUID(),
+            tabId: tabB,
+            surfaceId: nil,
+            title: "B",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: false
+        )
+
+        let store = TerminalNotificationStore.shared
+        store.replaceNotificationsForTesting([notificationA, notificationB])
+        defer {
+            store.replaceNotificationsForTesting([])
+        }
+
+        store.bookmarkNotifications(forTabId: tabA)
+
+        XCTAssertTrue(store.notifications.first(where: { $0.id == notificationA.id })?.isBookmarked ?? false)
+        XCTAssertFalse(store.notifications.first(where: { $0.id == notificationB.id })?.isBookmarked ?? true)
+
+        store.snoozeNotifications(forTabId: tabA, for: 60)
+
+        XCTAssertFalse(store.hasActiveNotifications(forTabId: tabA))
+        XCTAssertTrue(store.hasAnyNotifications(forTabId: tabA))
+        XCTAssertTrue(store.hasActiveNotifications(forTabId: tabB))
+        XCTAssertEqual(
+            store.archivedNotifications.first(where: { $0.id == notificationA.id })?.archivedReason,
+            .snoozed
+        )
+        XCTAssertNotNil(store.archivedNotifications.first(where: { $0.id == notificationA.id })?.snoozedUntil)
+        XCTAssertTrue(store.archivedNotifications.first(where: { $0.id == notificationA.id })?.isBookmarked ?? false)
+        XCTAssertEqual(
+            store.workspaceNotificationSidebarStatus(forTabId: tabA),
+            WorkspaceNotificationSidebarStatus(
+                isMuted: false,
+                bookmarkedCount: 1,
+                hiddenCount: 0,
+                snoozedCount: 1
+            )
+        )
+    }
+
+    func testWorkspaceWideHideAndSnoozeAlsoRetargetArchivedNotifications() {
+        let tab = UUID()
+        let firstNotification = TerminalNotification(
+            id: UUID(),
+            tabId: tab,
+            surfaceId: nil,
+            title: "First",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: true
+        )
+        let secondNotification = TerminalNotification(
+            id: UUID(),
+            tabId: tab,
+            surfaceId: nil,
+            title: "Second",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: true
+        )
+
+        let store = TerminalNotificationStore.shared
+        store.replaceNotificationsForTesting([firstNotification, secondNotification])
+        defer {
+            store.replaceNotificationsForTesting([])
+        }
+
+        store.hide(id: firstNotification.id)
+
+        XCTAssertEqual(store.archivedNotifications.count, 1)
+        XCTAssertEqual(
+            store.archivedNotifications.first(where: { $0.id == firstNotification.id })?.archivedReason,
+            .hidden
+        )
+        XCTAssertNotNil(store.notifications.first(where: { $0.id == secondNotification.id }))
+
+        store.snoozeNotifications(forTabId: tab, for: 300)
+
+        XCTAssertEqual(store.archivedNotifications.count, 2)
+        XCTAssertTrue(store.archivedNotifications.allSatisfy { $0.archivedReason == .snoozed })
+        XCTAssertTrue(store.archivedNotifications.allSatisfy { $0.snoozedUntil != nil })
+
+        store.hideNotifications(forTabId: tab)
+
+        XCTAssertEqual(store.archivedNotifications.count, 2)
+        XCTAssertTrue(store.archivedNotifications.allSatisfy { $0.archivedReason == .hidden })
+    }
 }
 
 
