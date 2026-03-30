@@ -6617,6 +6617,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     }
 
     override func mouseExited(with event: NSEvent) {
+        if wordPathHoverActive {
+            wordPathHoverActive = false
+            NSCursor.pop()
+        }
         guard let surface = surface else { return }
         if NSEvent.pressedMouseButtons != 0 {
             return
