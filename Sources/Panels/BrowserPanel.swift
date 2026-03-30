@@ -153,65 +153,6 @@ enum BrowserSearchSettings {
     }
 }
 
-enum BrowserThemeMode: String, CaseIterable, Identifiable {
-    case system
-    case light
-    case dark
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .system:
-            return String(localized: "theme.system", defaultValue: "System")
-        case .light:
-            return String(localized: "theme.light", defaultValue: "Light")
-        case .dark:
-            return String(localized: "theme.dark", defaultValue: "Dark")
-        }
-    }
-
-    var iconName: String {
-        switch self {
-        case .system:
-            return "circle.lefthalf.filled"
-        case .light:
-            return "sun.max"
-        case .dark:
-            return "moon"
-        }
-    }
-}
-
-enum BrowserThemeSettings {
-    static let modeKey = "browserThemeMode"
-    static let legacyForcedDarkModeEnabledKey = "browserForcedDarkModeEnabled"
-    static let defaultMode: BrowserThemeMode = .system
-
-    static func mode(for rawValue: String?) -> BrowserThemeMode {
-        guard let rawValue, let mode = BrowserThemeMode(rawValue: rawValue) else {
-            return defaultMode
-        }
-        return mode
-    }
-
-    static func mode(defaults: UserDefaults = .standard) -> BrowserThemeMode {
-        let resolvedMode = mode(for: defaults.string(forKey: modeKey))
-        if defaults.string(forKey: modeKey) != nil {
-            return resolvedMode
-        }
-
-        // Migrate the legacy bool toggle only when the new mode key is unset.
-        if defaults.object(forKey: legacyForcedDarkModeEnabledKey) != nil {
-            let migratedMode: BrowserThemeMode = defaults.bool(forKey: legacyForcedDarkModeEnabledKey) ? .dark : .system
-            defaults.set(migratedMode.rawValue, forKey: modeKey)
-            return migratedMode
-        }
-
-        return defaultMode
-    }
-}
-
 enum BrowserImportHintVariant: String, CaseIterable, Identifiable {
     case inlineStrip
     case floatingCard
@@ -2275,7 +2216,6 @@ final class BrowserPanel: Panel, ObservableObject {
     private var detachedDeveloperToolsWindowCloseObserver: NSObjectProtocol?
     private var preferredAttachedDeveloperToolsWidth: CGFloat?
     private var preferredAttachedDeveloperToolsWidthFraction: CGFloat?
-    private var browserThemeMode: BrowserThemeMode
 
     var displayTitle: String {
         if !pageTitle.isEmpty {
@@ -2468,8 +2408,9 @@ final class BrowserPanel: Panel, ObservableObject {
         if #available(macOS 13.3, *) {
             webView.isInspectable = true
         }
-        // Match the empty-page background to the terminal theme so newly-created browsers
-        // don't flash white before content loads.
+        // Match only the unpainted/loading background so newly-created browsers don't flash
+        // white before content loads. Do not force page appearance or inject color-scheme CSS;
+        // websites must keep control of their own theme.
         webView.underPageBackgroundColor = GhosttyBackgroundTheme.currentColor()
         // Always present as Safari.
         webView.customUserAgent = BrowserUserAgentSettings.safariUserAgent
@@ -2544,7 +2485,6 @@ final class BrowserPanel: Panel, ObservableObject {
                 self.realignRestoredSessionHistoryToLiveCurrentIfPossible()
                 boundHistoryStore.recordVisit(url: webView.url, title: webView.title)
                 self.refreshFavicon(from: webView)
-                self.applyBrowserThemeModeIfNeeded()
                 // Keep find-in-page open through load completion and refresh matches for the new DOM.
                 self.restoreFindStateAfterNavigation(replaySearch: true)
             }
@@ -2589,7 +2529,6 @@ final class BrowserPanel: Panel, ObservableObject {
         self.insecureHTTPBypassHostOnce = BrowserInsecureHTTPSettings.normalizeHost(bypassInsecureHTTPHostOnce ?? "")
         self.remoteProxyEndpoint = proxyEndpoint
         self.usesRemoteWorkspaceProxy = isRemoteWorkspace
-        self.browserThemeMode = BrowserThemeSettings.mode()
         self.websiteDataStore = isRemoteWorkspace
             ? WKWebsiteDataStore(forIdentifier: remoteWebsiteDataStoreIdentifier ?? workspaceId)
             : BrowserProfileStore.shared.websiteDataStore(for: resolvedProfileID)
@@ -2688,7 +2627,6 @@ final class BrowserPanel: Panel, ObservableObject {
 
         bindWebView(webView)
         installDetachedDeveloperToolsWindowCloseObserver()
-        applyBrowserThemeModeIfNeeded()
         insecureHTTPAlertWindowProvider = { [weak self] in
             self?.webView.window ?? NSApp.keyWindow ?? NSApp.mainWindow
         }
@@ -2848,7 +2786,6 @@ final class BrowserPanel: Panel, ObservableObject {
         shouldRenderWebView = wasRenderable
 
         bindWebView(replacement)
-        applyBrowserThemeModeIfNeeded()
 
         if !history.backHistoryURLStrings.isEmpty || !history.forwardHistoryURLStrings.isEmpty {
             restoreSessionNavigationHistory(
@@ -3188,7 +3125,6 @@ final class BrowserPanel: Panel, ObservableObject {
         shouldRenderWebView = wasRenderable
 
         bindWebView(replacement)
-        applyBrowserThemeModeIfNeeded()
 
         if !history.backHistoryURLStrings.isEmpty || !history.forwardHistoryURLStrings.isEmpty {
             restoreSessionNavigationHistory(
@@ -4008,7 +3944,6 @@ extension BrowserPanel {
         webView = replacement
         shouldRenderWebView = false
         bindWebView(replacement)
-        applyBrowserThemeModeIfNeeded()
         refreshNavigationAvailability()
 
 #if DEBUG
@@ -4926,11 +4861,6 @@ extension BrowserPanel {
         searchState?.selected = total > 0 ? UInt(current) : nil
     }
 
-    func setBrowserThemeMode(_ mode: BrowserThemeMode) {
-        browserThemeMode = mode
-        applyBrowserThemeModeIfNeeded()
-    }
-
     func refreshAppearanceDrivenColors() {
         webView.underPageBackgroundColor = GhosttyBackgroundTheme.currentColor()
     }
@@ -5430,66 +5360,6 @@ extension BrowserPanel {
 }
 
 private extension BrowserPanel {
-    func applyBrowserThemeModeIfNeeded() {
-        switch browserThemeMode {
-        case .system:
-            webView.appearance = nil
-        case .light:
-            webView.appearance = NSAppearance(named: .aqua)
-        case .dark:
-            webView.appearance = NSAppearance(named: .darkAqua)
-        }
-
-        let script = makeBrowserThemeModeScript(mode: browserThemeMode)
-        webView.evaluateJavaScript(script) { _, error in
-            #if DEBUG
-            if let error {
-                dlog("browser.themeMode error=\(error.localizedDescription)")
-            }
-            #endif
-        }
-    }
-
-    func makeBrowserThemeModeScript(mode: BrowserThemeMode) -> String {
-        let colorSchemeLiteral: String
-        switch mode {
-        case .system:
-            colorSchemeLiteral = "null"
-        case .light:
-            colorSchemeLiteral = "'light'"
-        case .dark:
-            colorSchemeLiteral = "'dark'"
-        }
-
-        return """
-        (() => {
-          const metaId = 'cmux-browser-theme-mode-meta';
-          const colorScheme = \(colorSchemeLiteral);
-          const root = document.documentElement || document.body;
-          if (!root) return;
-
-          let meta = document.getElementById(metaId);
-          if (colorScheme) {
-            root.style.setProperty('color-scheme', colorScheme, 'important');
-            root.setAttribute('data-cmux-browser-theme', colorScheme);
-            if (!meta) {
-              meta = document.createElement('meta');
-              meta.id = metaId;
-              meta.name = 'color-scheme';
-              (document.head || root).appendChild(meta);
-            }
-            meta.setAttribute('content', colorScheme);
-          } else {
-            root.style.removeProperty('color-scheme');
-            root.removeAttribute('data-cmux-browser-theme');
-            if (meta) {
-              meta.remove();
-            }
-          }
-        })();
-        """
-    }
-
     func scheduleDeveloperToolsRestoreRetry() {
         guard preferredDeveloperToolsVisible else { return }
         guard developerToolsRestoreRetryWorkItem == nil else { return }
