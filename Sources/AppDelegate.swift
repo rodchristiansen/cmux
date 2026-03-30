@@ -1851,6 +1851,73 @@ func shouldRouteCommandEquivalentDirectlyToMainMenu(_ event: NSEvent) -> Bool {
     return true
 }
 
+private enum BrowserFindCommandEquivalent {
+    case find
+    case findNext
+    case findPrevious
+    case hideFind
+    case useSelection
+
+    var keepsCmuxBrowserFindBarOwnershipWhenVisible: Bool {
+        switch self {
+        case .find, .findNext, .findPrevious, .hideFind:
+            return true
+        case .useSelection:
+            return false
+        }
+    }
+}
+
+private func browserFindCommandEquivalent(for event: NSEvent) -> BrowserFindCommandEquivalent? {
+    let flags = event.modifierFlags
+        .intersection(.deviceIndependentFlagsMask)
+        .subtracting([.numericPad, .function, .capsLock])
+
+    let normalizedChars = KeyboardLayout.normalizedCharacters(for: event).lowercased()
+    func matches(_ chars: String, keyCode: UInt16) -> Bool {
+        if normalizedChars.count == 1,
+           normalizedChars.allSatisfy(\.isASCII),
+           normalizedChars == chars {
+            return true
+        }
+        return event.keyCode == keyCode
+    }
+
+    switch flags {
+    case [.command]:
+        if matches("e", keyCode: 14) { // kVK_ANSI_E
+            return .useSelection
+        }
+        if matches("f", keyCode: 3) { // kVK_ANSI_F
+            return .find
+        }
+        if matches("g", keyCode: 5) { // kVK_ANSI_G
+            return .findNext
+        }
+        return nil
+    case [.command, .shift]:
+        if matches("f", keyCode: 3) { // kVK_ANSI_F
+            return .hideFind
+        }
+        if matches("g", keyCode: 5) { // kVK_ANSI_G
+            return .findPrevious
+        }
+        return nil
+    default:
+        return nil
+    }
+}
+
+/// For browser content, let the page try the Find command family before cmux's menu fallback.
+/// This preserves native web-app shortcuts like VS Code's Cmd+F while still allowing cmux's
+/// browser find overlay to keep owning its visible Find UI shortcuts.
+func shouldRouteBrowserFindCommandEquivalentThroughWebContentFirst(
+    _ event: NSEvent,
+    owningWebView: CmuxWebView? = nil
+) -> Bool {
+    browserFindCommandEquivalent(for: event) != nil
+}
+
 func cmuxOwningGhosttyView(for responder: NSResponder?) -> GhosttyNSView? {
     guard let responder else { return nil }
     if let ghosttyView = responder as? GhosttyNSView {
@@ -2132,6 +2199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var didSetupGotoSplitUITest = false
     private var didSetupBonsplitTabDragUITest = false
     private var bonsplitTabDragUITestRecorder: DispatchSourceTimer?
+    private var gotoSplitUITestRecorder: DispatchSourceTimer?
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
     private var didSetupMultiWindowNotificationsUITest = false
     private var didSetupDisplayResolutionUITestDiagnostics = false
@@ -7190,7 +7258,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 return
             }
 
-            let url = URL(string: "https://example.com")
+            let requestedBrowserURL = env["CMUX_UI_TEST_GOTO_SPLIT_BROWSER_URL"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = requestedBrowserURL.flatMap { rawURL in
+                guard !rawURL.isEmpty else { return nil }
+                return URL(string: rawURL)
+            } ?? URL(string: "https://example.com")
+            guard let url else {
+                self.writeGotoSplitTestData(["setupError": "Invalid browser URL"])
+                return
+            }
             guard let browserPanelId = tabManager.newBrowserSplit(
                 tabId: tab.id,
                 fromPanelId: initialPanelId,
@@ -7424,12 +7501,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             .first(where: { $0.searchState != nil })
         updates["terminalFindPanelId"] = terminalWithFind?.id.uuidString ?? ""
         updates["terminalFindNeedle"] = terminalWithFind?.searchState?.needle ?? ""
+        updates["terminalFindVisible"] = terminalWithFind == nil ? "false" : "true"
 
         let browserWithFind = workspace.panels.values
             .compactMap { $0 as? BrowserPanel }
             .first(where: { $0.searchState != nil })
         updates["browserFindPanelId"] = browserWithFind?.id.uuidString ?? ""
         updates["browserFindNeedle"] = browserWithFind?.searchState?.needle ?? ""
+        updates["browserFindSelected"] = browserWithFind?.searchState?.selected.map(String.init) ?? ""
+        updates["browserFindTotal"] = browserWithFind?.searchState?.total.map(String.init) ?? ""
+        updates["browserFindVisible"] = browserWithFind == nil ? "false" : "true"
 
         return updates
     }
@@ -7477,6 +7558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
             resolved = true
             cleanup()
+            self.startGotoSplitUITestRecorder(browserPanelId: browserPanelId)
             writeGotoSplitTestData([
                 "browserPanelId": browserPanelId.uuidString,
                 "browserPaneId": browserPaneId.description,
@@ -7525,6 +7607,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         recordFocusedState()
+    }
+
+    private func startGotoSplitUITestRecorder(browserPanelId: UUID) {
+        guard isGotoSplitUITestRecordingEnabled() else { return }
+        gotoSplitUITestRecorder?.cancel()
+        gotoSplitUITestRecorder = nil
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            self?.recordGotoSplitUITestState(browserPanelId: browserPanelId)
+        }
+        gotoSplitUITestRecorder = timer
+        timer.resume()
+    }
+
+    private func recordGotoSplitUITestState(browserPanelId: UUID) {
+        guard let tabManager,
+              let workspace = tabManager.selectedWorkspace,
+              let browserPanel = workspace.browserPanel(for: browserPanelId) else {
+            return
+        }
+
+        var updates = gotoSplitFindStateSnapshot(for: workspace)
+        updates["browserPageTitle"] = browserPanel.webView.title?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        updates["browserPageURL"] = browserPanel.preferredURLStringForOmnibar() ?? ""
+        writeGotoSplitTestData(updates)
     }
 
     private func isWebViewFocused(_ panel: BrowserPanel) -> Bool {
@@ -12687,6 +12797,26 @@ private extension NSWindow {
             dlog("  → browser Return/Enter routed to firstResponder.keyDown")
 #endif
             self.firstResponder?.keyDown(with: event)
+            return true
+        }
+
+        if let firstResponderWebView,
+           shouldRouteBrowserFindCommandEquivalentThroughWebContentFirst(
+               event,
+               owningWebView: firstResponderWebView
+           ) {
+            let result = firstResponderWebView.performKeyEquivalent(with: event)
+#if DEBUG
+            if result {
+                dlog("  → browser find command resolved before window menu path")
+            } else {
+                dlog("  → browser find command preflight left unclaimed; suppressing replay")
+            }
+#endif
+            // The focused web view has already received this Find-family shortcut once.
+            // Do not fall through into the original NSWindow.performKeyEquivalent path,
+            // or WebKit can observe the same key equivalent a second time before AppKit
+            // reaches keyDown/menu fallback.
             return true
         }
 

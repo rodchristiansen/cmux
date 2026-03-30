@@ -103,9 +103,9 @@ enum BrowserImageCopyPasteboardBuilder {
 }
 
 /// WKWebView tends to consume some Command-key equivalents (e.g. Cmd+N/Cmd+W),
-/// preventing the app menu/SwiftUI Commands from receiving them. Route menu
-/// key equivalents first so app-level shortcuts continue to work when WebKit is
-/// the first responder.
+/// preventing the app menu/SwiftUI Commands from receiving them. Route app/menu
+/// shortcuts first by default, but allow browser content to try the Find command
+/// family before cmux falls back to its own browser find overlay.
 final class CmuxWebView: WKWebView {
     // Some sites/WebKit paths report middle-click link activations as
     // WKNavigationAction.buttonNumber=4 instead of 2. Track a recent local
@@ -246,6 +246,19 @@ final class CmuxWebView: WKWebView {
             handled = result
 #endif
             return result
+        }
+
+        if shouldRouteBrowserFindCommandEquivalentThroughWebContentFirst(
+            event,
+            owningWebView: self
+        ) {
+            let result = super.performKeyEquivalent(with: event)
+#if DEBUG
+            handled = result
+#endif
+            if result {
+                return true
+            }
         }
 
         if !shouldRouteCommandEquivalentDirectlyToMainMenu(event) {
