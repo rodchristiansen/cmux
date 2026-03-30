@@ -2912,6 +2912,7 @@ struct WorkspaceSplitView<Content: View, EmptyContent: View>: View {
     @Bindable private var controller: WorkspaceSplitController
     private let contentBuilder: (WorkspaceSplit.Tab, PaneID) -> Content
     private let emptyPaneBuilder: (PaneID) -> EmptyContent
+    private let nativeContentBuilder: ((WorkspaceSplit.Tab, PaneID) -> WorkspaceNativePaneContent?)?
 
     /// Initialize with a controller, content builder, and empty pane builder
     /// - Parameters:
@@ -2920,10 +2921,12 @@ struct WorkspaceSplitView<Content: View, EmptyContent: View>: View {
     ///   - emptyPane: A ViewBuilder closure that provides content for empty panes
     init(
         controller: WorkspaceSplitController,
+        nativeContent: ((WorkspaceSplit.Tab, PaneID) -> WorkspaceNativePaneContent?)? = nil,
         @ViewBuilder content: @escaping (WorkspaceSplit.Tab, PaneID) -> Content,
         @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent
     ) {
         self.controller = controller
+        self.nativeContentBuilder = nativeContent
         self.contentBuilder = content
         self.emptyPaneBuilder = emptyPane
     }
@@ -2931,6 +2934,7 @@ struct WorkspaceSplitView<Content: View, EmptyContent: View>: View {
     var body: some View {
         WorkspaceSplitNativeHost(
             controller: controller,
+            nativeContent: nativeContentBuilder,
             content: contentBuilder,
             emptyPane: emptyPaneBuilder,
             showSplitButtons: controller.configuration.allowSplits && controller.configuration.appearance.showSplitButtons,
@@ -2951,12 +2955,31 @@ extension WorkspaceSplitView where EmptyContent == DefaultEmptyPaneView {
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
     init(
         controller: WorkspaceSplitController,
+        nativeContent: ((WorkspaceSplit.Tab, PaneID) -> WorkspaceNativePaneContent?)? = nil,
         @ViewBuilder content: @escaping (WorkspaceSplit.Tab, PaneID) -> Content
     ) {
         self.controller = controller
+        self.nativeContentBuilder = nativeContent
         self.contentBuilder = content
         self.emptyPaneBuilder = { _ in DefaultEmptyPaneView() }
     }
+}
+
+@MainActor
+enum WorkspaceNativePaneContent {
+    case terminal(WorkspaceTerminalPaneContent)
+}
+
+@MainActor
+struct WorkspaceTerminalPaneContent {
+    let panel: TerminalPanel
+    let isFocused: Bool
+    let isVisibleInUI: Bool
+    let isSplit: Bool
+    let appearance: PanelAppearance
+    let hasUnreadNotification: Bool
+    let onFocus: () -> Void
+    let onTriggerFlash: () -> Void
 }
 
 /// Default view shown when a pane has no tabs

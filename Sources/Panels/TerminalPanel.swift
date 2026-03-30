@@ -30,11 +30,12 @@ final class TerminalPanel: Panel, ObservableObject {
         }
     }
 
-    /// Bump this token to force SwiftUI to call `updateNSView` on `GhosttyTerminalView`,
-    /// which re-attaches the hosted view after WorkspaceSplit close/reparent operations.
+    /// Legacy invalidation token for the old SwiftUI wrapper path.
     ///
-    /// Without this, certain pane-close sequences can leave terminal views detached
-    /// (hostedView.window == nil) until the user switches workspaces.
+    /// Workspace panes now mount `hostedView` directly from AppKit, but a few existing
+    /// recovery paths still call `requestViewReattach()` as shorthand for "make the hosted
+    /// terminal healthy again". Keep the token for the legacy wrapper while the direct host
+    /// path performs the real reconcile/refresh work.
     @Published var viewReattachToken: UInt64 = 0
 
     var onRequestWorkspacePaneFlash: ((WorkspaceAttentionFlashReason) -> Void)?
@@ -180,6 +181,12 @@ final class TerminalPanel: Panel, ObservableObject {
 
     func requestViewReattach() {
         viewReattachToken &+= 1
+        _ = hostedView.reconcileGeometryNow()
+        if surface.surface != nil {
+            surface.forceRefresh()
+        } else {
+            surface.requestBackgroundSurfaceStartIfNeeded()
+        }
     }
 
     // MARK: - Terminal-specific methods

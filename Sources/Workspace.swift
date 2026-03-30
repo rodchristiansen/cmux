@@ -8859,9 +8859,9 @@ final class Workspace: Identifiable, ObservableObject {
 
     // MARK: - Portal Lifecycle
 
-    /// Hide all terminal portal views for this workspace.
-    /// Called before the workspace is unmounted to prevent portal-hosted terminal
-    /// views from covering browser panes in the newly selected workspace.
+    /// Hide any legacy terminal portal entries for this workspace before it is unmounted.
+    /// Workspace terminals are direct-mounted now, but stale portal-hosted views can still exist
+    /// during transition cases and should not cover the next workspace.
     func hideAllTerminalPortalViews() {
         for panel in panels.values {
             guard let terminal = panel as? TerminalPanel else { continue }
@@ -9301,8 +9301,9 @@ final class Workspace: Identifiable, ObservableObject {
             let hasSurface = terminalPanel.surface.surface != nil
             let isAttached = hostedView.window != nil && hostedView.superview != nil
 
-            // Split close/reparent churn can transiently detach a surviving terminal view.
-            // Force one SwiftUI representable update so the portal binding reattaches it.
+            // Split close/reparent churn can transiently leave a surviving terminal with no
+            // usable surface or geometry. Nudge the direct-mounted hosted view to reconcile
+            // itself and restart the runtime surface if needed.
             if !isAttached || !hasUsableBounds || !hasSurface {
                 terminalPanel.requestViewReattach()
                 needsFollowUpPass = true
@@ -9487,8 +9488,9 @@ final class Workspace: Identifiable, ObservableObject {
     private func scheduleMovedTerminalRefresh(panelId: UUID) {
         guard terminalPanel(for: panelId) != nil else { return }
 
-        // Force an NSViewRepresentable update after drag/move reparenting. This keeps
-        // portal host binding current when a pane auto-closes during tab moves.
+        // After drag/move reparenting, force the hosted terminal view to reconcile its
+        // geometry and refresh its surface. This keeps the direct AppKit mount current
+        // when a pane auto-closes during tab moves.
         terminalPanel(for: panelId)?.requestViewReattach()
 
         let runRefreshPass: (TimeInterval) -> Void = { [weak self] delay in
