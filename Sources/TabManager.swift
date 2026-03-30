@@ -702,6 +702,7 @@ class TabManager: ObservableObject {
     /// Global monotonically increasing counter for CMUX_PORT ordinal assignment.
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).
     private static var nextPortOrdinal: Int = 0
+    private static let isRunningUnderAutomatedTests = SessionRestorePolicy.isRunningUnderAutomatedTests()
     private static let initialWorkspaceGitProbeDelays: [TimeInterval] = [0, 0.5, 1.5, 3.0, 6.0, 10.0]
     private static let workspaceGitBranchPollInterval: TimeInterval = 2
     private static let workspaceGitMetadataPollInterval: TimeInterval = 30
@@ -874,7 +875,9 @@ class TabManager: ObservableObject {
         })
 
         startAgentPIDSweepTimer()
-        startWorkspaceGitBranchPollTimer()
+        if !Self.isRunningUnderAutomatedTests {
+            startWorkspaceGitBranchPollTimer()
+        }
         startWorkspaceGitMetadataPollTimer()
 #if DEBUG
         setupUITestFocusShortcutsIfNeeded()
