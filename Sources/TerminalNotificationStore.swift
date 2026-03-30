@@ -678,8 +678,8 @@ struct TerminalNotification: Identifiable, Hashable {
     let title: String
     let subtitle: String
     let body: String
-    let processIdentifier: String? = nil
-    let processDisplayName: String? = nil
+    let processIdentifier: String?
+    let processDisplayName: String?
     let createdAt: Date
     var isRead: Bool
     var isBookmarked: Bool = false
@@ -689,6 +689,38 @@ struct TerminalNotification: Identifiable, Hashable {
 
     var isArchived: Bool {
         archivedReason != nil
+    }
+
+    init(
+        id: UUID,
+        tabId: UUID,
+        surfaceId: UUID?,
+        title: String,
+        subtitle: String,
+        body: String,
+        processIdentifier: String? = nil,
+        processDisplayName: String? = nil,
+        createdAt: Date,
+        isRead: Bool,
+        isBookmarked: Bool = false,
+        archivedReason: NotificationArchiveReason? = nil,
+        archivedAt: Date? = nil,
+        snoozedUntil: Date? = nil
+    ) {
+        self.id = id
+        self.tabId = tabId
+        self.surfaceId = surfaceId
+        self.title = title
+        self.subtitle = subtitle
+        self.body = body
+        self.processIdentifier = processIdentifier
+        self.processDisplayName = processDisplayName
+        self.createdAt = createdAt
+        self.isRead = isRead
+        self.isBookmarked = isBookmarked
+        self.archivedReason = archivedReason
+        self.archivedAt = archivedAt
+        self.snoozedUntil = snoozedUntil
     }
 }
 
@@ -1035,16 +1067,6 @@ final class TerminalNotificationStore: ObservableObject {
             return
         }
 
-        var updated = notifications
-        var idsToClear: [String] = []
-        updated.removeAll { existing in
-            guard existing.tabId == tabId,
-                  existing.surfaceId == surfaceId,
-                  !existing.isBookmarked else { return false }
-            idsToClear.append(existing.id.uuidString)
-            return true
-        }
-
         if let existingIndicatorSurfaceId = focusedReadIndicatorByTabId[tabId],
            existingIndicatorSurfaceId != surfaceId {
             focusedReadIndicatorByTabId.removeValue(forKey: tabId)
@@ -1094,17 +1116,11 @@ final class TerminalNotificationStore: ObservableObject {
         if let cooldownKey, resolvedCooldownInterval != nil {
             lastNotificationDateByCooldownKey[cooldownKey] = now
         }
-        if !idsToClear.isEmpty {
-            center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
-            center.removePendingNotificationRequestsOffMain(withIdentifiers: idsToClear)
-        }
         if let mutedReason {
-            notifications = updated
             archiveIncomingNotification(notification, reason: mutedReason)
             return
         }
-        updated.insert(notification, at: 0)
-        notifications = updated
+        insertNotificationIntoInbox(notification, removingMatchingInboxEntries: true)
         if shouldSuppressExternalDelivery {
             suppressedNotificationFeedbackHandler(self, notification)
         } else {
@@ -1686,26 +1702,41 @@ final class TerminalNotificationStore: ObservableObject {
         }
     }
 
-    private func insertArchivedNotificationIntoInbox(_ notification: TerminalNotification) {
+    private func insertNotificationIntoInbox(
+        _ notification: TerminalNotification,
+        removingMatchingInboxEntries: Bool
+    ) {
         var updated = notifications
         var idsToClear: [String] = []
-        updated.removeAll { existing in
-            guard existing.tabId == notification.tabId,
-                  existing.surfaceId == notification.surfaceId,
-                  !existing.isBookmarked else { return false }
-            idsToClear.append(existing.id.uuidString)
-            return true
+
+        if removingMatchingInboxEntries {
+            updated.removeAll { existing in
+                guard existing.tabId == notification.tabId,
+                      existing.surfaceId == notification.surfaceId,
+                      !existing.isBookmarked else { return false }
+                idsToClear.append(existing.id.uuidString)
+                return true
+            }
         }
-        var restored = notification
-        restored.archivedReason = nil
-        restored.archivedAt = nil
-        restored.snoozedUntil = nil
-        updated.insert(restored, at: 0)
+
+        let insertIndex = updated.firstIndex { existing in
+            existing.createdAt < notification.createdAt
+        } ?? updated.endIndex
+        updated.insert(notification, at: insertIndex)
         notifications = updated
+
         if !idsToClear.isEmpty {
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
             center.removePendingNotificationRequestsOffMain(withIdentifiers: idsToClear)
         }
+    }
+
+    private func insertArchivedNotificationIntoInbox(_ notification: TerminalNotification) {
+        var restored = notification
+        restored.archivedReason = nil
+        restored.archivedAt = nil
+        restored.snoozedUntil = nil
+        insertNotificationIntoInbox(restored, removingMatchingInboxEntries: false)
     }
 
     private func archiveActiveNotifications(

@@ -459,7 +459,9 @@ private struct NotificationRow: View {
                     systemImage: notification.isBookmarked ? "bookmark.fill" : "bookmark",
                     helpText: bookmarkHelpText
                 ) {
-                    notificationStore.toggleBookmark(id: notification.id)
+                    performNotificationAction {
+                        notificationStore.toggleBookmark(id: notification.id)
+                    }
                 }
                 .foregroundStyle(notification.isBookmarked ? .yellow : .secondary)
 
@@ -467,10 +469,12 @@ private struct NotificationRow: View {
                     systemImage: isArchived ? "arrow.uturn.backward.circle" : "eye.slash",
                     helpText: archiveHelpText
                 ) {
-                    if isArchived {
-                        notificationStore.restore(id: notification.id)
-                    } else {
-                        notificationStore.hide(id: notification.id)
+                    performNotificationAction {
+                        if isArchived {
+                            notificationStore.restore(id: notification.id)
+                        } else {
+                            notificationStore.hide(id: notification.id)
+                        }
                     }
                 }
 
@@ -485,6 +489,7 @@ private struct NotificationRow: View {
                 .safeHelp(String(localized: "notifications.action.more", defaultValue: "More Actions"))
             }
             .padding(.top, 2)
+            .zIndex(1)
         }
         .padding(12)
         .background(
@@ -529,26 +534,32 @@ private struct NotificationRow: View {
         Button(notification.isRead
                ? String(localized: "notifications.action.markUnread", defaultValue: "Mark Unread")
                : String(localized: "notifications.action.markRead", defaultValue: "Mark Read")) {
-            if notification.isRead {
-                notificationStore.markUnread(id: notification.id)
-            } else {
-                notificationStore.markRead(id: notification.id)
+            performNotificationAction {
+                if notification.isRead {
+                    notificationStore.markUnread(id: notification.id)
+                } else {
+                    notificationStore.markRead(id: notification.id)
+                }
             }
         }
 
         Button(notification.isBookmarked
                ? String(localized: "notifications.action.removeBookmark", defaultValue: "Remove Bookmark")
                : String(localized: "notifications.action.bookmark", defaultValue: "Bookmark")) {
-            notificationStore.toggleBookmark(id: notification.id)
+            performNotificationAction {
+                notificationStore.toggleBookmark(id: notification.id)
+            }
         }
 
         Button(isArchived
                ? String(localized: "notifications.action.restore", defaultValue: "Restore to Inbox")
                : String(localized: "notifications.action.hide", defaultValue: "Hide from Inbox")) {
-            if isArchived {
-                notificationStore.restore(id: notification.id)
-            } else {
-                notificationStore.hide(id: notification.id)
+            performNotificationAction {
+                if isArchived {
+                    notificationStore.restore(id: notification.id)
+                } else {
+                    notificationStore.hide(id: notification.id)
+                }
             }
         }
 
@@ -557,7 +568,9 @@ private struct NotificationRow: View {
 
             ForEach(NotificationSnoozeOption.allCases) { option in
                 Button(option.title) {
-                    notificationStore.snooze(id: notification.id, for: option.duration)
+                    performNotificationAction {
+                        notificationStore.snooze(id: notification.id, for: option.duration)
+                    }
                 }
             }
         }
@@ -567,10 +580,12 @@ private struct NotificationRow: View {
         Button(notificationStore.isWorkspaceMuted(notification.tabId)
                ? String(localized: "notifications.action.unmuteWorkspace", defaultValue: "Unmute Workspace")
                : String(localized: "notifications.action.muteWorkspace", defaultValue: "Mute Workspace")) {
-            if notificationStore.isWorkspaceMuted(notification.tabId) {
-                notificationStore.unmuteWorkspace(tabId: notification.tabId)
-            } else {
-                notificationStore.muteWorkspace(tabId: notification.tabId, label: tabTitle)
+            performNotificationAction {
+                if notificationStore.isWorkspaceMuted(notification.tabId) {
+                    notificationStore.unmuteWorkspace(tabId: notification.tabId)
+                } else {
+                    notificationStore.muteWorkspace(tabId: notification.tabId, label: tabTitle)
+                }
             }
         }
 
@@ -578,13 +593,15 @@ private struct NotificationRow: View {
             Button(notificationStore.isProcessMuted(processIdentifier)
                    ? String(localized: "notifications.action.unmuteProcess", defaultValue: "Unmute Process")
                    : String(localized: "notifications.action.muteProcess", defaultValue: "Mute Process")) {
-                if notificationStore.isProcessMuted(processIdentifier) {
-                    notificationStore.unmuteProcess(identifier: processIdentifier)
-                } else {
-                    notificationStore.muteProcess(
-                        identifier: processIdentifier,
-                        label: notification.processDisplayName
-                    )
+                performNotificationAction {
+                    if notificationStore.isProcessMuted(processIdentifier) {
+                        notificationStore.unmuteProcess(identifier: processIdentifier)
+                    } else {
+                        notificationStore.muteProcess(
+                            identifier: processIdentifier,
+                            label: notification.processDisplayName
+                        )
+                    }
                 }
             }
         }
@@ -595,8 +612,14 @@ private struct NotificationRow: View {
             String(localized: "notifications.action.delete", defaultValue: "Delete Permanently"),
             role: .destructive
         ) {
-            notificationStore.remove(id: notification.id)
+            performNotificationAction {
+                notificationStore.remove(id: notification.id)
+            }
         }
+    }
+
+    private func performNotificationAction(_ action: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: action)
     }
 
     private func openNotification() {

@@ -935,6 +935,132 @@ final class NotificationDockBadgeTests: XCTestCase {
         XCTAssertEqual(store.archivedNotifications.count, 2)
         XCTAssertTrue(store.archivedNotifications.allSatisfy { $0.archivedReason == .hidden })
     }
+
+    func testRestoreDoesNotEvictNewerActiveNotificationOnSameSurface() throws {
+        let tab = UUID()
+        let surface = UUID()
+        let archivedNotification = TerminalNotification(
+            id: UUID(),
+            tabId: tab,
+            surfaceId: surface,
+            title: "Older",
+            subtitle: "",
+            body: "",
+            createdAt: Date(timeIntervalSince1970: 1),
+            isRead: false
+        )
+
+        let store = TerminalNotificationStore.shared
+        store.replaceNotificationsForTesting([archivedNotification])
+        store.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        defer {
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        store.hide(id: archivedNotification.id)
+        XCTAssertTrue(store.notifications.isEmpty)
+        XCTAssertEqual(store.archivedNotifications.map(\.id), [archivedNotification.id])
+
+        store.addNotification(
+            tabId: tab,
+            surfaceId: surface,
+            title: "Newer",
+            subtitle: "",
+            body: ""
+        )
+
+        let newerNotificationID = try XCTUnwrap(store.notifications.first?.id)
+
+        store.restore(id: archivedNotification.id)
+
+        XCTAssertEqual(store.notifications.map(\.id), [newerNotificationID, archivedNotification.id])
+        XCTAssertEqual(store.latestNotification(forTabId: tab)?.id, newerNotificationID)
+        XCTAssertFalse(store.archivedNotifications.contains(where: { $0.id == archivedNotification.id }))
+    }
+
+    func testMutedDeliveryDoesNotEvictExistingActiveNotificationOnSameSurface() throws {
+        let tab = UUID()
+        let surface = UUID()
+        let existingActive = TerminalNotification(
+            id: UUID(),
+            tabId: tab,
+            surfaceId: surface,
+            title: "Visible",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: false
+        )
+
+        let store = TerminalNotificationStore.shared
+        var deliveredNotificationIDs: [UUID] = []
+
+        store.replaceNotificationsForTesting([existingActive])
+        store.configureNotificationDeliveryHandlerForTesting { _, notification in
+            deliveredNotificationIDs.append(notification.id)
+        }
+        defer {
+            store.unmuteProcess(identifier: "muted process")
+            store.replaceNotificationsForTesting([])
+            store.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        store.muteProcess(identifier: "muted process", label: "Muted Process")
+        store.addNotification(
+            tabId: tab,
+            surfaceId: surface,
+            title: "Muted Process",
+            subtitle: "",
+            body: ""
+        )
+
+        XCTAssertEqual(store.notifications.map(\.id), [existingActive.id])
+        XCTAssertEqual(store.latestNotification(forTabId: tab)?.id, existingActive.id)
+        XCTAssertEqual(store.archivedNotifications.count, 1)
+        XCTAssertEqual(store.archivedNotifications.first?.archivedReason, .mutedProcess)
+        XCTAssertEqual(store.archivedNotifications.first?.processIdentifier, "muted process")
+        XCTAssertTrue(deliveredNotificationIDs.isEmpty)
+    }
+
+    func testPerNotificationActionsUpdateBookmarkHideAndSnoozeState() throws {
+        let tab = UUID()
+        let notification = TerminalNotification(
+            id: UUID(),
+            tabId: tab,
+            surfaceId: nil,
+            title: "Actionable",
+            subtitle: "",
+            body: "",
+            createdAt: Date(),
+            isRead: false
+        )
+
+        let store = TerminalNotificationStore.shared
+        store.replaceNotificationsForTesting([notification])
+        defer {
+            store.replaceNotificationsForTesting([])
+        }
+
+        store.toggleBookmark(id: notification.id)
+        XCTAssertTrue(store.notifications.first(where: { $0.id == notification.id })?.isBookmarked ?? false)
+
+        store.hide(id: notification.id)
+        XCTAssertTrue(store.notifications.isEmpty)
+        let hiddenNotification = try XCTUnwrap(
+            store.archivedNotifications.first(where: { $0.id == notification.id })
+        )
+        XCTAssertEqual(hiddenNotification.archivedReason, .hidden)
+        XCTAssertTrue(hiddenNotification.isBookmarked)
+
+        store.snooze(id: notification.id, for: 60)
+        let snoozedNotification = try XCTUnwrap(
+            store.archivedNotifications.first(where: { $0.id == notification.id })
+        )
+        XCTAssertEqual(snoozedNotification.archivedReason, .snoozed)
+        XCTAssertNotNil(snoozedNotification.snoozedUntil)
+        XCTAssertTrue(snoozedNotification.isBookmarked)
+    }
 }
 
 
