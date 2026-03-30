@@ -3828,22 +3828,13 @@ enum TelemetrySettings {
 enum PreferredEditorSettings {
     static let key = "preferredEditorCommand"
 
-    /// Returns the configured editor command, falling back to $VISUAL, then $EDITOR.
-    /// Returns nil if all are empty (use system default).
+    /// Returns the configured editor command, or nil to use system default.
     static func resolvedCommand(defaults: UserDefaults = .standard) -> String? {
-        if let stored = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !stored.isEmpty {
-            return stored
+        guard let stored = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !stored.isEmpty else {
+            return nil
         }
-        if let visual = ProcessInfo.processInfo.environment["VISUAL"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !visual.isEmpty {
-            return visual
-        }
-        if let editor = ProcessInfo.processInfo.environment["EDITOR"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !editor.isEmpty {
-            return editor
-        }
-        return nil
+        return stored
     }
 
     /// Open a file path with the user's preferred editor, falling back to system default.
@@ -4556,7 +4547,7 @@ struct SettingsView: View {
 
                         SettingsCardRow(
                             String(localized: "settings.app.preferredEditor", defaultValue: "Open Files With"),
-                            subtitle: String(localized: "settings.app.preferredEditor.subtitle", defaultValue: "Command to open files on Cmd-click (e.g. code, zed, subl). Falls back to $VISUAL, $EDITOR, then system default.")
+                            subtitle: String(localized: "settings.app.preferredEditor.subtitle", defaultValue: "Command to open files on Cmd-click. Leave empty for system default.")
                         ) {
                             TextField(
                                 String(localized: "settings.app.preferredEditor.placeholder", defaultValue: "e.g. code, zed, subl"),
