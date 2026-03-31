@@ -1433,6 +1433,48 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(secondShiftResult.nextAnchorIndex, 1)
     }
 
+    func testCommandClickRemovingShiftPivotMovesPivotToNearestRemainingWorkspace() throws {
+        let workspaceIds = makeWorkspaceIds(count: 6)
+
+        let firstShiftResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[3]]),
+            currentActiveWorkspaceId: workspaceIds[3],
+            lastSelectionAnchorIndex: 3,
+            clickedIndex: 1,
+            modifiers: [.shift]
+        )
+
+        let commandResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: firstShiftResult.selectedWorkspaceIds,
+            currentActiveWorkspaceId: firstShiftResult.nextActiveWorkspaceId,
+            lastSelectionAnchorIndex: firstShiftResult.nextAnchorIndex,
+            clickedIndex: 1,
+            modifiers: [.command]
+        )
+
+        let secondShiftResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: commandResult.selectedWorkspaceIds,
+            currentActiveWorkspaceId: commandResult.nextActiveWorkspaceId,
+            lastSelectionAnchorIndex: commandResult.nextAnchorIndex,
+            clickedIndex: 5,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(firstShiftResult.nextAnchorIndex, 1)
+        XCTAssertEqual(commandResult.selectedWorkspaceIds, Set([workspaceIds[2], workspaceIds[3]]))
+        XCTAssertEqual(commandResult.nextActiveWorkspaceId, workspaceIds[2])
+        XCTAssertEqual(commandResult.nextAnchorIndex, 2)
+        XCTAssertEqual(
+            secondShiftResult.selectedWorkspaceIds,
+            Set([workspaceIds[2], workspaceIds[3], workspaceIds[4], workspaceIds[5]])
+        )
+        XCTAssertEqual(secondShiftResult.nextActiveWorkspaceId, workspaceIds[5])
+        XCTAssertEqual(secondShiftResult.nextAnchorIndex, 2)
+    }
+
     func testCommandClickOnOnlySelectedWorkspaceKeepsActiveWorkspaceSelected() throws {
         let workspaceIds = makeWorkspaceIds()
 
