@@ -1028,6 +1028,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
     private func update(
         workspaceIds: [UUID],
         selectedWorkspaceIds: Set<UUID>,
+        currentActiveWorkspaceId: UUID? = nil,
         lastSelectionAnchorIndex: Int?,
         clickedIndex: Int,
         modifiers: NSEvent.ModifierFlags
@@ -1036,6 +1037,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             SidebarWorkspaceSelectionPolicy.update(
                 workspaceIds: workspaceIds,
                 selectedWorkspaceIds: selectedWorkspaceIds,
+                currentActiveWorkspaceId: currentActiveWorkspaceId,
                 lastSelectionAnchorIndex: lastSelectionAnchorIndex,
                 clickedIndex: clickedIndex,
                 modifiers: modifiers
@@ -1047,16 +1049,21 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         workspaceIds: [UUID],
         initialSelectedWorkspaceIds: Set<UUID>,
         initialAnchorIndex: Int?,
+        initialActiveWorkspaceId: UUID? = nil,
         clickedIndexes: [Int]
     ) throws -> [SidebarWorkspaceSelectionUpdate] {
         var selectedWorkspaceIds = initialSelectedWorkspaceIds
         var anchorIndex = initialAnchorIndex
+        var currentActiveWorkspaceId = initialActiveWorkspaceId ?? (
+            initialSelectedWorkspaceIds.count == 1 ? initialSelectedWorkspaceIds.first : nil
+        )
         var updates: [SidebarWorkspaceSelectionUpdate] = []
 
         for clickedIndex in clickedIndexes {
             let result = try update(
                 workspaceIds: workspaceIds,
                 selectedWorkspaceIds: selectedWorkspaceIds,
+                currentActiveWorkspaceId: currentActiveWorkspaceId,
                 lastSelectionAnchorIndex: anchorIndex,
                 clickedIndex: clickedIndex,
                 modifiers: [.command]
@@ -1064,6 +1071,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             updates.append(result)
             selectedWorkspaceIds = result.selectedWorkspaceIds
             anchorIndex = result.nextAnchorIndex
+            currentActiveWorkspaceId = result.nextActiveWorkspaceId
         }
 
         return updates
@@ -1235,6 +1243,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         let result = try update(
             workspaceIds: workspaceIds,
             selectedWorkspaceIds: Set([workspaceIds[2]]),
+            currentActiveWorkspaceId: workspaceIds[2],
             lastSelectionAnchorIndex: 2,
             clickedIndex: 2,
             modifiers: [.command]
@@ -1255,6 +1264,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         let result = try update(
             workspaceIds: workspaceIds,
             selectedWorkspaceIds: Set([workspaceIds[1], workspaceIds[2], workspaceIds[4]]),
+            currentActiveWorkspaceId: workspaceIds[2],
             lastSelectionAnchorIndex: 4,
             clickedIndex: 2,
             modifiers: [.command]
@@ -1264,6 +1274,24 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             result.selectedWorkspaceIds.contains(result.nextActiveWorkspaceId),
             "Command-click can shrink a multi-selection, but the focused workspace should still be part of the resulting selected set."
         )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
+        XCTAssertEqual(result.nextAnchorIndex, 2)
+    }
+
+    func testCommandClickRemovingNonActiveWorkspacePreservesCurrentActiveWorkspace() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[1], workspaceIds[2], workspaceIds[4]]),
+            currentActiveWorkspaceId: workspaceIds[4],
+            lastSelectionAnchorIndex: 4,
+            clickedIndex: 2,
+            modifiers: [.command]
+        )
+
+        XCTAssertEqual(result.selectedWorkspaceIds, Set([workspaceIds[1], workspaceIds[4]]))
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
         XCTAssertEqual(result.nextAnchorIndex, 2)
     }
 }

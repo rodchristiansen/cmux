@@ -11143,6 +11143,7 @@ enum SidebarWorkspaceSelectionPolicy {
     static func update(
         workspaceIds: [UUID],
         selectedWorkspaceIds: Set<UUID>,
+        currentActiveWorkspaceId: UUID?,
         lastSelectionAnchorIndex: Int?,
         clickedIndex: Int,
         modifiers: NSEvent.ModifierFlags
@@ -11153,6 +11154,7 @@ enum SidebarWorkspaceSelectionPolicy {
         let isCommand = modifiers.contains(.command)
         let isShift = modifiers.contains(.shift)
         var nextSelectedWorkspaceIds = selectedWorkspaceIds
+        var nextActiveWorkspaceId = clickedWorkspaceId
 
         if isShift,
            let lastSelectionAnchorIndex,
@@ -11167,7 +11169,18 @@ enum SidebarWorkspaceSelectionPolicy {
             }
         } else if isCommand {
             if nextSelectedWorkspaceIds.contains(clickedWorkspaceId) {
-                nextSelectedWorkspaceIds.remove(clickedWorkspaceId)
+                if nextSelectedWorkspaceIds.count == 1 {
+                    nextSelectedWorkspaceIds = [clickedWorkspaceId]
+                    nextActiveWorkspaceId = clickedWorkspaceId
+                } else {
+                    nextSelectedWorkspaceIds.remove(clickedWorkspaceId)
+                    nextActiveWorkspaceId = preferredActiveWorkspaceId(
+                        workspaceIds: workspaceIds,
+                        selectedWorkspaceIds: nextSelectedWorkspaceIds,
+                        currentActiveWorkspaceId: currentActiveWorkspaceId,
+                        clickedIndex: clickedIndex
+                    ) ?? clickedWorkspaceId
+                }
             } else {
                 nextSelectedWorkspaceIds.insert(clickedWorkspaceId)
             }
@@ -11177,9 +11190,29 @@ enum SidebarWorkspaceSelectionPolicy {
 
         return SidebarWorkspaceSelectionUpdate(
             selectedWorkspaceIds: nextSelectedWorkspaceIds,
-            nextActiveWorkspaceId: clickedWorkspaceId,
+            nextActiveWorkspaceId: nextActiveWorkspaceId,
             nextAnchorIndex: clickedIndex
         )
+    }
+
+    private static func preferredActiveWorkspaceId(
+        workspaceIds: [UUID],
+        selectedWorkspaceIds: Set<UUID>,
+        currentActiveWorkspaceId: UUID?,
+        clickedIndex: Int
+    ) -> UUID? {
+        if let currentActiveWorkspaceId,
+           selectedWorkspaceIds.contains(currentActiveWorkspaceId) {
+            return currentActiveWorkspaceId
+        }
+
+        let trailingIds = workspaceIds.suffix(from: min(clickedIndex + 1, workspaceIds.count))
+        if let nextId = trailingIds.first(where: selectedWorkspaceIds.contains) {
+            return nextId
+        }
+
+        let leadingIds = workspaceIds.prefix(clickedIndex).reversed()
+        return leadingIds.first(where: selectedWorkspaceIds.contains)
     }
 }
 
@@ -12188,6 +12221,7 @@ private struct TabItemView: View, Equatable {
         guard let update = SidebarWorkspaceSelectionPolicy.update(
             workspaceIds: tabManager.tabs.map(\.id),
             selectedWorkspaceIds: selectedTabIds,
+            currentActiveWorkspaceId: tabManager.selectedTabId,
             lastSelectionAnchorIndex: lastSidebarSelectionIndex,
             clickedIndex: index,
             modifiers: modifiers
@@ -12197,7 +12231,9 @@ private struct TabItemView: View, Equatable {
 
         selectedTabIds = update.selectedWorkspaceIds
         lastSidebarSelectionIndex = update.nextAnchorIndex
-        tabManager.selectTab(tab)
+        if let nextActiveWorkspace = tabManager.tabs.first(where: { $0.id == update.nextActiveWorkspaceId }) {
+            tabManager.selectTab(nextActiveWorkspace)
+        }
         if wasSelected, !isCommand, !isShift {
             tabManager.dismissNotificationOnDirectInteraction(
                 tabId: tab.id,
