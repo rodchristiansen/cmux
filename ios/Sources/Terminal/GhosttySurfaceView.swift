@@ -330,6 +330,31 @@ final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(focusInput))
         addGestureRecognizer(tap)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleAppDidEnterBackground() {
+        guard let surface else { return }
+        setFocus(false)
+        ghostty_surface_set_occlusion(surface, true)
+    }
+
+    @objc private func handleAppWillEnterForeground() {
+        guard let surface, window != nil else { return }
+        ghostty_surface_set_occlusion(surface, false)
+        setFocus(true)
     }
 
     required init?(coder: NSCoder) {
@@ -356,11 +381,13 @@ final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         liveAnchormuxLog("surface.didMoveToWindow window=\(window != nil)")
-        syncSurfaceGeometry()
         syncSurfaceVisibility()
-        setFocus(window != nil)
         if window != nil {
+            syncSurfaceGeometry()
+            setFocus(true)
             focusInput()
+        } else {
+            setFocus(false)
         }
     }
 
@@ -497,7 +524,7 @@ final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
     private func sendText(_ text: String) {
         guard let surface else { return }
         let count = text.utf8CString.count
-        guard count > 0 else { return }
+        guard count > 1 else { return }
         text.withCString { pointer in
             ghostty_surface_text(surface, pointer, UInt(count - 1))
         }
