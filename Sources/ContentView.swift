@@ -11155,10 +11155,11 @@ enum SidebarWorkspaceSelectionPolicy {
         let isShift = modifiers.contains(.shift)
         var nextSelectedWorkspaceIds = selectedWorkspaceIds
         var nextActiveWorkspaceId = clickedWorkspaceId
+        var nextAnchorIndex = clickedIndex
+        let hasSelectionAnchor = isShift &&
+            lastSelectionAnchorIndex.map(workspaceIds.indices.contains) == true
 
-        if isShift,
-           let lastSelectionAnchorIndex,
-           workspaceIds.indices.contains(lastSelectionAnchorIndex) {
+        if hasSelectionAnchor, let lastSelectionAnchorIndex {
             let lower = min(lastSelectionAnchorIndex, clickedIndex)
             let upper = max(lastSelectionAnchorIndex, clickedIndex)
             let rangeIds = workspaceIds[lower...upper]
@@ -11167,6 +11168,7 @@ enum SidebarWorkspaceSelectionPolicy {
             } else {
                 nextSelectedWorkspaceIds = Set(rangeIds)
             }
+            nextAnchorIndex = lastSelectionAnchorIndex
         } else if isCommand {
             if nextSelectedWorkspaceIds.contains(clickedWorkspaceId) {
                 if nextSelectedWorkspaceIds.count == 1 {
@@ -11191,7 +11193,7 @@ enum SidebarWorkspaceSelectionPolicy {
         return SidebarWorkspaceSelectionUpdate(
             selectedWorkspaceIds: nextSelectedWorkspaceIds,
             nextActiveWorkspaceId: nextActiveWorkspaceId,
-            nextAnchorIndex: clickedIndex
+            nextAnchorIndex: nextAnchorIndex
         )
     }
 

@@ -1109,7 +1109,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             Set([workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
         )
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
-        XCTAssertEqual(result.nextAnchorIndex, 4)
+        XCTAssertEqual(result.nextAnchorIndex, 1)
     }
 
     func testShiftClickSelectsBackwardInclusiveRange() throws {
@@ -1128,7 +1128,61 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             Set([workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
         )
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[1])
-        XCTAssertEqual(result.nextAnchorIndex, 1)
+        XCTAssertEqual(result.nextAnchorIndex, 4)
+    }
+
+    func testRepeatedShiftClicksPreserveOriginalAnchorWhileShrinkingRange() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let firstResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[1]]),
+            currentActiveWorkspaceId: workspaceIds[1],
+            lastSelectionAnchorIndex: 1,
+            clickedIndex: 4,
+            modifiers: [.shift]
+        )
+
+        let secondResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: firstResult.selectedWorkspaceIds,
+            currentActiveWorkspaceId: firstResult.nextActiveWorkspaceId,
+            lastSelectionAnchorIndex: firstResult.nextAnchorIndex,
+            clickedIndex: 2,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(firstResult.nextAnchorIndex, 1)
+        XCTAssertEqual(secondResult.selectedWorkspaceIds, Set([workspaceIds[1], workspaceIds[2]]))
+        XCTAssertEqual(secondResult.nextActiveWorkspaceId, workspaceIds[2])
+        XCTAssertEqual(secondResult.nextAnchorIndex, 1)
+    }
+
+    func testRepeatedShiftClicksPreserveOriginalAnchorAcrossDirectionChange() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let firstResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[3]]),
+            currentActiveWorkspaceId: workspaceIds[3],
+            lastSelectionAnchorIndex: 3,
+            clickedIndex: 1,
+            modifiers: [.shift]
+        )
+
+        let secondResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: firstResult.selectedWorkspaceIds,
+            currentActiveWorkspaceId: firstResult.nextActiveWorkspaceId,
+            lastSelectionAnchorIndex: firstResult.nextAnchorIndex,
+            clickedIndex: 4,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(firstResult.nextAnchorIndex, 3)
+        XCTAssertEqual(secondResult.selectedWorkspaceIds, Set([workspaceIds[3], workspaceIds[4]]))
+        XCTAssertEqual(secondResult.nextActiveWorkspaceId, workspaceIds[4])
+        XCTAssertEqual(secondResult.nextAnchorIndex, 3)
     }
 
     func testShiftClickWithoutAnchorFallsBackToSingleSelection() throws {
@@ -1215,7 +1269,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             Set([workspaceIds[0], workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
         )
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[3])
-        XCTAssertEqual(result.nextAnchorIndex, 3)
+        XCTAssertEqual(result.nextAnchorIndex, 1)
     }
 
     func testCommandShiftClickWithoutAnchorFallsBackToCommandToggle() throws {
@@ -1235,6 +1289,33 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         )
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[2])
         XCTAssertEqual(result.nextAnchorIndex, 2)
+    }
+
+    func testCommandClickSetsAnchorForSubsequentShiftClickRange() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let commandResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[0]]),
+            currentActiveWorkspaceId: workspaceIds[0],
+            lastSelectionAnchorIndex: 0,
+            clickedIndex: 3,
+            modifiers: [.command]
+        )
+
+        let shiftResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: commandResult.selectedWorkspaceIds,
+            currentActiveWorkspaceId: commandResult.nextActiveWorkspaceId,
+            lastSelectionAnchorIndex: commandResult.nextAnchorIndex,
+            clickedIndex: 4,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(commandResult.nextAnchorIndex, 3)
+        XCTAssertEqual(shiftResult.selectedWorkspaceIds, Set([workspaceIds[3], workspaceIds[4]]))
+        XCTAssertEqual(shiftResult.nextActiveWorkspaceId, workspaceIds[4])
+        XCTAssertEqual(shiftResult.nextAnchorIndex, 3)
     }
 
     func testCommandClickOnOnlySelectedWorkspaceKeepsActiveWorkspaceSelected() throws {
