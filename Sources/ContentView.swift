@@ -11158,6 +11158,7 @@ enum SidebarWorkspaceSelectionPolicy {
         let validAnchorIndex = lastSelectionAnchorIndex.flatMap { index in
             workspaceIds.indices.contains(index) ? index : nil
         }
+        let anchorWorkspaceId = validAnchorIndex.map { workspaceIds[$0] }
         var nextAnchorIndex = validAnchorIndex ?? clickedIndex
 
         if isShift, let validAnchorIndex {
@@ -11169,7 +11170,9 @@ enum SidebarWorkspaceSelectionPolicy {
             } else {
                 nextSelectedWorkspaceIds = Set(rangeIds)
             }
-            nextAnchorIndex = validAnchorIndex
+            // Once a range starts from a singleton selection, keep the first
+            // shift-clicked edge as the pivot while later shift clicks resize.
+            nextAnchorIndex = selectedWorkspaceIds.count <= 1 ? clickedIndex : validAnchorIndex
         } else if isCommand {
             if nextSelectedWorkspaceIds.contains(clickedWorkspaceId) {
                 if nextSelectedWorkspaceIds.count == 1 {
@@ -11186,6 +11189,16 @@ enum SidebarWorkspaceSelectionPolicy {
                 }
             } else {
                 nextSelectedWorkspaceIds.insert(clickedWorkspaceId)
+            }
+
+            if let anchorWorkspaceId,
+               !nextSelectedWorkspaceIds.contains(anchorWorkspaceId),
+               let replacementAnchorIndex = preferredSelectionAnchorIndex(
+                   workspaceIds: workspaceIds,
+                   selectedWorkspaceIds: nextSelectedWorkspaceIds,
+                   referenceIndex: validAnchorIndex ?? clickedIndex
+               ) {
+                nextAnchorIndex = replacementAnchorIndex
             }
         } else {
             nextSelectedWorkspaceIds = [clickedWorkspaceId]
@@ -11217,6 +11230,32 @@ enum SidebarWorkspaceSelectionPolicy {
 
         let leadingIds = workspaceIds.prefix(clickedIndex).reversed()
         return leadingIds.first(where: selectedWorkspaceIds.contains)
+    }
+
+    private static func preferredSelectionAnchorIndex(
+        workspaceIds: [UUID],
+        selectedWorkspaceIds: Set<UUID>,
+        referenceIndex: Int
+    ) -> Int? {
+        let safeReferenceIndex = min(max(referenceIndex, 0), workspaceIds.count - 1)
+
+        for index in workspaceIds.indices.dropFirst(safeReferenceIndex + 1) {
+            if selectedWorkspaceIds.contains(workspaceIds[index]) {
+                return index
+            }
+        }
+
+        for index in workspaceIds.indices.prefix(safeReferenceIndex).reversed() {
+            if selectedWorkspaceIds.contains(workspaceIds[index]) {
+                return index
+            }
+        }
+
+        if selectedWorkspaceIds.contains(workspaceIds[safeReferenceIndex]) {
+            return safeReferenceIndex
+        }
+
+        return nil
     }
 }
 
@@ -12222,27 +12261,6 @@ private struct TabItemView: View, Equatable {
         let wasSelected = tabManager.selectedTabId == tab.id
         let isCommand = modifiers.contains(.command)
         let isShift = modifiers.contains(.shift)
-        #if DEBUG
-        let debugWorkspaceId: (UUID?) -> String = { workspaceId in
-            guard let workspaceId else { return "nil" }
-            return String(workspaceId.uuidString.prefix(5))
-        }
-        let debugSelectedWorkspaceIds: (Set<UUID>) -> String = { workspaceIds in
-            let orderedIds = tabManager.tabs.enumerated().compactMap { tabIndex, workspace in
-                workspaceIds.contains(workspace.id) ? "\(tabIndex):\(workspace.id.uuidString.prefix(5))" : nil
-            }
-            return orderedIds.isEmpty ? "[]" : "[\(orderedIds.joined(separator: ", "))]"
-        }
-        let debugPivot = lastSidebarSelectionIndex.map { anchorIndex -> String in
-            guard tabManager.tabs.indices.contains(anchorIndex) else { return "\(anchorIndex):invalid" }
-            return "\(anchorIndex):\(tabManager.tabs[anchorIndex].id.uuidString.prefix(5))"
-        } ?? "nil"
-        if isShift {
-            dlog(
-                "sidebar.select shift before clicked=\(index):\(tab.id.uuidString.prefix(5)) active=\(debugWorkspaceId(tabManager.selectedTabId)) pivot=\(debugPivot) selected=\(debugSelectedWorkspaceIds(selectedTabIds)) command=\(isCommand)"
-            )
-        }
-        #endif
         guard let update = SidebarWorkspaceSelectionPolicy.update(
             workspaceIds: tabManager.tabs.map(\.id),
             selectedWorkspaceIds: selectedTabIds,
@@ -12253,16 +12271,6 @@ private struct TabItemView: View, Equatable {
         ) else {
             return
         }
-        #if DEBUG
-        if isShift {
-            let debugNextPivot = tabManager.tabs.indices.contains(update.nextAnchorIndex)
-                ? "\(update.nextAnchorIndex):\(tabManager.tabs[update.nextAnchorIndex].id.uuidString.prefix(5))"
-                : "\(update.nextAnchorIndex):invalid"
-            dlog(
-                "sidebar.select shift after clicked=\(index):\(tab.id.uuidString.prefix(5)) active=\(debugWorkspaceId(update.nextActiveWorkspaceId)) pivot=\(debugNextPivot) selected=\(debugSelectedWorkspaceIds(update.selectedWorkspaceIds)) command=\(isCommand)"
-            )
-        }
-        #endif
 
         selectedTabIds = update.selectedWorkspaceIds
         lastSidebarSelectionIndex = update.nextAnchorIndex
