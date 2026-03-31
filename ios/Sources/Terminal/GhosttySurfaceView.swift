@@ -545,7 +545,6 @@ final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
         if let surface {
             GhosttySurfaceView.register(surface: surface, for: self)
             if let config = runtime?.config {
-                ghostty_surface_update_config(surface, config)
                 applyBackgroundColorFromConfig(config)
             }
         }
