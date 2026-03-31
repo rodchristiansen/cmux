@@ -1217,7 +1217,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             Set([workspaceIds[1], workspaceIds[3], workspaceIds[4]])
         )
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
-        XCTAssertEqual(result.nextAnchorIndex, 4)
+        XCTAssertEqual(result.nextAnchorIndex, 3)
     }
 
     func testRepeatedCommandClicksAccumulateDifferentWorkspaces() throws {
@@ -1239,7 +1239,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         )
     }
 
-    func testRepeatedCommandClicksMoveFocusAndAnchorToEachClickedWorkspace() throws {
+    func testRepeatedCommandClicksMoveFocusWhilePreservingOriginalPivot() throws {
         let workspaceIds = makeWorkspaceIds()
 
         let updates = try applyCommandClickSequence(
@@ -1250,7 +1250,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(updates.map(\.nextActiveWorkspaceId), [workspaceIds[3], workspaceIds[1], workspaceIds[4]])
-        XCTAssertEqual(updates.map(\.nextAnchorIndex), [3, 1, 4])
+        XCTAssertEqual(updates.map(\.nextAnchorIndex), [0, 0, 0])
     }
 
     func testCommandShiftClickUnionsContiguousRangeIntoExistingSelection() throws {
@@ -1291,7 +1291,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(result.nextAnchorIndex, 2)
     }
 
-    func testCommandClickSetsAnchorForSubsequentShiftClickRange() throws {
+    func testCommandClickPreservesPivotForSubsequentShiftClickRange() throws {
         let workspaceIds = makeWorkspaceIds()
 
         let commandResult = try update(
@@ -1312,10 +1312,41 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             modifiers: [.shift]
         )
 
-        XCTAssertEqual(commandResult.nextAnchorIndex, 3)
-        XCTAssertEqual(shiftResult.selectedWorkspaceIds, Set([workspaceIds[3], workspaceIds[4]]))
+        XCTAssertEqual(commandResult.nextAnchorIndex, 0)
+        XCTAssertEqual(
+            shiftResult.selectedWorkspaceIds,
+            Set([workspaceIds[0], workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
+        )
         XCTAssertEqual(shiftResult.nextActiveWorkspaceId, workspaceIds[4])
-        XCTAssertEqual(shiftResult.nextAnchorIndex, 3)
+        XCTAssertEqual(shiftResult.nextAnchorIndex, 0)
+    }
+
+    func testInitialCommandClickEstablishesPivotForSubsequentShiftClickRange() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let commandResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: [],
+            lastSelectionAnchorIndex: nil,
+            clickedIndex: 2,
+            modifiers: [.command]
+        )
+
+        let shiftResult = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: commandResult.selectedWorkspaceIds,
+            currentActiveWorkspaceId: commandResult.nextActiveWorkspaceId,
+            lastSelectionAnchorIndex: commandResult.nextAnchorIndex,
+            clickedIndex: 4,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(commandResult.selectedWorkspaceIds, Set([workspaceIds[2]]))
+        XCTAssertEqual(commandResult.nextActiveWorkspaceId, workspaceIds[2])
+        XCTAssertEqual(commandResult.nextAnchorIndex, 2)
+        XCTAssertEqual(shiftResult.selectedWorkspaceIds, Set([workspaceIds[2], workspaceIds[3], workspaceIds[4]]))
+        XCTAssertEqual(shiftResult.nextActiveWorkspaceId, workspaceIds[4])
+        XCTAssertEqual(shiftResult.nextAnchorIndex, 2)
     }
 
     func testCommandClickOnOnlySelectedWorkspaceKeepsActiveWorkspaceSelected() throws {
@@ -1356,7 +1387,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
             "Command-click can shrink a multi-selection, but the focused workspace should still be part of the resulting selected set."
         )
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
-        XCTAssertEqual(result.nextAnchorIndex, 2)
+        XCTAssertEqual(result.nextAnchorIndex, 4)
     }
 
     func testCommandClickRemovingNonActiveWorkspacePreservesCurrentActiveWorkspace() throws {
@@ -1373,7 +1404,7 @@ final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
 
         XCTAssertEqual(result.selectedWorkspaceIds, Set([workspaceIds[1], workspaceIds[4]]))
         XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
-        XCTAssertEqual(result.nextAnchorIndex, 2)
+        XCTAssertEqual(result.nextAnchorIndex, 4)
     }
 }
 
