@@ -156,8 +156,10 @@ final class GhosttyRuntime {
     private static func setupiOSConfigEnvironment() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        setenv("XDG_CONFIG_HOME", appSupport.path, 0) // Don't override if already set
-        NSLog("📱 XDG_CONFIG_HOME=%@", String(cString: getenv("XDG_CONFIG_HOME") ?? strdup("nil")))
+        setenv("XDG_CONFIG_HOME", appSupport.path, 0)
+        if let env = getenv("XDG_CONFIG_HOME") {
+            NSLog("📱 XDG_CONFIG_HOME=%@", String(cString: env))
+        }
     }
 
     private static func applyiOSDefaults(_ config: ghostty_config_t) {
@@ -188,11 +190,15 @@ final class GhosttyRuntime {
         palette = 15=fdfff1
         """
         let tmpFile = FileManager.default.temporaryDirectory.appendingPathComponent("ghostty-ios-config-\(ProcessInfo.processInfo.processIdentifier)")
-        try? monokai.write(to: tmpFile, atomically: true, encoding: .utf8)
-        tmpFile.path.withCString { path in
-            ghostty_config_load_file(config, path)
+        do {
+            try monokai.write(to: tmpFile, atomically: true, encoding: .utf8)
+            tmpFile.path.withCString { path in
+                ghostty_config_load_file(config, path)
+            }
+            try FileManager.default.removeItem(at: tmpFile)
+        } catch {
+            NSLog("📱 applyiOSDefaults: failed to write config: %@", error.localizedDescription)
         }
-        try? FileManager.default.removeItem(at: tmpFile)
 
         var bgColor = ghostty_config_color_s()
         let bgKey2 = "background"
@@ -233,8 +239,12 @@ final class GhosttyRuntime {
         palette = 15=#fdfff1
         """
 
-        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-        try? defaultConfig.write(to: configFile, atomically: true, encoding: .utf8)
+        do {
+            try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+            try defaultConfig.write(to: configFile, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("📱 ensureDefaultiOSConfig: failed: %@", error.localizedDescription)
+        }
     }
 
     nonisolated static func iOSConfigURLs(
