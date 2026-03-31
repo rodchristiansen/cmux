@@ -1020,6 +1020,195 @@ final class TabManagerCloseCurrentPanelTests: XCTestCase {
     }
 }
 
+final class SidebarWorkspaceSelectionPolicyTests: XCTestCase {
+    private func makeWorkspaceIds(count: Int = 5) -> [UUID] {
+        (0..<count).map { _ in UUID() }
+    }
+
+    private func update(
+        workspaceIds: [UUID],
+        selectedWorkspaceIds: Set<UUID>,
+        lastSelectionAnchorIndex: Int?,
+        clickedIndex: Int,
+        modifiers: NSEvent.ModifierFlags
+    ) throws -> SidebarWorkspaceSelectionUpdate {
+        try XCTUnwrap(
+            SidebarWorkspaceSelectionPolicy.update(
+                workspaceIds: workspaceIds,
+                selectedWorkspaceIds: selectedWorkspaceIds,
+                lastSelectionAnchorIndex: lastSelectionAnchorIndex,
+                clickedIndex: clickedIndex,
+                modifiers: modifiers
+            )
+        )
+    }
+
+    func testPlainClickReplacesExistingSelectionAndMovesAnchor() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[0], workspaceIds[3]]),
+            lastSelectionAnchorIndex: 3,
+            clickedIndex: 2,
+            modifiers: []
+        )
+
+        XCTAssertEqual(result.selectedWorkspaceIds, Set([workspaceIds[2]]))
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[2])
+        XCTAssertEqual(result.nextAnchorIndex, 2)
+    }
+
+    func testShiftClickSelectsForwardInclusiveRange() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[1]]),
+            lastSelectionAnchorIndex: 1,
+            clickedIndex: 4,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(
+            result.selectedWorkspaceIds,
+            Set([workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
+        )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
+        XCTAssertEqual(result.nextAnchorIndex, 4)
+    }
+
+    func testShiftClickSelectsBackwardInclusiveRange() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[4]]),
+            lastSelectionAnchorIndex: 4,
+            clickedIndex: 1,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(
+            result.selectedWorkspaceIds,
+            Set([workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
+        )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[1])
+        XCTAssertEqual(result.nextAnchorIndex, 1)
+    }
+
+    func testShiftClickWithoutAnchorFallsBackToSingleSelection() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[0], workspaceIds[1]]),
+            lastSelectionAnchorIndex: nil,
+            clickedIndex: 3,
+            modifiers: [.shift]
+        )
+
+        XCTAssertEqual(result.selectedWorkspaceIds, Set([workspaceIds[3]]))
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[3])
+        XCTAssertEqual(result.nextAnchorIndex, 3)
+    }
+
+    func testCommandClickAddsWorkspaceToExistingSelection() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[1], workspaceIds[3]]),
+            lastSelectionAnchorIndex: 3,
+            clickedIndex: 4,
+            modifiers: [.command]
+        )
+
+        XCTAssertEqual(
+            result.selectedWorkspaceIds,
+            Set([workspaceIds[1], workspaceIds[3], workspaceIds[4]])
+        )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[4])
+        XCTAssertEqual(result.nextAnchorIndex, 4)
+    }
+
+    func testCommandShiftClickUnionsContiguousRangeIntoExistingSelection() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[0], workspaceIds[4]]),
+            lastSelectionAnchorIndex: 1,
+            clickedIndex: 3,
+            modifiers: [.command, .shift]
+        )
+
+        XCTAssertEqual(
+            result.selectedWorkspaceIds,
+            Set([workspaceIds[0], workspaceIds[1], workspaceIds[2], workspaceIds[3], workspaceIds[4]])
+        )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[3])
+        XCTAssertEqual(result.nextAnchorIndex, 3)
+    }
+
+    func testCommandShiftClickWithoutAnchorFallsBackToCommandToggle() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[1], workspaceIds[3]]),
+            lastSelectionAnchorIndex: nil,
+            clickedIndex: 2,
+            modifiers: [.command, .shift]
+        )
+
+        XCTAssertEqual(
+            result.selectedWorkspaceIds,
+            Set([workspaceIds[1], workspaceIds[2], workspaceIds[3]])
+        )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[2])
+        XCTAssertEqual(result.nextAnchorIndex, 2)
+    }
+
+    func testCommandClickOnOnlySelectedWorkspaceKeepsActiveWorkspaceSelected() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[2]]),
+            lastSelectionAnchorIndex: 2,
+            clickedIndex: 2,
+            modifiers: [.command]
+        )
+
+        XCTAssertEqual(
+            result.selectedWorkspaceIds,
+            Set([workspaceIds[2]]),
+            "The sidebar always has an active workspace, so command-click should not leave the current workspace visually active but absent from the multi-selection set."
+        )
+        XCTAssertEqual(result.nextActiveWorkspaceId, workspaceIds[2])
+        XCTAssertEqual(result.nextAnchorIndex, 2)
+    }
+
+    func testCommandClickRemovingActiveWorkspaceKeepsActiveWorkspaceInsideSelection() throws {
+        let workspaceIds = makeWorkspaceIds()
+
+        let result = try update(
+            workspaceIds: workspaceIds,
+            selectedWorkspaceIds: Set([workspaceIds[1], workspaceIds[2], workspaceIds[4]]),
+            lastSelectionAnchorIndex: 4,
+            clickedIndex: 2,
+            modifiers: [.command]
+        )
+
+        XCTAssertTrue(
+            result.selectedWorkspaceIds.contains(result.nextActiveWorkspaceId),
+            "Command-click can shrink a multi-selection, but the focused workspace should still be part of the resulting selected set."
+        )
+        XCTAssertEqual(result.nextAnchorIndex, 2)
+    }
+}
+
 
 @MainActor
 final class TabManagerNotificationFocusTests: XCTestCase {
