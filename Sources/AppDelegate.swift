@@ -2430,6 +2430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // UI tests run on a shared VM user profile, so persisted shortcuts can drift and make
         // key-equivalent routing flaky. Force defaults for deterministic tests.
         if isRunningUnderXCTest {
+            SystemWideHotkeySettings.reset()
             KeyboardShortcutSettings.resetAll()
         }
 #endif
@@ -2517,6 +2518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         installBrowserAddressBarFocusObservers()
         installShortcutMonitor()
         installShortcutDefaultsObserver()
+        SystemWideHotkeyController.shared.start()
         NSApp.servicesProvider = self
 #if DEBUG
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)

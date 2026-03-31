@@ -5740,6 +5740,8 @@ struct SettingsView: View {
                         }
                     }
 
+                    GlobalHotkeySection()
+
                     SettingsSectionHeader(title: String(localized: "settings.section.keyboardShortcuts", defaultValue: "Keyboard Shortcuts"))
                         .id(SettingsNavigationTarget.keyboardShortcuts)
                         .accessibilityIdentifier("SettingsKeyboardShortcutsSection")
@@ -6051,6 +6053,7 @@ struct SettingsView: View {
         socketPasswordStatusMessage = nil
         socketPasswordStatusIsError = false
         refreshDetectedImportBrowsers()
+        SystemWideHotkeySettings.reset()
         KeyboardShortcutSettings.resetAll()
         WorkspaceTabColorSettings.reset()
         reloadWorkspaceTabColorSettings()
@@ -6602,6 +6605,135 @@ private struct ShortcutSettingRow: View {
                     shortcut = latest
                 }
             }
+    }
+}
+
+private struct GlobalHotkeySection: View {
+    @AppStorage(SystemWideHotkeySettings.enabledKey) private var isEnabled = SystemWideHotkeySettings.defaultEnabled
+    @State private var shortcut = SystemWideHotkeySettings.shortcut()
+    @State private var accessibilityTrusted = SystemWideHotkeySettings.isAccessibilityTrusted()
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { isEnabled },
+            set: { newValue in
+                isEnabled = newValue
+                SystemWideHotkeySettings.setEnabled(newValue)
+                guard newValue else { return }
+                let trusted = SystemWideHotkeyController.shared.requestAccessibilityAccess()
+                accessibilityTrusted = trusted
+                if !trusted {
+                    SystemWideHotkeySettings.openAccessibilitySettings()
+                }
+            }
+        )
+    }
+
+    private var enableSubtitle: String {
+        if isEnabled {
+            return String(
+                localized: "settings.globalHotkey.enable.subtitleOn",
+                defaultValue: "Press the shortcut from any app to show or hide all cmux windows."
+            )
+        }
+        return String(
+            localized: "settings.globalHotkey.enable.subtitleOff",
+            defaultValue: "Turn this on to show or hide all cmux windows from any app."
+        )
+    }
+
+    private var accessibilitySubtitle: String {
+        if accessibilityTrusted {
+            return String(
+                localized: "settings.globalHotkey.accessibility.subtitleAllowed",
+                defaultValue: "cmux can monitor the hotkey while you are in other apps."
+            )
+        }
+        return String(
+            localized: "settings.globalHotkey.accessibility.subtitleRequired",
+            defaultValue: "macOS Accessibility access is required before cmux can monitor the hotkey outside the app."
+        )
+    }
+
+    var body: some View {
+        SettingsSectionHeader(title: String(localized: "settings.section.globalHotkey", defaultValue: "Global Hotkey"))
+            .accessibilityIdentifier("SettingsGlobalHotkeySection")
+
+        SettingsCard {
+            SettingsCardRow(
+                String(localized: "settings.globalHotkey.enable", defaultValue: "Enable System-Wide Hotkey"),
+                subtitle: enableSubtitle
+            ) {
+                Toggle("", isOn: enabledBinding)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityIdentifier("SettingsGlobalHotkeyToggle")
+            }
+
+            SettingsCardDivider()
+
+            KeyboardShortcutRecorder(
+                label: String(localized: "settings.globalHotkey.shortcut", defaultValue: "Show/Hide All Windows"),
+                shortcut: $shortcut,
+                transformRecordedShortcut: { SystemWideHotkeySettings.normalizedRecordedShortcut($0) },
+                onRecordingChanged: { SystemWideHotkeyController.shared.setShortcutRecordingActive($0) }
+            )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .accessibilityIdentifier("SettingsGlobalHotkeyRecorder")
+
+            SettingsCardDivider()
+
+            SettingsCardRow(
+                String(localized: "settings.globalHotkey.accessibility", defaultValue: "Accessibility Access"),
+                subtitle: accessibilitySubtitle
+            ) {
+                Group {
+                    if accessibilityTrusted {
+                        Text(String(localized: "settings.globalHotkey.accessibility.allowed", defaultValue: "Allowed"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button(String(localized: "settings.globalHotkey.accessibility.grant", defaultValue: "Grant Access…")) {
+                            let trusted = SystemWideHotkeyController.shared.requestAccessibilityAccess()
+                            accessibilityTrusted = trusted
+                            if !trusted {
+                                SystemWideHotkeySettings.openAccessibilitySettings()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("SettingsGlobalHotkeyGrantAccessButton")
+                    }
+                }
+            }
+        }
+        .onAppear(perform: syncFromDefaults)
+        .onChange(of: shortcut) { newValue in
+            SystemWideHotkeySettings.setShortcut(newValue)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            syncFromDefaults()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            accessibilityTrusted = SystemWideHotkeySettings.isAccessibilityTrusted()
+        }
+
+        SettingsCardNote(
+            String(
+                localized: "settings.globalHotkey.note",
+                defaultValue: "Use Command, Option, or Control with another key. Accessibility access is required to monitor the hotkey outside cmux."
+            )
+        )
+            .accessibilityIdentifier("SettingsGlobalHotkeyNote")
+    }
+
+    private func syncFromDefaults() {
+        let latestShortcut = SystemWideHotkeySettings.shortcut()
+        if latestShortcut != shortcut {
+            shortcut = latestShortcut
+        }
+        accessibilityTrusted = SystemWideHotkeySettings.isAccessibilityTrusted()
     }
 }
 

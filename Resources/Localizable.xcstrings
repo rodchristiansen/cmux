@@ -62850,6 +62850,23 @@
         }
       }
     },
+    "settings.section.globalHotkey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Global Hotkey"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グローバルホットキー"
+          }
+        }
+      }
+    },
     "settings.section.keyboardShortcuts": {
       "extractionState": "manual",
       "localizations": {
@@ -63322,6 +63339,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "Натисніть на значення комбінації, щоб записати нову."
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accessibility Access"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセシビリティアクセス"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.accessibility.allowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "許可済み"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.accessibility.grant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grant Access…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセスを許可…"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.accessibility.subtitleAllowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "cmux can monitor the hotkey while you are in other apps."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "他のアプリを使用中でも cmux がこのホットキーを監視できます。"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.accessibility.subtitleRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS Accessibility access is required before cmux can monitor the hotkey outside the app."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリ外でこのホットキーを監視するには macOS のアクセシビリティアクセスが必要です。"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable System-Wide Hotkey"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム全体のホットキーを有効にする"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.enable.subtitleOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn this on to show or hide all cmux windows from any app."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "どのアプリからでも cmux のすべてのウィンドウを表示または非表示にするにはオンにします。"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.enable.subtitleOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press the shortcut from any app to show or hide all cmux windows."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "どのアプリからでもこのショートカットで cmux のすべてのウィンドウを表示または非表示にできます。"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Command, Option, or Control with another key. Accessibility access is required to monitor the hotkey outside cmux."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command、Option、または Control と別のキーを組み合わせてください。アプリ外でホットキーを監視するにはアクセシビリティアクセスが必要です。"
+          }
+        }
+      }
+    },
+    "settings.globalHotkey.shortcut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show/Hide All Windows"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのウィンドウを表示/非表示"
           }
         }
       }

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 
 /// Stores customizable keyboard shortcuts (definitions + persistence).
@@ -330,6 +331,262 @@ enum KeyboardShortcutSettings {
     static func showBrowserJavaScriptConsoleShortcut() -> StoredShortcut { shortcut(for: .showBrowserJavaScriptConsole) }
 }
 
+enum SystemWideHotkeySettings {
+    static let enabledKey = "systemWideHotkey.enabled"
+    static let shortcutKey = "systemWideHotkey.shortcut"
+    static let defaultEnabled = false
+    static let defaultShortcut = StoredShortcut(key: ".", command: true, shift: false, option: false, control: false)
+
+    private static let accessibilitySettingsURL = URL(
+        string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    )
+
+    static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: enabledKey) as? Bool ?? defaultEnabled
+    }
+
+    static func setEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: enabledKey)
+    }
+
+    static func shortcut(defaults: UserDefaults = .standard) -> StoredShortcut {
+        guard let data = defaults.data(forKey: shortcutKey),
+              let shortcut = try? JSONDecoder().decode(StoredShortcut.self, from: data),
+              isValid(shortcut) else {
+            return defaultShortcut
+        }
+        return shortcut
+    }
+
+    static func setShortcut(_ shortcut: StoredShortcut, defaults: UserDefaults = .standard) {
+        guard let normalizedShortcut = normalizedRecordedShortcut(shortcut),
+              let data = try? JSONEncoder().encode(normalizedShortcut) else {
+            return
+        }
+        defaults.set(data, forKey: shortcutKey)
+    }
+
+    static func normalizedRecordedShortcut(_ shortcut: StoredShortcut) -> StoredShortcut? {
+        isValid(shortcut) ? shortcut : nil
+    }
+
+    static func isValid(_ shortcut: StoredShortcut) -> Bool {
+        shortcut.hasPrimaryModifier
+    }
+
+    static func isAccessibilityTrusted(prompt: Bool = false) -> Bool {
+        guard prompt else { return AXIsProcessTrusted() }
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
+    }
+
+    static func openAccessibilitySettings() {
+        guard let accessibilitySettingsURL else { return }
+        NSWorkspace.shared.open(accessibilitySettingsURL)
+    }
+
+    static func reset(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: enabledKey)
+        defaults.removeObject(forKey: shortcutKey)
+    }
+}
+
+final class SystemWideHotkeyController {
+    static let shared = SystemWideHotkeyController()
+
+    private var eventTap: CFMachPort?
+    private var eventTapRunLoopSource: CFRunLoopSource?
+    private var defaultsObserver: NSObjectProtocol?
+    private var applicationDidBecomeActiveObserver: NSObjectProtocol?
+    private var isShortcutRecordingActive = false
+    private var isEnabled = SystemWideHotkeySettings.defaultEnabled
+    private var shortcut = SystemWideHotkeySettings.defaultShortcut
+
+    private init() {}
+
+    func start() {
+        guard defaultsObserver == nil else { return }
+
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshRegistration(promptIfNeeded: false)
+        }
+
+        applicationDidBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshRegistration(promptIfNeeded: false)
+        }
+
+        refreshRegistration(promptIfNeeded: false)
+    }
+
+    @discardableResult
+    func requestAccessibilityAccess() -> Bool {
+        let trusted = SystemWideHotkeySettings.isAccessibilityTrusted(prompt: true)
+        refreshRegistration(promptIfNeeded: false)
+        return trusted
+    }
+
+    func setShortcutRecordingActive(_ isActive: Bool) {
+        isShortcutRecordingActive = isActive
+    }
+
+    private func refreshRegistration(promptIfNeeded: Bool) {
+        isEnabled = SystemWideHotkeySettings.isEnabled()
+        shortcut = SystemWideHotkeySettings.shortcut()
+
+        guard isEnabled else {
+            uninstallEventTap()
+            return
+        }
+
+        guard SystemWideHotkeySettings.isAccessibilityTrusted(prompt: promptIfNeeded) else {
+            uninstallEventTap()
+            return
+        }
+
+        installEventTapIfNeeded()
+    }
+
+    private func installEventTapIfNeeded() {
+        guard eventTap == nil else { return }
+
+        let eventMask = CGEventMask(1) << CGEventType.keyDown.rawValue
+        let userInfo = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+
+        guard let eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: Self.eventTapCallback,
+            userInfo: userInfo
+        ) else {
+            return
+        }
+
+        guard let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0) else {
+            CFMachPortInvalidate(eventTap)
+            return
+        }
+
+        self.eventTap = eventTap
+        eventTapRunLoopSource = runLoopSource
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+    }
+
+    private func uninstallEventTap() {
+        if let runLoopSource = eventTapRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+            eventTapRunLoopSource = nil
+        }
+
+        if let eventTap = eventTap {
+            CFMachPortInvalidate(eventTap)
+            self.eventTap = nil
+        }
+    }
+
+    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
+        guard let userInfo else { return Unmanaged.passUnretained(event) }
+        let controller = Unmanaged<SystemWideHotkeyController>
+            .fromOpaque(userInfo)
+            .takeUnretainedValue()
+        return controller.handleEventTap(type: type, event: event)
+    }
+
+    private func handleEventTap(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard type == .keyDown, isEnabled, !isShortcutRecordingActive else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard matchesShortcut(event) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            DispatchQueue.main.async { [weak self] in
+                self?.toggleApplicationVisibility()
+            }
+        }
+
+        return nil
+    }
+
+    private func matchesShortcut(_ event: CGEvent) -> Bool {
+        let eventModifiers = StoredShortcut.normalizedModifierFlags(
+            from: NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
+        )
+        guard eventModifiers == shortcut.modifierFlags else { return false }
+
+        let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        if let expectedKeyCode = shortcut.expectedKeyCode {
+            return keyCode == expectedKeyCode
+        }
+
+        guard let event = NSEvent(cgEvent: event) else { return false }
+        return shortcut.matches(event: event)
+    }
+
+    private func toggleApplicationVisibility() {
+        if NSApp.isActive {
+            NSApp.hide(nil)
+            return
+        }
+
+        showAllApplicationWindows()
+    }
+
+    private func showAllApplicationWindows() {
+        NSApp.unhide(nil)
+
+        let windowsToReveal = NSApp.windows.filter { $0.isVisible || $0.isMiniaturized }
+        for window in windowsToReveal where window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+
+        let focusWindow = preferredFocusWindow(from: windowsToReveal)
+        focusWindow?.orderFrontRegardless()
+        focusWindow?.makeKeyAndOrderFront(nil)
+
+        for window in windowsToReveal where window !== focusWindow {
+            window.orderFrontRegardless()
+        }
+    }
+
+    private func preferredFocusWindow(from windows: [NSWindow]) -> NSWindow? {
+        if let keyWindow = NSApp.keyWindow,
+           windows.contains(where: { $0 === keyWindow }) {
+            return keyWindow
+        }
+
+        if let mainWindow = NSApp.mainWindow,
+           windows.contains(where: { $0 === mainWindow }) {
+            return mainWindow
+        }
+
+        return windows.first(where: \.canBecomeMain)
+            ?? windows.first(where: \.canBecomeKey)
+            ?? windows.first
+    }
+}
+
 /// A keyboard shortcut that can be stored in UserDefaults
 struct StoredShortcut: Codable, Equatable {
     var key: String
@@ -369,6 +626,70 @@ struct StoredShortcut: Codable, Equatable {
         if option { flags.insert(.option) }
         if control { flags.insert(.control) }
         return flags
+    }
+
+    var hasPrimaryModifier: Bool {
+        command || option || control
+    }
+
+    var expectedKeyCode: UInt16? {
+        switch key {
+        case "a": return 0
+        case "s": return 1
+        case "d": return 2
+        case "f": return 3
+        case "h": return 4
+        case "g": return 5
+        case "z": return 6
+        case "x": return 7
+        case "c": return 8
+        case "v": return 9
+        case "b": return 11
+        case "q": return 12
+        case "w": return 13
+        case "e": return 14
+        case "r": return 15
+        case "y": return 16
+        case "t": return 17
+        case "1": return 18
+        case "2": return 19
+        case "3": return 20
+        case "4": return 21
+        case "6": return 22
+        case "5": return 23
+        case "=": return 24
+        case "9": return 25
+        case "7": return 26
+        case "-": return 27
+        case "8": return 28
+        case "0": return 29
+        case "]": return 30
+        case "o": return 31
+        case "u": return 32
+        case "[": return 33
+        case "i": return 34
+        case "p": return 35
+        case "\r": return 36
+        case "l": return 37
+        case "j": return 38
+        case "'": return 39
+        case "k": return 40
+        case ";": return 41
+        case "\\": return 42
+        case ",": return 43
+        case "/": return 44
+        case "n": return 45
+        case "m": return 46
+        case ".": return 47
+        case "\t": return 48
+        case "`": return 50
+        case "←": return 123
+        case "→": return 124
+        case "↓": return 125
+        case "↑": return 126
+        default:
+            return nil
+        }
     }
 
     var keyEquivalent: KeyEquivalent? {
@@ -437,9 +758,7 @@ struct StoredShortcut: Codable, Equatable {
     static func from(event: NSEvent) -> StoredShortcut? {
         guard let key = storedKey(from: event) else { return nil }
 
-        // Some keys include extra flags depending on the responder chain.
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            .subtracting([.numericPad, .function])
+        let flags = normalizedModifierFlags(from: event.modifierFlags)
 
         let shortcut = StoredShortcut(
             key: key,
@@ -454,6 +773,15 @@ struct StoredShortcut: Codable, Equatable {
             return nil
         }
         return shortcut
+    }
+
+    static func normalizedModifierFlags(from flags: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
+        flags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.numericPad, .function])
+    }
+
+    func matches(event: NSEvent) -> Bool {
+        StoredShortcut.from(event: event) == self
     }
 
     private static func storedKey(from event: NSEvent) -> String? {
@@ -499,6 +827,7 @@ struct KeyboardShortcutRecorder: View {
     @Binding var shortcut: StoredShortcut
     var displayString: (StoredShortcut) -> String = { $0.displayString }
     var transformRecordedShortcut: (StoredShortcut) -> StoredShortcut? = { $0 }
+    var onRecordingChanged: (Bool) -> Void = { _ in }
     @State private var isRecording = false
 
     var body: some View {
@@ -511,7 +840,8 @@ struct KeyboardShortcutRecorder: View {
                 shortcut: $shortcut,
                 isRecording: $isRecording,
                 displayString: displayString,
-                transformRecordedShortcut: transformRecordedShortcut
+                transformRecordedShortcut: transformRecordedShortcut,
+                onRecordingChanged: onRecordingChanged
             )
                 .frame(width: 120)
         }
@@ -523,6 +853,7 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
     @Binding var isRecording: Bool
     let displayString: (StoredShortcut) -> String
     let transformRecordedShortcut: (StoredShortcut) -> StoredShortcut?
+    let onRecordingChanged: (Bool) -> Void
 
     func makeNSView(context: Context) -> ShortcutRecorderNSButton {
         let button = ShortcutRecorderNSButton()
@@ -535,6 +866,7 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
         }
         button.onRecordingChanged = { recording in
             isRecording = recording
+            onRecordingChanged(recording)
         }
         return button
     }
@@ -543,6 +875,10 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
         nsView.shortcut = shortcut
         nsView.displayString = displayString
         nsView.transformRecordedShortcut = transformRecordedShortcut
+        nsView.onRecordingChanged = { recording in
+            isRecording = recording
+            onRecordingChanged(recording)
+        }
         nsView.updateTitle()
     }
 }
