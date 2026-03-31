@@ -19,20 +19,10 @@ struct PanelContentView: View {
     var body: some View {
         switch panel.panelType {
         case .terminal:
-            if let terminalPanel = panel as? TerminalPanel {
-                TerminalPanelView(
-                    panel: terminalPanel,
-                    paneId: paneId,
-                    isFocused: isFocused,
-                    isVisibleInUI: isVisibleInUI,
-                    portalPriority: portalPriority,
-                    isSplit: isSplit,
-                    appearance: appearance,
-                    hasUnreadNotification: hasUnreadNotification,
-                    onFocus: onFocus,
-                    onTriggerFlash: onTriggerFlash
-                )
-            }
+            Color.clear
+                .onAppear {
+                    assertionFailure("Terminal panels should render via the AppKit split host")
+                }
         case .browser:
             if let browserPanel = panel as? BrowserPanel {
                 BrowserPanelView(

@@ -30,14 +30,6 @@ final class TerminalPanel: Panel, ObservableObject {
         }
     }
 
-    /// Legacy invalidation token for the old SwiftUI wrapper path.
-    ///
-    /// Workspace panes now mount `hostedView` directly from AppKit, but a few existing
-    /// recovery paths still call `requestViewReattach()` as shorthand for "make the hosted
-    /// terminal healthy again". Keep the token for the legacy wrapper while the direct host
-    /// path performs the real reconcile/refresh work.
-    @Published var viewReattachToken: UInt64 = 0
-
     var onRequestWorkspacePaneFlash: ((WorkspaceAttentionFlashReason) -> Void)?
 
     private var cancellables = Set<AnyCancellable>()
@@ -180,7 +172,6 @@ final class TerminalPanel: Panel, ObservableObject {
     }
 
     func requestViewReattach() {
-        viewReattachToken &+= 1
         _ = hostedView.reconcileGeometryNow()
         if surface.surface != nil {
             surface.forceRefresh()

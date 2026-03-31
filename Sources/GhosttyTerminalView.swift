@@ -7357,20 +7357,6 @@ final class GhosttySurfaceScrollView: NSView {
         )
     }
 
-    func releaseOwnedPortalHost(hostId: ObjectIdentifier, reason: String) {
-        surfaceView.terminalSurface?.releasePortalHostIfOwned(
-            hostId: hostId,
-            reason: reason
-        )
-    }
-
-    func prepareOwnedPortalHostForTransientReattach(hostId: ObjectIdentifier, reason: String) {
-        surfaceView.terminalSurface?.preparePortalHostReplacementIfOwned(
-            hostId: hostId,
-            reason: reason
-        )
-    }
-
     init(surfaceView: GhosttyNSView) {
         let initialTerminalBackground = GhosttyApp.shared.defaultBackgroundColor
             .withAlphaComponent(GhosttyApp.shared.defaultBackgroundOpacity)
@@ -10724,10 +10710,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
         if let host = nsView as? HostContainerView {
             host.onDidMoveToWindow = nil
             host.onGeometryChanged = nil
-            hostedView?.prepareOwnedPortalHostForTransientReattach(
-                hostId: ObjectIdentifier(host),
-                reason: "dismantle"
-            )
         }
 
         // SwiftUI can transiently dismantle/rebuild NSViewRepresentable instances during split

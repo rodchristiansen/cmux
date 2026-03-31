@@ -697,6 +697,16 @@ private final class WorkspaceSplitPaneHostView<Content: View, EmptyContent: View
             return
         }
 
+        if let existing = mountedTabContent[tab.id],
+           case .terminal(let descriptor, let slotView) = existing {
+            applyTerminalContent(
+                descriptor,
+                slotView: slotView,
+                isSelected: isSelected
+            )
+            return
+        }
+
         refreshSwiftUIContent(
             for: tabModel,
             tabId: tab.id,
@@ -709,32 +719,44 @@ private final class WorkspaceSplitPaneHostView<Content: View, EmptyContent: View
         for tabId: UUID,
         isSelected: Bool
     ) {
-        let entry: WorkspaceSplitMountedPaneContent
+        let slotView: WorkspaceSplitPaneContentSlotView
         if let existing = mountedTabContent[tabId],
-           case .terminal(let panel, let slotView) = existing,
-           panel === descriptor.panel {
-            entry = .terminal(panel: panel, slotView: slotView)
+           case .terminal(let previousDescriptor, let existingSlotView) = existing,
+           previousDescriptor.panel === descriptor.panel {
+            slotView = existingSlotView
         } else {
             if let existing = mountedTabContent[tabId] {
                 tearDownMountedContent(existing)
             }
-            let slotView = WorkspaceSplitPaneContentSlotView(frame: contentContainer.bounds)
-            slotView.autoresizingMask = [.width, .height]
-            contentContainer.addSubview(slotView)
-            entry = .terminal(panel: descriptor.panel, slotView: slotView)
-            mountedTabContent[tabId] = entry
+            let nextSlotView = WorkspaceSplitPaneContentSlotView(frame: contentContainer.bounds)
+            nextSlotView.autoresizingMask = [.width, .height]
+            contentContainer.addSubview(nextSlotView)
+            slotView = nextSlotView
         }
 
-        guard case .terminal(let panel, let slotView) = entry else { return }
+        mountedTabContent[tabId] = .terminal(descriptor: descriptor, slotView: slotView)
+        applyTerminalContent(
+            descriptor,
+            slotView: slotView,
+            isSelected: isSelected
+        )
+    }
+
+    private func applyTerminalContent(
+        _ descriptor: WorkspaceTerminalPaneContent,
+        slotView: WorkspaceSplitPaneContentSlotView,
+        isSelected: Bool
+    ) {
         if slotView.superview !== contentContainer {
             slotView.removeFromSuperview()
             contentContainer.addSubview(slotView)
         }
         slotView.frame = contentContainer.bounds
-        slotView.installContentView(panel.hostedView)
+        slotView.installContentView(descriptor.panel.hostedView)
         slotView.isHidden = !isSelected
 
-        let hostedView = panel.hostedView
+        let panel = descriptor.panel
+        let hostedView = descriptor.panel.hostedView
         hostedView.attachSurface(panel.surface)
         hostedView.setFocusHandler { descriptor.onFocus() }
         hostedView.setTriggerFlashHandler(descriptor.onTriggerFlash)
@@ -745,7 +767,7 @@ private final class WorkspaceSplitPaneHostView<Content: View, EmptyContent: View
         )
         hostedView.setNotificationRing(visible: descriptor.hasUnreadNotification)
         hostedView.setSearchOverlay(searchState: panel.searchState)
-        hostedView.syncKeyStateIndicator(text: panel.surface.currentKeyStateIndicatorText)
+        hostedView.syncKeyStateIndicator(text: descriptor.panel.surface.currentKeyStateIndicatorText)
         hostedView.setDropZoneOverlay(zone: isSelected ? activeDropZone : nil)
         hostedView.setVisibleInUI(isSelected ? descriptor.isVisibleInUI : false)
         hostedView.setActive(isSelected ? descriptor.isFocused : false)
@@ -801,8 +823,8 @@ private final class WorkspaceSplitPaneHostView<Content: View, EmptyContent: View
 
     private func tearDownMountedContent(_ content: WorkspaceSplitMountedPaneContent) {
         switch content {
-        case .terminal(let panel, let slotView):
-            let hostedView = panel.hostedView
+        case .terminal(let descriptor, let slotView):
+            let hostedView = descriptor.panel.hostedView
             hostedView.setDropZoneOverlay(zone: nil)
             hostedView.setVisibleInUI(false)
             hostedView.setActive(false)
@@ -857,7 +879,7 @@ private final class WorkspaceSplitPaneContentSlotView: NSView {
 
 @MainActor
 private enum WorkspaceSplitMountedPaneContent {
-    case terminal(panel: TerminalPanel, slotView: WorkspaceSplitPaneContentSlotView)
+    case terminal(descriptor: WorkspaceTerminalPaneContent, slotView: WorkspaceSplitPaneContentSlotView)
     case swiftUI(hostingController: NSHostingController<AnyView>, slotView: WorkspaceSplitPaneContentSlotView)
 
     var slotView: WorkspaceSplitPaneContentSlotView {
