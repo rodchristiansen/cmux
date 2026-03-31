@@ -10404,6 +10404,59 @@
         }
       }
     },
+    "browser.reactGrab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inject React Grab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grabを注入"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注入 React Grab"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注入 React Grab"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grab 주입"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grab einfügen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inyectar React Grab"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Injecter React Grab"
+          }
+        }
+      }
+    },
     "browser.search.placeholder": {
       "extractionState": "manual",
       "localizations": {
@@ -19490,6 +19543,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Відкрити теку…"
+          }
+        }
+      }
+    },
+    "command.openFolderInVSCodeInline.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code Inline"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code インライン"
+          }
+        }
+      }
+    },
+    "command.openFolderInVSCodeInline.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Folder in VS Code (Inline)…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダを VS Code で開く（インライン）…"
           }
         }
       }
@@ -38518,6 +38605,57 @@
         }
       }
     },
+    "menu.file.openFolderInVSCodeInline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Folder in VS Code (Inline)…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダを VS Code で開く（インライン）…"
+          }
+        }
+      }
+    },
+    "menu.file.openFolderInVSCodeInline.panelPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in VS Code"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code で開く"
+          }
+        }
+      }
+    },
+    "menu.file.openFolderInVSCodeInline.panelTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Folder in VS Code (Inline)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダを VS Code で開く（インライン）"
+          }
+        }
+      }
+    },
     "menu.file.reopenClosedBrowserPanel": {
       "extractionState": "manual",
       "localizations": {
@@ -43562,6 +43700,41 @@
         }
       }
     },
+    "menu.view.toggleReactGrab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toggle React Grab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grabの切り替え"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换 React Grab"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切換 React Grab"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grab 전환"
+          }
+        }
+      }
+    },
     "menu.view.showNotifications": {
       "extractionState": "manual",
       "localizations": {
@@ -47811,6 +47984,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Коли активна поверхня є останньою у робочій області, комбінація закриття поверхні закриває лише поверхню, залишаючи робочу область відкритою. Використовуйте комбінацію закриття робочої області для явного закриття."
+          }
+        }
+      }
+    },
+    "settings.app.copyOnSelect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy on Select"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択時にコピー"
+          }
+        }
+      }
+    },
+    "settings.app.copyOnSelect.subtitleOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecting terminal text does not copy it to the system clipboard."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターミナルテキストを選択してもシステムのクリップボードにはコピーしません。"
+          }
+        }
+      }
+    },
+    "settings.app.copyOnSelect.subtitleOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically copy selected terminal text to the system clipboard."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択したターミナルテキストをシステムのクリップボードに自動でコピーします。"
           }
         }
       }
@@ -56800,6 +57024,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Імпорт даних браузера"
+          }
+        }
+      }
+    },
+    "settings.browser.reactGrabVersion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grab Version"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grabバージョン"
+          }
+        }
+      }
+    },
+    "settings.browser.reactGrabVersion.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pinned npm version of react-grab injected by the toolbar button (Cmd+Shift+G). Only versions with a known integrity hash are accepted."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ツールバーボタン（Cmd+Shift+G）で注入されるreact-grabのnpmバージョン。既知の整合性ハッシュを持つバージョンのみ使用可能です。"
           }
         }
       }
@@ -67598,6 +67856,41 @@
           "stringUnit": {
             "state": "translated",
             "value": "Показати консоль JavaScript браузера"
+          }
+        }
+      }
+    },
+    "shortcut.toggleReactGrab.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toggle React Grab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grabの切り替え"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换 React Grab"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切換 React Grab"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "React Grab 전환"
           }
         }
       }
@@ -83198,6 +83491,40 @@
         }
       }
     },
+    "settings.sidebarAppearance.matchTerminalBackground": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Match Terminal Background"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターミナルの背景に合わせる"
+          }
+        }
+      }
+    },
+    "settings.sidebarAppearance.matchTerminalBackground.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the same background color and transparency as the terminal."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターミナルと同じ背景色と透明度を使用します。"
+          }
+        }
+      }
+    },
     "settings.sidebarAppearance.tintColorLight": {
       "extractionState": "manual",
       "localizations": {
@@ -84810,6 +85137,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не вдалося завантажити перетягнутий файл: %@"
+          }
+        }
+      }
+    },
+    "terminalContextMenu.copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピー"
+          }
+        }
+      }
+    },
+    "terminalContextMenu.paste": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ペースト"
+          }
+        }
+      }
+    },
+    "terminalContextMenu.resetTerminal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Terminal"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターミナルをリセット"
+          }
+        }
+      }
+    },
+    "terminalContextMenu.splitHorizontally": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Split Horizontally"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "水平に分割"
+          }
+        }
+      }
+    },
+    "terminalContextMenu.splitVertically": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Split Vertically"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "垂直に分割"
+          }
+        }
+      }
+    },
+    "terminalContextMenu.triggerFlash": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trigger Flash"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フラッシュを発火"
           }
         }
       }
