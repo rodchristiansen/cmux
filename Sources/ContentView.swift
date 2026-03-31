@@ -11133,6 +11133,56 @@ enum SidebarTrailingAccessoryWidthPolicy {
     }
 }
 
+struct SidebarWorkspaceSelectionUpdate: Equatable {
+    let selectedWorkspaceIds: Set<UUID>
+    let nextActiveWorkspaceId: UUID
+    let nextAnchorIndex: Int
+}
+
+enum SidebarWorkspaceSelectionPolicy {
+    static func update(
+        workspaceIds: [UUID],
+        selectedWorkspaceIds: Set<UUID>,
+        lastSelectionAnchorIndex: Int?,
+        clickedIndex: Int,
+        modifiers: NSEvent.ModifierFlags
+    ) -> SidebarWorkspaceSelectionUpdate? {
+        guard workspaceIds.indices.contains(clickedIndex) else { return nil }
+
+        let clickedWorkspaceId = workspaceIds[clickedIndex]
+        let isCommand = modifiers.contains(.command)
+        let isShift = modifiers.contains(.shift)
+        var nextSelectedWorkspaceIds = selectedWorkspaceIds
+
+        if isShift,
+           let lastSelectionAnchorIndex,
+           workspaceIds.indices.contains(lastSelectionAnchorIndex) {
+            let lower = min(lastSelectionAnchorIndex, clickedIndex)
+            let upper = max(lastSelectionAnchorIndex, clickedIndex)
+            let rangeIds = workspaceIds[lower...upper]
+            if isCommand {
+                nextSelectedWorkspaceIds.formUnion(rangeIds)
+            } else {
+                nextSelectedWorkspaceIds = Set(rangeIds)
+            }
+        } else if isCommand {
+            if nextSelectedWorkspaceIds.contains(clickedWorkspaceId) {
+                nextSelectedWorkspaceIds.remove(clickedWorkspaceId)
+            } else {
+                nextSelectedWorkspaceIds.insert(clickedWorkspaceId)
+            }
+        } else {
+            nextSelectedWorkspaceIds = [clickedWorkspaceId]
+        }
+
+        return SidebarWorkspaceSelectionUpdate(
+            selectedWorkspaceIds: nextSelectedWorkspaceIds,
+            nextActiveWorkspaceId: clickedWorkspaceId,
+            nextAnchorIndex: clickedIndex
+        )
+    }
+}
+
 // PERF: TabItemView is Equatable so SwiftUI skips body re-evaluation when
 // the parent rebuilds with unchanged values. Without this, every TabManager
 // or NotificationStore publish causes ALL tab items to re-evaluate (~18% of
@@ -12132,30 +12182,21 @@ private struct TabItemView: View, Equatable {
         dlog("sidebar.select workspace=\(tab.id.uuidString.prefix(5)) modifiers=\(modStr.isEmpty ? "none" : modStr.trimmingCharacters(in: .whitespaces))")
         #endif
         let modifiers = NSEvent.modifierFlags
+        let wasSelected = tabManager.selectedTabId == tab.id
         let isCommand = modifiers.contains(.command)
         let isShift = modifiers.contains(.shift)
-        let wasSelected = tabManager.selectedTabId == tab.id
-
-        if isShift, let lastIndex = lastSidebarSelectionIndex {
-            let lower = min(lastIndex, index)
-            let upper = max(lastIndex, index)
-            let rangeIds = tabManager.tabs[lower...upper].map { $0.id }
-            if isCommand {
-                selectedTabIds.formUnion(rangeIds)
-            } else {
-                selectedTabIds = Set(rangeIds)
-            }
-        } else if isCommand {
-            if selectedTabIds.contains(tab.id) {
-                selectedTabIds.remove(tab.id)
-            } else {
-                selectedTabIds.insert(tab.id)
-            }
-        } else {
-            selectedTabIds = [tab.id]
+        guard let update = SidebarWorkspaceSelectionPolicy.update(
+            workspaceIds: tabManager.tabs.map(\.id),
+            selectedWorkspaceIds: selectedTabIds,
+            lastSelectionAnchorIndex: lastSidebarSelectionIndex,
+            clickedIndex: index,
+            modifiers: modifiers
+        ) else {
+            return
         }
 
-        lastSidebarSelectionIndex = index
+        selectedTabIds = update.selectedWorkspaceIds
+        lastSidebarSelectionIndex = update.nextAnchorIndex
         tabManager.selectTab(tab)
         if wasSelected, !isCommand, !isShift {
             tabManager.dismissNotificationOnDirectInteraction(
