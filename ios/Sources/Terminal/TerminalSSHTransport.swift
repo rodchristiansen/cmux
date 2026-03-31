@@ -159,6 +159,10 @@ final class TerminalSSHTransport: @unchecked Sendable, TerminalTransport {
     private let credentials: TerminalSSHCredentials
     private let sessionName: String
 
+    /// Protects `rootChannel`, `shellChannel`, and `closed` from concurrent access.
+    /// These fields are mutated from the caller's async context and read/written from
+    /// NIO event loop callbacks (`closeFuture.whenComplete`, shell handler `onClose`).
+    private let lock = NSLock()
     private var rootChannel: Channel?
     private var shellChannel: Channel?
     private var closed = false
@@ -172,14 +176,18 @@ final class TerminalSSHTransport: @unchecked Sendable, TerminalTransport {
     func connect(initialSize: TerminalGridSize) async throws {
         let connection = try await terminalOpenSSHConnection(host: host, credentials: credentials)
         let rootChannel = connection.rootChannel
+        lock.lock()
         self.rootChannel = rootChannel
+        lock.unlock()
 
         rootChannel.closeFuture.whenComplete { [weak self] result in
             self?.finishDisconnect(error: result.failureReason?.localizedDescription)
         }
 
         let shellChannel = try await terminalOpenSSHSessionChannel(rootChannel: rootChannel)
+        lock.lock()
         self.shellChannel = shellChannel
+        lock.unlock()
 
         let shellHandler = TerminalSSHShellHandler(
             eventLoop: shellChannel.eventLoop,
@@ -200,11 +208,14 @@ final class TerminalSSHTransport: @unchecked Sendable, TerminalTransport {
     }
 
     func send(_ data: Data) async throws {
-        guard let shellChannel else { return }
-        try await shellChannel.eventLoop.submit {
-            var buffer = shellChannel.allocator.buffer(capacity: data.count)
+        lock.lock()
+        let channel = shellChannel
+        lock.unlock()
+        guard let channel else { return }
+        try await channel.eventLoop.submit {
+            var buffer = channel.allocator.buffer(capacity: data.count)
             buffer.writeBytes(data)
-            return shellChannel.writeAndFlush(
+            return channel.writeAndFlush(
                 SSHChannelData(type: .channel, data: .byteBuffer(buffer))
             )
         }
@@ -213,29 +224,40 @@ final class TerminalSSHTransport: @unchecked Sendable, TerminalTransport {
     }
 
     func resize(_ size: TerminalGridSize) async {
-        guard let shellChannel else { return }
+        lock.lock()
+        let channel = shellChannel
+        lock.unlock()
+        guard let channel else { return }
         let request = SSHChannelRequestEvent.WindowChangeRequest(
             terminalCharacterWidth: max(1, size.columns),
             terminalRowHeight: max(1, size.rows),
             terminalPixelWidth: max(1, size.pixelWidth),
             terminalPixelHeight: max(1, size.pixelHeight)
         )
-        let promise = shellChannel.eventLoop.makePromise(of: Void.self)
-        shellChannel.eventLoop.execute {
-            shellChannel.triggerUserOutboundEvent(request, promise: promise)
+        let promise = channel.eventLoop.makePromise(of: Void.self)
+        channel.eventLoop.execute {
+            channel.triggerUserOutboundEvent(request, promise: promise)
         }
         _ = try? await promise.futureResult.get()
     }
 
     func disconnect() async {
-        guard let rootChannel else { return }
-        try? await rootChannel.close().get()
+        lock.lock()
+        let channel = rootChannel
+        lock.unlock()
+        guard let channel else { return }
+        try? await channel.close().get()
         finishDisconnect(error: nil)
     }
 
     private func finishDisconnect(error: String?) {
-        guard !closed else { return }
+        lock.lock()
+        guard !closed else {
+            lock.unlock()
+            return
+        }
         closed = true
+        lock.unlock()
         eventHandler?(.disconnected(error))
     }
 }
