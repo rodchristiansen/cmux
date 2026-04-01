@@ -228,7 +228,6 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/test_claude_wrapper_hooks.py
-          python3 tests/test_codex_wrapper_hooks.py
 
       - name: Run CLI version memory guard regression
         run: |
