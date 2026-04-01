@@ -9550,13 +9550,14 @@ struct CMUXCLI {
         let fakeTmuxPane = focusedContext.map { "%\($0.paneHandle)" }
             ?? processEnvironment["TMUX_PANE"]
             ?? "%1"
-        let fakeTerm = processEnvironment[termOverrideEnvVar] ?? "screen-256color"
+        let fakeTerm = processEnvironment[termOverrideEnvVar] ?? "xterm-256color"
 
         setenv(cmuxBinEnvVar, executablePath, 1)
         setenv("PATH", updatedPath, 1)
         setenv("TMUX", fakeTmuxValue, 1)
         setenv("TMUX_PANE", fakeTmuxPane, 1)
         setenv("TERM", fakeTerm, 1)
+        setenv("COLORTERM", "truecolor", 1)
         setenv("CMUX_SOCKET_PATH", socketPath, 1)
         setenv("CMUX_SOCKET", socketPath, 1)
         if let explicitPassword,
