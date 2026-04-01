@@ -105,16 +105,21 @@ final class BonsplitTabDragUITests: XCTestCase {
         }
 
         let sourceWorkspaceId = ready["workspaceId"] ?? ""
-        let alphaTitle = ready["alphaTitle"] ?? "UITest Alpha"
         let betaTitle = ready["betaTitle"] ?? "UITest Beta"
         let betaTab = app.buttons[betaTitle]
         let sidebar = app.descendants(matching: .any).matching(identifier: "Sidebar").firstMatch
+        let workspaceRowIdentifier = "sidebarWorkspace.\(sourceWorkspaceId)"
+        let workspaceRow = app.descendants(matching: .any).matching(identifier: workspaceRowIdentifier).firstMatch
 
         XCTAssertTrue(betaTab.waitForExistence(timeout: 5.0), "Expected beta tab to exist")
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5.0), "Expected sidebar to exist")
+        XCTAssertTrue(workspaceRow.waitForExistence(timeout: 5.0), "Expected source workspace row to exist")
 
         let start = CGPoint(x: betaTab.frame.midX, y: betaTab.frame.midY)
-        let destination = CGPoint(x: sidebar.frame.midX, y: sidebar.frame.midY)
+        let destination = CGPoint(
+            x: min(sidebar.frame.maxX - 24, workspaceRow.frame.midX),
+            y: workspaceRow.frame.maxY - max(6, min(14, workspaceRow.frame.height * 0.25))
+        )
         guard let dragSession = beginMouseDrag(
             fromAccessibilityPoint: start,
             holdDuration: 0.20
