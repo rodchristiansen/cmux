@@ -46,6 +46,33 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertEqual(restored.panelTitle(panelId: restoredPanelId), "Readme")
     }
 
+    @MainActor
+    func testWorkspaceSessionSnapshotRestoresSerialTerminalConfiguration() throws {
+        let configuration = SerialConsoleConfiguration(
+            devicePath: "/dev/cu.usbserial-1410",
+            baudRate: 115_200,
+            dataBits: .seven,
+            stopBits: .two,
+            parity: .even,
+            flowControl: .hardware
+        )
+
+        let workspace = Workspace(
+            title: configuration.displayTitle,
+            initialTerminalSerialConfiguration: configuration
+        )
+
+        let snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        let terminalSnapshot = try XCTUnwrap(snapshot.panels.first?.terminal)
+        XCTAssertEqual(terminalSnapshot.serialConfiguration, configuration)
+
+        let restored = Workspace()
+        restored.restoreSessionSnapshot(snapshot)
+
+        let restoredPanel = try XCTUnwrap(restored.focusedTerminalPanel)
+        XCTAssertEqual(restoredPanel.serialConfiguration, configuration)
+    }
+
     func testSaveAndLoadRoundTripWithCustomSnapshotPath() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-session-tests-\(UUID().uuidString)", isDirectory: true)
