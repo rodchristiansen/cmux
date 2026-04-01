@@ -7699,7 +7699,7 @@ final class GhosttySurfaceScrollView: NSView {
             queue: .main
         ) { [weak self] notification in
             guard let self,
-                  let readySurfaceId = notification.userInfo?[GhosttyNotificationKey.surfaceId] as? UUID,
+                  let readySurfaceId = notification.userInfo?["surfaceId"] as? UUID,
                   readySurfaceId == self.surfaceView.terminalSurface?.id else {
                 return
             }
