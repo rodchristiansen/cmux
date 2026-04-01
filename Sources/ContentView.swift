@@ -8689,6 +8689,7 @@ struct VerticalTabsSidebar: View {
     @StateObject private var dragAutoScrollController = SidebarDragAutoScrollController()
     @StateObject private var dragFailsafeMonitor = SidebarDragFailsafeMonitor()
     @StateObject private var tabItemSettingsStore = SidebarTabItemSettingsStore()
+    @State private var workspaceRowFrames: [UUID: CGRect] = [:]
     @State private var draggedTabId: UUID?
     @State private var dropIndicator: SidebarDropIndicator?
     @AppStorage(WorkspacePresentationModeSettings.modeKey)
@@ -8700,6 +8701,11 @@ struct VerticalTabsSidebar: View {
     private let trafficLightPadding: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
+    private static let scrollViewportCoordinateSpace = "VerticalTabsSidebar.ScrollViewport"
+
+    private var sidebarTopOverlayHeight: CGFloat {
+        trafficLightPadding + 20
+    }
 
     private var isMinimalMode: Bool {
         WorkspacePresentationModeSettings.mode(for: workspacePresentationMode) == .minimal
@@ -8805,6 +8811,24 @@ struct VerticalTabsSidebar: View {
                                         settings: tabItemSettings
                                     )
                                     .equatable()
+                                    .background(
+                                        GeometryReader { geometry in
+                                            Color.clear.preference(
+                                                key: SidebarWorkspaceRowFramePreferenceKey.self,
+                                                value: [
+                                                    tab.id: geometry.frame(
+                                                        in: .named(Self.scrollViewportCoordinateSpace)
+                                                    )
+                                                ]
+                                            )
+                                        }
+                                    )
+                                    .overlay(alignment: .top) {
+                                        Color.clear
+                                            .frame(height: sidebarTopOverlayHeight)
+                                            .offset(y: -sidebarTopOverlayHeight)
+                                            .id(revealAnchorId(for: tab.id))
+                                    }
                                     .id(tab.id)
                                 }
                             }
@@ -8829,6 +8853,7 @@ struct VerticalTabsSidebar: View {
                         }
                         .frame(width: 0, height: 0)
                     )
+                    .coordinateSpace(name: Self.scrollViewportCoordinateSpace)
                     .overlay(alignment: .top) {
                         SidebarTopScrim(height: trafficLightPadding + 20)
                             .allowsHitTesting(false)
@@ -8850,10 +8875,22 @@ struct VerticalTabsSidebar: View {
                     .background(Color.clear)
                     .modifier(ClearScrollBackground())
                     .onAppear {
-                        revealSelectedWorkspace(using: scrollProxy, animated: false)
+                        DispatchQueue.main.async {
+                            revealSelectedWorkspace(
+                                using: scrollProxy,
+                                viewportHeight: proxy.size.height,
+                                animated: false
+                            )
+                        }
                     }
                     .onChange(of: tabManager.selectedTabId) { _ in
-                        revealSelectedWorkspace(using: scrollProxy)
+                        revealSelectedWorkspace(
+                            using: scrollProxy,
+                            viewportHeight: proxy.size.height
+                        )
+                    }
+                    .onPreferenceChange(SidebarWorkspaceRowFramePreferenceKey.self) { frames in
+                        workspaceRowFrames = frames
                     }
                 }
             }
@@ -8926,20 +8963,46 @@ struct VerticalTabsSidebar: View {
         return String(id.uuidString.prefix(5))
     }
 
+    private func revealAnchorId(for workspaceId: UUID) -> String {
+        "sidebar-reveal-anchor-\(workspaceId.uuidString)"
+    }
+
     private func revealSelectedWorkspace(
         using scrollProxy: ScrollViewProxy,
+        viewportHeight: CGFloat,
         animated: Bool = true
     ) {
-        guard let selectedWorkspaceId = tabManager.selectedTabId else { return }
+        guard let selectedWorkspaceId = tabManager.selectedTabId,
+              let rowFrame = workspaceRowFrames[selectedWorkspaceId] else { return }
         DispatchQueue.main.async {
+            let scrollAction: () -> Void = {
+                if rowFrame.minY < sidebarTopOverlayHeight {
+                    scrollProxy.scrollTo(revealAnchorId(for: selectedWorkspaceId), anchor: .top)
+                } else if rowFrame.maxY > viewportHeight {
+                    scrollProxy.scrollTo(selectedWorkspaceId, anchor: .bottom)
+                }
+            }
+
+            guard rowFrame.minY < sidebarTopOverlayHeight || rowFrame.maxY > viewportHeight else {
+                return
+            }
+
             if animated {
                 withAnimation(.easeInOut(duration: 0.14)) {
-                    scrollProxy.scrollTo(selectedWorkspaceId)
+                    scrollAction()
                 }
             } else {
-                scrollProxy.scrollTo(selectedWorkspaceId)
+                scrollAction()
             }
         }
+    }
+}
+
+private struct SidebarWorkspaceRowFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
     }
 }
 
