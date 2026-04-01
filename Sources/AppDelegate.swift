@@ -4893,6 +4893,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
+    private func keyRoutingOwnerView(for responder: NSResponder?) -> NSView? {
+        guard let responder else { return nil }
+        if let editor = responder as? NSTextView,
+           editor.isFieldEditor,
+           let delegateView = editor.delegate as? NSView {
+            return delegateView
+        }
+        return responder as? NSView
+    }
+
+    private func responderNeedsFocusedTerminalKeyRepair(
+        _ responder: NSResponder?,
+        in window: NSWindow
+    ) -> Bool {
+        guard let responder else { return true }
+        if responder is NSWindow { return true }
+
+        if let ghosttyView = cmuxOwningGhosttyView(for: responder) {
+            if ghosttyView.window !== window {
+                return true
+            }
+            return ghosttyView.isHiddenOrHasHiddenAncestor
+        }
+
+        guard let ownerView = keyRoutingOwnerView(for: responder) else {
+            return false
+        }
+
+        if ownerView.window !== window {
+            return true
+        }
+
+        if ownerView.isHiddenOrHasHiddenAncestor {
+            return true
+        }
+
+        if ownerView !== window.contentView, ownerView.superview == nil {
+            return true
+        }
+
+        return false
+    }
+
+    func repairFocusedTerminalKeyboardRoutingIfNeeded(
+        window: NSWindow,
+        event: NSEvent
+    ) {
+        guard event.type == .keyDown else { return }
+        let normalizedFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !normalizedFlags.contains(.command) else { return }
+        guard isMainTerminalWindow(window) else { return }
+        guard window.attachedSheet == nil else { return }
+        guard !isCommandPaletteEffectivelyVisible(in: window) else { return }
+        guard let context = contextForMainWindow(window),
+              let workspace = context.tabManager.selectedWorkspace,
+              let panelId = workspace.focusedPanelId,
+              let terminalPanel = workspace.terminalPanel(for: panelId) else {
+            return
+        }
+        guard terminalPanel.surface.searchState == nil else { return }
+        guard responderNeedsFocusedTerminalKeyRepair(window.firstResponder, in: window) else { return }
+
+#if DEBUG
+        let before = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+        dlog(
+            "focus.keyRepair attempt window=\(ObjectIdentifier(window)) " +
+            "workspace=\(String(workspace.id.uuidString.prefix(5))) " +
+            "panel=\(String(panelId.uuidString.prefix(5))) " +
+            "fr=\(before) keyCode=\(event.keyCode) mods=\(event.modifierFlags.rawValue)"
+        )
+#endif
+
+        terminalPanel.hostedView.ensureFocus(for: workspace.id, surfaceId: panelId)
+
+#if DEBUG
+        let after = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+        dlog(
+            "focus.keyRepair result window=\(ObjectIdentifier(window)) " +
+            "panel=\(String(panelId.uuidString.prefix(5))) " +
+            "isSurfaceResponder=\(terminalPanel.hostedView.isSurfaceViewFirstResponder() ? 1 : 0) " +
+            "fr=\(after)"
+        )
+#endif
+    }
+
     func locateSurface(surfaceId: UUID) -> (windowId: UUID, workspaceId: UUID, tabManager: TabManager)? {
         for ctx in mainWindowContexts.values {
             for ws in ctx.tabManager.tabs {
@@ -12776,6 +12861,7 @@ private extension NSWindow {
         let typingTimingStart = event.type == .keyDown ? CmuxTypingTiming.start() : nil
         let phaseTotalStart = event.type == .keyDown ? ProcessInfo.processInfo.systemUptime : 0
         var contextSetupMs: Double = 0
+        var focusRepairMs: Double = 0
         var folderGuardMs: Double = 0
         var originalDispatchMs: Double = 0
         let typingTimingExtra: String? = {
@@ -12809,6 +12895,7 @@ private extension NSWindow {
                     thresholdMs: 1.0,
                     parts: [
                         ("contextSetupMs", contextSetupMs),
+                        ("focusRepairMs", focusRepairMs),
                         ("folderGuardMs", folderGuardMs),
                         ("originalDispatchMs", originalDispatchMs),
                     ],
@@ -12833,6 +12920,18 @@ private extension NSWindow {
 #if DEBUG
         if event.type == .keyDown {
             contextSetupMs = (ProcessInfo.processInfo.systemUptime - contextSetupStart) * 1000.0
+        }
+        let focusRepairStart = event.type == .keyDown ? ProcessInfo.processInfo.systemUptime : 0
+#endif
+        if event.type == .keyDown {
+            AppDelegate.shared?.repairFocusedTerminalKeyboardRoutingIfNeeded(
+                window: self,
+                event: event
+            )
+        }
+#if DEBUG
+        if event.type == .keyDown {
+            focusRepairMs = (ProcessInfo.processInfo.systemUptime - focusRepairStart) * 1000.0
         }
         let folderGuardStart = event.type == .keyDown ? ProcessInfo.processInfo.systemUptime : 0
 #endif
