@@ -27,13 +27,15 @@ final class WorkspaceDescriptionUITests: XCTestCase {
     }
 
     private var dataPath = ""
+    private var socketTag = ""
     private var socketPath = ""
 
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
         dataPath = "/tmp/cmux-ui-test-workspace-description-\(UUID().uuidString).json"
-        socketPath = "/tmp/cmux-ui-test-workspace-description-\(UUID().uuidString).sock"
+        socketTag = "ui-tests-workspace-description-\(UUID().uuidString.lowercased())"
+        socketPath = "/tmp/cmux-debug-\(socketTag).sock"
         try? FileManager.default.removeItem(atPath: dataPath)
         try? FileManager.default.removeItem(atPath: socketPath)
     }
@@ -100,8 +102,7 @@ final class WorkspaceDescriptionUITests: XCTestCase {
         app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_SETUP"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_GOTO_SPLIT_PATH"] = dataPath
         app.launchEnvironment["CMUX_UI_TEST_FOCUS_SHORTCUTS"] = "1"
-        app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
-        app.launchEnvironment["CMUX_TAG"] = "ui-tests-workspace-description"
+        app.launchEnvironment["CMUX_TAG"] = socketTag
         return app
     }
 
