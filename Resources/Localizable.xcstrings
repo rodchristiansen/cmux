@@ -63247,13 +63247,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Click a shortcut value to record a new shortcut."
+            "value": "Click a shortcut value to record a new shortcut. Press Delete to clear it."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ショートカット値をクリックして新しいショートカットを記録します。"
+            "value": "ショートカット値をクリックして新しいショートカットを記録します。Delete キーで解除できます。"
           }
         },
         "zh-Hans": {
@@ -67686,6 +67686,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вибрати робочу область 1…9"
+          }
+        }
+      }
+    },
+    "shortcut.browserReload.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload Page"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ページを再読み込み"
           }
         }
       }

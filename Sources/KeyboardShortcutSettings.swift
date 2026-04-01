@@ -44,6 +44,7 @@ enum KeyboardShortcutSettings {
 
         // Panels
         case openBrowser
+        case browserReload
         case toggleBrowserDeveloperTools
         case showBrowserJavaScriptConsole
         case toggleReactGrab
@@ -82,6 +83,7 @@ enum KeyboardShortcutSettings {
             case .splitBrowserRight: return String(localized: "shortcut.splitBrowserRight.label", defaultValue: "Split Browser Right")
             case .splitBrowserDown: return String(localized: "shortcut.splitBrowserDown.label", defaultValue: "Split Browser Down")
             case .openBrowser: return String(localized: "shortcut.openBrowser.label", defaultValue: "Open Browser")
+            case .browserReload: return String(localized: "shortcut.browserReload.label", defaultValue: "Reload Page")
             case .toggleBrowserDeveloperTools: return String(localized: "shortcut.toggleBrowserDevTools.label", defaultValue: "Toggle Browser Developer Tools")
             case .showBrowserJavaScriptConsole: return String(localized: "shortcut.showBrowserJSConsole.label", defaultValue: "Show Browser JavaScript Console")
             case .toggleReactGrab: return String(localized: "shortcut.toggleReactGrab.label", defaultValue: "Toggle React Grab")
@@ -120,6 +122,7 @@ enum KeyboardShortcutSettings {
             case .newSurface: return "shortcut.newSurface"
             case .toggleTerminalCopyMode: return "shortcut.toggleTerminalCopyMode"
             case .openBrowser: return "shortcut.openBrowser"
+            case .browserReload: return "shortcut.browserReload"
             case .toggleBrowserDeveloperTools: return "shortcut.toggleBrowserDeveloperTools"
             case .showBrowserJavaScriptConsole: return "shortcut.showBrowserJavaScriptConsole"
             case .toggleReactGrab: return "shortcut.toggleReactGrab"
@@ -188,6 +191,8 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "1", command: true, shift: false, option: false, control: false)
             case .openBrowser:
                 return StoredShortcut(key: "l", command: true, shift: true, option: false, control: false)
+            case .browserReload:
+                return StoredShortcut(key: "r", command: true, shift: false, option: false, control: false)
             case .toggleBrowserDeveloperTools:
                 // Safari default: Show Web Inspector.
                 return StoredShortcut(key: "i", command: true, shift: false, option: true, control: false)
@@ -213,6 +218,9 @@ enum KeyboardShortcutSettings {
         }
 
         func displayedShortcutString(for shortcut: StoredShortcut) -> String {
+            if shortcut.isDisabled {
+                return shortcut.displayString
+            }
             if usesNumberedDigitMatching {
                 return shortcut.modifierDisplayString + "1…9"
             }
@@ -220,6 +228,7 @@ enum KeyboardShortcutSettings {
         }
 
         func normalizedRecordedShortcut(_ shortcut: StoredShortcut) -> StoredShortcut? {
+            guard !shortcut.isDisabled else { return shortcut }
             guard usesNumberedDigitMatching else { return shortcut }
             guard let digit = Int(shortcut.key), (1...9).contains(digit) else {
                 return nil
@@ -338,8 +347,17 @@ struct StoredShortcut: Codable, Equatable {
     var option: Bool
     var control: Bool
 
+    static let disabled = StoredShortcut(key: "", command: false, shift: false, option: false, control: false)
+
+    var isDisabled: Bool {
+        key.isEmpty && !command && !shift && !option && !control
+    }
+
     var displayString: String {
-        modifierDisplayString + keyDisplayString
+        if isDisabled {
+            return String(localized: "settings.material.none", defaultValue: "None")
+        }
+        return modifierDisplayString + keyDisplayString
     }
 
     var modifierDisplayString: String {
@@ -352,6 +370,9 @@ struct StoredShortcut: Codable, Equatable {
     }
 
     var keyDisplayString: String {
+        if isDisabled {
+            return String(localized: "settings.material.none", defaultValue: "None")
+        }
         switch key {
         case "\t":
             return "TAB"
@@ -372,6 +393,7 @@ struct StoredShortcut: Codable, Equatable {
     }
 
     var keyEquivalent: KeyEquivalent? {
+        guard !isDisabled else { return nil }
         switch key {
         case "←":
             return .leftArrow
@@ -410,6 +432,7 @@ struct StoredShortcut: Codable, Equatable {
     }
 
     var menuItemKeyEquivalent: String? {
+        guard !isDisabled else { return nil }
         switch key {
         case "←":
             guard let scalar = UnicodeScalar(NSLeftArrowFunctionKey) else { return nil }
@@ -599,6 +622,13 @@ private class ShortcutRecorderNSButton: NSButton {
             guard let self = self else { return event }
 
             if event.keyCode == 53 { // Escape
+                self.stopRecording()
+                return nil
+            }
+
+            if event.keyCode == 51 || event.keyCode == 117 { // Delete / Forward Delete
+                self.shortcut = .disabled
+                self.onShortcutRecorded?(.disabled)
                 self.stopRecording()
                 return nil
             }

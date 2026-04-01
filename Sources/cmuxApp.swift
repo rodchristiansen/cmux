@@ -160,6 +160,7 @@ struct cmuxApp: App {
     @AppStorage(KeyboardShortcutSettings.Action.splitRight.defaultsKey) private var splitRightShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.splitDown.defaultsKey) private var splitDownShortcutData = Data()
     @AppStorage(BrowserToolbarAccessorySpacingDebugSettings.key) private var browserToolbarAccessorySpacingRaw = BrowserToolbarAccessorySpacingDebugSettings.defaultSpacing
+    @AppStorage(KeyboardShortcutSettings.Action.browserReload.defaultsKey) private var browserReloadShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.toggleBrowserDeveloperTools.defaultsKey)
     private var toggleBrowserDeveloperToolsShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.showBrowserJavaScriptConsole.defaultsKey)
@@ -715,10 +716,10 @@ struct cmuxApp: App {
                 }
                 .keyboardShortcut("]", modifiers: .command)
 
-                Button(String(localized: "menu.view.reloadPage", defaultValue: "Reload Page")) {
+                splitCommandButton(title: String(localized: "menu.view.reloadPage", defaultValue: "Reload Page"), shortcut: browserReloadMenuShortcut) {
                     activeTabManager.focusedBrowserPanel?.reload()
                 }
-                .keyboardShortcut("r", modifiers: .command)
+                .disabled(activeTabManager.focusedBrowserPanel == nil)
 
                 splitCommandButton(title: String(localized: "menu.view.toggleDevTools", defaultValue: "Toggle Developer Tools"), shortcut: toggleBrowserDeveloperToolsMenuShortcut) {
                     let manager = activeTabManager
@@ -930,6 +931,13 @@ struct cmuxApp: App {
 
     private var splitDownMenuShortcut: StoredShortcut {
         decodeShortcut(from: splitDownShortcutData, fallback: KeyboardShortcutSettings.Action.splitDown.defaultShortcut)
+    }
+
+    private var browserReloadMenuShortcut: StoredShortcut {
+        decodeShortcut(
+            from: browserReloadShortcutData,
+            fallback: KeyboardShortcutSettings.Action.browserReload.defaultShortcut
+        )
     }
 
     private var toggleBrowserDeveloperToolsMenuShortcut: StoredShortcut {
@@ -5734,7 +5742,7 @@ struct SettingsView: View {
                     }
                     .id(shortcutResetToken)
 
-                    Text(String(localized: "settings.shortcuts.recordHint", defaultValue: "Click a shortcut value to record a new shortcut."))
+                    Text(String(localized: "settings.shortcuts.recordHint", defaultValue: "Click a shortcut value to record a new shortcut. Press Delete to clear it."))
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.leading, 2)

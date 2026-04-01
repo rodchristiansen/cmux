@@ -5159,7 +5159,8 @@ struct ContentView: View {
             return nil
         }
         if let action = commandPaletteShortcutAction(for: contribution.commandId) {
-            return KeyboardShortcutSettings.shortcut(for: action).displayString
+            let shortcut = KeyboardShortcutSettings.shortcut(for: action)
+            return shortcut.isDisabled ? nil : action.displayedShortcutString(for: shortcut)
         }
         if let staticShortcut = commandPaletteStaticShortcutHint(for: contribution.commandId) {
             return staticShortcut
@@ -5199,6 +5200,8 @@ struct ContentView: View {
             return .nextSurface
         case "palette.previousTabInPane":
             return .prevSurface
+        case "palette.browserReload":
+            return .browserReload
         case "palette.browserToggleDevTools":
             return .toggleBrowserDeveloperTools
         case "palette.browserConsole":
