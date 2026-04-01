@@ -2579,12 +2579,9 @@ class GhosttyApp {
                 height: CGFloat(action.action.cell_size.height)
             )
             DispatchQueue.main.async {
+                guard surfaceView.cellSize != cellSize else { return }
                 surfaceView.cellSize = cellSize
-                NotificationCenter.default.post(
-                    name: .ghosttyDidUpdateCellSize,
-                    object: surfaceView,
-                    userInfo: [GhosttyNotificationKey.cellSize: cellSize]
-                )
+                surfaceView.onCellSizeUpdate?()
             }
             return true
         case GHOSTTY_ACTION_START_SEARCH:
@@ -4437,6 +4434,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         }
         return UserDefaults.standard.bool(forKey: "cmuxFocusDebug")
     }()
+    // Keep viewport synchronization bounded to display cadence so terminal output
+    // bursts don't spend main-thread time updating AppKit scroll state faster than
+    // the user can see.
+    private static let scrollbarFlushInterval: CFTimeInterval = 1.0 / 120.0
     internal enum DropPlan: Equatable {
         case insertText(String)
         case uploadFiles([URL])
@@ -4471,25 +4472,37 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     /// fires on Ghostty's I/O thread while the flush runs on main.
     private var _pendingScrollbar: GhosttyScrollbar?
     private var _scrollbarFlushScheduled = false
+    private var _lastScrollbarFlushAt: CFTimeInterval = 0
     private let _scrollbarLock = NSLock()
     var cellSize: CGSize = .zero
+    var onScrollbarUpdate: ((GhosttyScrollbar) -> Void)?
+    var onCellSizeUpdate: (() -> Void)?
 
     /// Coalesce high-frequency scrollbar updates into a single main-thread
     /// dispatch.  The action callback (which may fire thousands of times per
     /// second during bulk output like `seq 1 100000`) stores the latest value
-    /// and schedules exactly one async flush.
+    /// and schedules a flush no faster than the display can present it.
     func enqueueScrollbarUpdate(_ newValue: GhosttyScrollbar) {
         _scrollbarLock.lock()
-        defer { _scrollbarLock.unlock() }
         // Store the latest value (always overwrites — only the newest matters).
         _pendingScrollbar = newValue
         let needsSchedule = !_scrollbarFlushScheduled
         if needsSchedule { _scrollbarFlushScheduled = true }
+        let earliestNextFlush = _lastScrollbarFlushAt + Self.scrollbarFlushInterval
+        let delay = max(0, earliestNextFlush - CACurrentMediaTime())
+        _scrollbarLock.unlock()
 
         // If a flush is already scheduled, skip the dispatch — the scheduled
         // block will pick up the latest value.
         guard needsSchedule else { return }
-        DispatchQueue.main.async { [weak self] in
+        guard delay > 0 else {
+            DispatchQueue.main.async { [weak self] in
+                self?.flushPendingScrollbar()
+            }
+            return
+        }
+        let delayMilliseconds = Int((delay * 1000).rounded(.up))
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMilliseconds)) { [weak self] in
             self?.flushPendingScrollbar()
         }
     }
@@ -4499,15 +4512,15 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         _scrollbarFlushScheduled = false
         let pending = _pendingScrollbar
         _pendingScrollbar = nil
+        if pending != nil {
+            _lastScrollbarFlushAt = CACurrentMediaTime()
+        }
         _scrollbarLock.unlock()
 
         guard let pending else { return }
+        guard pending != scrollbar else { return }
         scrollbar = pending
-        NotificationCenter.default.post(
-            name: .ghosttyDidUpdateScrollbar,
-            object: self,
-            userInfo: [GhosttyNotificationKey.scrollbar: pending]
-        )
+        onScrollbarUpdate?(pending)
     }
 
     var desiredFocus: Bool = false
@@ -7154,7 +7167,7 @@ private extension NSScreen {
     }
 }
 
-struct GhosttyScrollbar {
+struct GhosttyScrollbar: Equatable {
     let total: UInt64
     let offset: UInt64
     let len: UInt64
@@ -7167,8 +7180,6 @@ struct GhosttyScrollbar {
 }
 
 enum GhosttyNotificationKey {
-    static let scrollbar = "ghostty.scrollbar"
-    static let cellSize = "ghostty.cellSize"
     static let tabId = "ghostty.tabId"
     static let surfaceId = "ghostty.surfaceId"
     static let title = "ghostty.title"
@@ -7179,8 +7190,6 @@ enum GhosttyNotificationKey {
 }
 
 extension Notification.Name {
-    static let ghosttyDidUpdateScrollbar = Notification.Name("ghosttyDidUpdateScrollbar")
-    static let ghosttyDidUpdateCellSize = Notification.Name("ghosttyDidUpdateCellSize")
     static let ghosttyDidReceiveWheelScroll = Notification.Name("ghosttyDidReceiveWheelScroll")
     static let ghosttySearchFocus = Notification.Name("ghosttySearchFocus")
     static let ghosttyConfigDidReload = Notification.Name("ghosttyConfigDidReload")
@@ -7694,6 +7703,13 @@ final class GhosttySurfaceScrollView: NSView {
             imageTransferIndicatorContainerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ])
 
+        surfaceView.onScrollbarUpdate = { [weak self] scrollbar in
+            self?.handleScrollbarUpdate(scrollbar)
+        }
+        surfaceView.onCellSizeUpdate = { [weak self] in
+            self?.synchronizeScrollView()
+        }
+
         scrollView.contentView.postsBoundsChangedNotifications = true
         observers.append(NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
@@ -7730,14 +7746,6 @@ final class GhosttySurfaceScrollView: NSView {
         })
 
         observers.append(NotificationCenter.default.addObserver(
-            forName: .ghosttyDidUpdateScrollbar,
-            object: surfaceView,
-            queue: .main
-        ) { [weak self] notification in
-            self?.handleScrollbarUpdate(notification)
-        })
-
-        observers.append(NotificationCenter.default.addObserver(
             forName: .ghosttyDidReceiveWheelScroll,
             object: surfaceView,
             queue: .main
@@ -7757,14 +7765,6 @@ final class GhosttySurfaceScrollView: NSView {
             // Explicitly unfocus the terminal so the cursor stops blinking
             // when the search field takes over.
             surface.setFocus(false)
-        })
-
-        observers.append(NotificationCenter.default.addObserver(
-            forName: .ghosttyDidUpdateCellSize,
-            object: surfaceView,
-            queue: .main
-        ) { [weak self] _ in
-            self?.synchronizeScrollView()
         })
 
         observers.append(NotificationCenter.default.addObserver(
@@ -9856,10 +9856,7 @@ final class GhosttySurfaceScrollView: NSView {
         _ = surfaceView.performBindingAction("scroll_to_row:\(row)")
     }
 
-    private func handleScrollbarUpdate(_ notification: Notification) {
-        guard let scrollbar = notification.userInfo?[GhosttyNotificationKey.scrollbar] as? GhosttyScrollbar else {
-            return
-        }
+    private func handleScrollbarUpdate(_ scrollbar: GhosttyScrollbar) {
         if pendingExplicitWheelScroll {
             userScrolledAwayFromBottom = scrollbar.offset + scrollbar.len < scrollbar.total
             allowExplicitScrollbarSync = true
