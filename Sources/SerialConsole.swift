@@ -246,8 +246,12 @@ struct SerialConsoleConnectionError: LocalizedError, Sendable, Equatable {
 }
 
 @MainActor
-final class SerialConsoleAccessoryView: NSView {
-    private let deviceField = NSComboBox(frame: .zero)
+final class SerialConsoleAccessoryView: NSView, NSTextFieldDelegate {
+    private static let customDeviceMenuItemTag = -1
+
+    private let discoveredDevicePaths: [String]
+    private let deviceButton = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let devicePathField = NSTextField(frame: .zero)
     private let baudRateButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private let dataBitsButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private let stopBitsButton = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -255,7 +259,8 @@ final class SerialConsoleAccessoryView: NSView {
     private let flowControlButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private lazy var grid: NSGridView = {
         let rows: [[NSView]] = [
-            [Self.label(text: String(localized: "serial.open.device", defaultValue: "Device")), deviceField],
+            [Self.label(text: String(localized: "serial.open.device", defaultValue: "Device")), deviceButton],
+            [Self.label(text: String(localized: "serial.open.devicePath", defaultValue: "Device Path")), devicePathField],
             [Self.label(text: String(localized: "serial.open.baudRate", defaultValue: "Baud Rate")), baudRateButton],
             [Self.label(text: String(localized: "serial.open.dataBits", defaultValue: "Data Bits")), dataBitsButton],
             [Self.label(text: String(localized: "serial.open.stopBits", defaultValue: "Stop Bits")), stopBitsButton],
@@ -277,15 +282,19 @@ final class SerialConsoleAccessoryView: NSView {
     }
 
     init(configuration: SerialConsoleConfiguration, discoveredDevicePaths: [String]) {
+        self.discoveredDevicePaths = Self.uniqueDevicePaths(discoveredDevicePaths)
         super.init(frame: .zero)
 
-        deviceField.translatesAutoresizingMaskIntoConstraints = false
-        deviceField.isEditable = true
-        deviceField.usesDataSource = false
-        deviceField.completes = true
-        deviceField.numberOfVisibleItems = min(12, max(discoveredDevicePaths.count, 4))
-        deviceField.addItems(withObjectValues: discoveredDevicePaths)
-        deviceField.stringValue = configuration.trimmedDevicePath
+        let initialDevicePath = configuration.trimmedDevicePath
+
+        deviceButton.translatesAutoresizingMaskIntoConstraints = false
+        deviceButton.target = self
+        deviceButton.action = #selector(handleDeviceSelectionChanged(_:))
+        rebuildDeviceMenu(selectedPath: initialDevicePath)
+
+        devicePathField.translatesAutoresizingMaskIntoConstraints = false
+        devicePathField.delegate = self
+        devicePathField.stringValue = initialDevicePath
 
         baudRateButton.translatesAutoresizingMaskIntoConstraints = false
         for baudRate in SerialConsoleDefaults.baudRates {
@@ -343,7 +352,8 @@ final class SerialConsoleAccessoryView: NSView {
             grid.trailingAnchor.constraint(equalTo: trailingAnchor),
             grid.topAnchor.constraint(equalTo: topAnchor),
             grid.bottomAnchor.constraint(equalTo: bottomAnchor),
-            deviceField.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
+            deviceButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
+            devicePathField.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
             baudRateButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             dataBitsButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             stopBitsButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
@@ -361,7 +371,7 @@ final class SerialConsoleAccessoryView: NSView {
     }
 
     var selectedConfiguration: SerialConsoleConfiguration? {
-        let devicePath = deviceField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let devicePath = devicePathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !devicePath.isEmpty else { return nil }
 
         let baudRate = baudRateButton.selectedItem?.tag ?? 115_200
@@ -380,11 +390,75 @@ final class SerialConsoleAccessoryView: NSView {
         )
     }
 
+    func controlTextDidChange(_ obj: Notification) {
+        guard obj.object as? NSTextField === devicePathField else { return }
+        syncDeviceSelection(with: devicePathField.stringValue)
+    }
+
     private static func label(text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.alignment = .right
         label.lineBreakMode = .byClipping
         return label
+    }
+
+    private static func uniqueDevicePaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0).inserted }
+    }
+
+    @objc
+    private func handleDeviceSelectionChanged(_ sender: NSPopUpButton) {
+        guard let selectedItem = sender.selectedItem else { return }
+
+        if selectedItem.tag == Self.customDeviceMenuItemTag {
+            sender.window?.makeFirstResponder(devicePathField)
+            return
+        }
+
+        guard let path = selectedItem.representedObject as? String else { return }
+        devicePathField.stringValue = path
+    }
+
+    private func rebuildDeviceMenu(selectedPath: String) {
+        deviceButton.removeAllItems()
+
+        for path in discoveredDevicePaths {
+            let item = NSMenuItem(title: path, action: nil, keyEquivalent: "")
+            item.representedObject = path
+            deviceButton.menu?.addItem(item)
+        }
+
+        if !discoveredDevicePaths.isEmpty {
+            deviceButton.menu?.addItem(.separator())
+        }
+
+        let customItem = NSMenuItem(
+            title: String(localized: "serial.open.device.custom", defaultValue: "Custom Device…"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        customItem.tag = Self.customDeviceMenuItemTag
+        deviceButton.menu?.addItem(customItem)
+
+        syncDeviceSelection(with: selectedPath)
+    }
+
+    private func syncDeviceSelection(with devicePath: String) {
+        let trimmedPath = devicePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else {
+            deviceButton.selectItem(withTag: Self.customDeviceMenuItemTag)
+            return
+        }
+
+        if let matchingItem = deviceButton.itemArray.first(where: {
+            ($0.representedObject as? String) == trimmedPath
+        }) {
+            deviceButton.select(matchingItem)
+            return
+        }
+
+        deviceButton.selectItem(withTag: Self.customDeviceMenuItemTag)
     }
 
     private func selectItem(withTag tag: Int, in button: NSPopUpButton) {

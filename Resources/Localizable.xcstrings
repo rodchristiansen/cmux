@@ -29018,6 +29018,40 @@
         }
       }
     },
+    "serial.open.device.custom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Device…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カスタムデバイス…"
+          }
+        }
+      }
+    },
+    "serial.open.devicePath": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Device Path"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバイスパス"
+          }
+        }
+      }
+    },
     "serial.open.flowControl": {
       "extractionState": "manual",
       "localizations": {
