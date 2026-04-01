@@ -2884,6 +2884,10 @@ class GhosttyApp {
                             let idCount = ghostty_surface_tmux_pane_ids(surface, &paneId, 1)
                             if idCount > 0 {
                                 let success = ghostty_surface_tmux_set_active_pane(surface, paneId)
+                                if success {
+                                    // Force the renderer to redraw with the new pane terminal
+                                    ghostty_surface_refresh(surface)
+                                }
                                 #if DEBUG
                                 dlog("tmux.windowsChanged panes=\(paneCount) activePaneId=\(paneId) setActive=\(success)")
                                 #endif
