@@ -12,7 +12,7 @@ if [[ "${GHOSTTY_SHELL_FEATURES:-}" == *ssh-* ]]; then
 
     local current_term ssh_term ssh_opts
     current_term="${TERM:-xterm-256color}"
-    ssh_term="$current_term"
+    ssh_term="xterm-256color"
     ssh_opts=()
 
     # Configure environment variables for remote session.
@@ -22,13 +22,11 @@ if [[ "${GHOSTTY_SHELL_FEATURES:-}" == *ssh-* ]]; then
     fi
 
     # Only try to install/use xterm-ghostty when the active local TERM already
-    # uses it. If the user selected a portable TERM such as xterm-256color,
-    # keep that TERM across SSH hops so nested sessions remain broadly
-    # compatible even when Ghostty shell integration is unavailable remotely.
+    # uses it. For xterm-256color and other local TERM values, keep Ghostty's
+    # documented SSH fallback behavior and normalize the remote side to
+    # xterm-256color.
     if [[ "$GHOSTTY_SHELL_FEATURES" == *ssh-terminfo* && "$current_term" == "xterm-ghostty" ]]; then
       local ssh_user ssh_hostname
-
-      ssh_term="xterm-256color"
 
       while IFS=' ' read -r ssh_key ssh_value; do
         case "$ssh_key" in
