@@ -11,6 +11,12 @@ import Bonsplit
 import IOSurface
 import UniformTypeIdentifiers
 
+@_silgen_name("ghostty_surface_clear_selection")
+private func ghostty_surface_clear_selection_compat(_ surface: ghostty_surface_t) -> Bool
+
+@_silgen_name("ghostty_surface_select_cursor_cell")
+private func ghostty_surface_select_cursor_cell_compat(_ surface: ghostty_surface_t) -> Bool
+
 #if os(macOS)
 func cmuxShouldApplyWindowGlass(
     sidebarBlendMode: String,
@@ -1148,7 +1154,7 @@ class GhosttyApp {
         }
         runtimeConfig.read_clipboard_cb = { userdata, location, state in
             guard let callbackContext = GhosttyApp.callbackContext(from: userdata),
-                  let requestSurface = callbackContext.runtimeSurface else { return false }
+                  let requestSurface = callbackContext.runtimeSurface else { return }
 
             DispatchQueue.main.async {
                 func completeClipboardRequest(with text: String) {
@@ -2190,10 +2196,10 @@ class GhosttyApp {
 
     private func bellAudioPath() -> String? {
         guard let config else { return nil }
-        var value = ghostty_config_path_s()
+        var value: UnsafePointer<Int8>?
         let key = "bell-audio-path"
         guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))),
-              let rawPath = value.path else {
+              let rawPath = value else {
             return nil
         }
         let path = String(cString: rawPath)
@@ -5149,7 +5155,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard surface != nil else { return false }
         setKeyboardCopyModeActive(!keyboardCopyModeActive)
         if !keyboardCopyModeActive, let surface {
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
         }
         return true
     }
@@ -5160,13 +5166,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         keyboardCopyModeActive = active
         if active, let surface {
             keyboardCopyModeViewportRow = keyboardCopyModeSelectionAnchor(surface: surface)?.row
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             if keyboardCopyModeViewportRow == nil {
                 keyboardCopyModeViewportRow = keyboardCopyModeImeViewportRow(surface: surface)
             }
             // Create a 1-cell selection at the terminal cursor to serve as a
             // visible cursor indicator in copy mode.
-            _ = ghostty_surface_select_cursor_cell(surface)
+            _ = ghostty_surface_select_cursor_cell_compat(surface)
         } else {
             keyboardCopyModeViewportRow = nil
         }
@@ -5203,7 +5209,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private func keyboardCopyModeSelectionAnchor(surface: ghostty_surface_t) -> (row: Int, y: Double)? {
         let size = ghostty_surface_size(surface)
         guard size.rows > 0, size.columns > 0 else { return nil }
-        guard ghostty_surface_select_cursor_cell(surface) else { return nil }
+        guard ghostty_surface_select_cursor_cell_compat(surface) else { return nil }
 
         var text = ghostty_text_s()
         guard ghostty_surface_read_selection(surface, &text) else { return nil }
@@ -5224,7 +5230,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard let anchor = keyboardCopyModeSelectionAnchor(surface: surface) else { return }
         keyboardCopyModeViewportRow = anchor.row
         // Preserve the visible cursor indicator.
-        _ = ghostty_surface_select_cursor_cell(surface)
+        _ = ghostty_surface_select_cursor_cell_compat(surface)
     }
 
     private func copyCurrentViewportLinesToClipboard(
@@ -5239,7 +5245,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard let anchor = keyboardCopyModeSelectionAnchor(surface: surface) else {
             return false
         }
-        _ = ghostty_surface_clear_selection(surface)
+        _ = ghostty_surface_clear_selection_compat(surface)
 
         var imeX: Double = 0
         var imeY: Double = 0
@@ -5295,18 +5301,18 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
         switch action {
         case .exit:
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             setKeyboardCopyModeActive(false)
         case .startSelection:
             keyboardCopyModeVisualActive = true
         case .clearSelection:
             keyboardCopyModeVisualActive = false
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             // Re-create 1-cell cursor at terminal cursor position.
-            _ = ghostty_surface_select_cursor_cell(surface)
+            _ = ghostty_surface_select_cursor_cell_compat(surface)
         case .copyAndExit:
             _ = performBindingAction("copy_to_clipboard")
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             setKeyboardCopyModeActive(false)
         case .copyLineAndExit:
             let startRow = currentKeyboardCopyModeViewportRow(surface: surface)
@@ -5315,7 +5321,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                 startRow: startRow,
                 lineCount: count
             )
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             setKeyboardCopyModeActive(false)
         case let .scrollLines(delta):
             _ = performBindingAction("scroll_page_lines:\(delta * count)")
