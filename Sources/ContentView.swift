@@ -13919,7 +13919,13 @@ private struct SidebarWorkspaceDescriptionText: View {
     }
 
     private func renderMarkdown() {
-        renderedMarkdown = try? AttributedString(
+        renderedMarkdown = SidebarMarkdownRenderer.renderWorkspaceDescription(markdown)
+    }
+}
+
+enum SidebarMarkdownRenderer {
+    static func renderWorkspaceDescription(_ markdown: String) -> AttributedString? {
+        try? AttributedString(
             markdown: markdown,
             options: .init(interpretedSyntax: .full)
         )
