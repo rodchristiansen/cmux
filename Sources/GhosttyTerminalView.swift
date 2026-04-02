@@ -2876,23 +2876,17 @@ class GhosttyApp {
                     dlog("tmux.exited tab=\(surfaceView.tabId?.uuidString.prefix(5) ?? "nil") surface=\(terminalSurface.id.uuidString.prefix(5))")
                     #endif
                 case GHOSTTY_TMUX_STATE_WINDOWS_CHANGED:
-                    // Auto-set the renderer to the first pane so we can see tmux output
+                    // The tmux window/pane layout changed. Output is written
+                    // directly to the surface terminal by the stream handler's
+                    // octal decoder, so no renderer pointer swap is needed.
                     if let surface = terminalSurface.surface {
                         let paneCount = ghostty_surface_tmux_pane_count(surface)
-                        if paneCount > 0 {
-                            var paneId: UInt = 0
-                            let idCount = ghostty_surface_tmux_pane_ids(surface, &paneId, 1)
-                            if idCount > 0 {
-                                let success = ghostty_surface_tmux_set_active_pane(surface, paneId)
-                                if success {
-                                    // Force the renderer to redraw with the new pane terminal
-                                    ghostty_surface_refresh(surface)
-                                }
-                                #if DEBUG
-                                dlog("tmux.windowsChanged panes=\(paneCount) activePaneId=\(paneId) setActive=\(success)")
-                                #endif
-                            }
-                        }
+                        let windowCount = ghostty_surface_tmux_window_count(surface)
+                        #if DEBUG
+                        dlog("tmux.windowsChanged windows=\(windowCount) panes=\(paneCount)")
+                        #endif
+                        _ = paneCount
+                        _ = windowCount
                     }
                 default:
                     break
