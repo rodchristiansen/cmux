@@ -108,14 +108,16 @@ The fork branch HEAD is now the section 7 cmux theme picker helper commit.
   - `41e796064` (Add macos-background-from-layer config flag)
   - `f9030b5c5` (Skip fullscreen bg draw call in layer-background mode)
   - `8e1d2ff88` (Preserve bg images in layer background mode)
+  - `77e68c9b5` (Restore bg-image alpha in layer background mode)
 - Files:
   - `src/config/Config.zig`
   - `src/renderer/generic.zig`
 - Summary:
   - Adds a `macos-background-from-layer` bool config (default false).
-  - When true, sets `bg_color[3] = 0` in the per-frame uniform update so the Metal renderer skips the full-screen background fill.
+  - When true and no background image is active, sets `bg_color[3] = 0` in the per-frame uniform update so the Metal renderer skips the full-screen background fill.
   - Allows the host app to provide the terminal background via `CALayer.backgroundColor` for instant coverage during view resizes, avoiding alpha double-stacking.
   - Keeps Ghostty-owned background images rendering in that mode by skipping only the plain color fill.
+  - Preserves background-image opacity/compositing by keeping `bg_color.a` intact whenever the bg-image shader is active.
 
 The fork branch HEAD is now the section 8 background-image follow-up commit.
 

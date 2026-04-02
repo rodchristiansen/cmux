@@ -799,16 +799,16 @@ struct cmuxApp: App {
 
                 // Numbered workspace selection (9 = last workspace)
                 ForEach(1...9, id: \.self) { number in
-                    Button(String(localized: "menu.view.workspace", defaultValue: "Workspace \(number)")) {
+                    numberedCommandButton(
+                        title: String(localized: "menu.view.workspace", defaultValue: "Workspace \(number)"),
+                        number: number,
+                        shortcut: selectWorkspaceByNumberMenuShortcut
+                    ) {
                         let manager = activeTabManager
                         if let targetIndex = WorkspaceShortcutMapper.workspaceIndex(forDigit: number, workspaceCount: manager.tabs.count) {
                             manager.selectTab(at: targetIndex)
                         }
                     }
-                    .keyboardShortcut(
-                        KeyEquivalent(Character("\(number)")),
-                        modifiers: selectWorkspaceByNumberMenuShortcut.eventModifiers
-                    )
                 }
 
                 Divider()
@@ -1230,6 +1230,24 @@ struct cmuxApp: App {
                 .keyboardShortcut(key, modifiers: shortcut.eventModifiers)
         } else {
             Button(title, action: action)
+        }
+    }
+
+    @ViewBuilder
+    private func numberedCommandButton(
+        title: String,
+        number: Int,
+        shortcut: StoredShortcut,
+        action: @escaping () -> Void
+    ) -> some View {
+        if shortcut.isDisabled {
+            Button(title, action: action)
+        } else {
+            Button(title, action: action)
+                .keyboardShortcut(
+                    KeyEquivalent(Character("\(number)")),
+                    modifiers: shortcut.eventModifiers
+                )
         }
     }
 

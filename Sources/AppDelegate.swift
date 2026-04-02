@@ -9991,9 +9991,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        var shouldSwallowDisabledWorkspaceDigitShortcut = false
+        var shouldSwallowDisabledSurfaceDigitShortcut = false
+
         // Numeric shortcuts for specific workspaces (9 = last workspace)
-        // Always consume the event when the digit matches to prevent Ghostty's
-        // goto_tab fallback from creating a new window when the index is out of bounds.
+        // If the shortcut is disabled, remember the match and keep routing so any
+        // later custom shortcut on the same combo can still win before we swallow
+        // the event to block Ghostty's goto_tab fallback.
         switch numberedShortcutMatch(
             event: event,
             shortcut: KeyboardShortcutSettings.shortcut(for: .selectWorkspaceByNumber),
@@ -10011,7 +10015,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             return true
         case .disabledMatch:
-            return true
+            shouldSwallowDisabledWorkspaceDigitShortcut = true
         case .noMatch:
             break
         }
@@ -10030,7 +10034,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             return true
         case .disabledMatch:
-            return true
+            shouldSwallowDisabledSurfaceDigitShortcut = true
         case .noMatch:
             break
         }
@@ -10267,6 +10271,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             )
         }
         #endif
+
+        if shouldSwallowDisabledWorkspaceDigitShortcut || shouldSwallowDisabledSurfaceDigitShortcut {
+            return true
+        }
 
         return false
     }
@@ -11081,6 +11089,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         return .noMatch
+    }
+
+    fileprivate func shouldSuppressBrowserDefaultReloadCommandEquivalent(_ event: NSEvent) -> Bool {
+        guard isDefaultBrowserReloadCommandEquivalent(event) else {
+            return false
+        }
+
+        let configuredReloadShortcut = KeyboardShortcutSettings.shortcut(for: .browserReload)
+        guard !matchShortcut(event: event, shortcut: configuredReloadShortcut) else {
+            return false
+        }
+
+        return true
     }
 
     private func numberedShortcutDigit(event: NSEvent, shortcut: StoredShortcut) -> Int? {
@@ -12742,6 +12763,21 @@ private extension AppDelegate {
     }
 }
 
+private func isDefaultBrowserReloadCommandEquivalent(
+    _ event: NSEvent,
+    layoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
+) -> Bool {
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        .subtracting([.numericPad, .function, .capsLock])
+    guard flags == [.command] else { return false }
+
+    if event.charactersIgnoringModifiers?.lowercased() == "r" {
+        return true
+    }
+
+    return layoutCharacterProvider(event.keyCode, event.modifierFlags)?.lowercased() == "r"
+}
+
 private extension NSWindow {
     @objc func cmux_makeFirstResponder(_ responder: NSResponder?) -> Bool {
         if cmuxIsWindowFirstResponderBypassActive() {
@@ -13080,6 +13116,14 @@ private extension NSWindow {
         if AppDelegate.shared?.handleBrowserSurfaceKeyEquivalent(event) == true {
 #if DEBUG
             dlog("  → consumed by handleBrowserSurfaceKeyEquivalent")
+#endif
+            return true
+        }
+
+        if firstResponderWebView != nil,
+           AppDelegate.shared?.shouldSuppressBrowserDefaultReloadCommandEquivalent(event) == true {
+#if DEBUG
+            dlog("  → suppressed stale browser reload command equivalent")
 #endif
             return true
         }
