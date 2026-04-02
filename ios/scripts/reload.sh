@@ -30,12 +30,7 @@ fi
 
 LOCAL_CONFIG_SOURCE="$PROJECT_DIR/ios/Sources/Config/LocalConfig.plist"
 
-copy_local_config_if_present() {
-    local app_path="$1"
-    if [ -f "$LOCAL_CONFIG_SOURCE" ] && [ -d "$app_path" ]; then
-        cp "$LOCAL_CONFIG_SOURCE" "$app_path/LocalConfig.plist"
-    fi
-}
+source "$SCRIPT_DIR/common.sh"
 
 ensure_ghosttykit() {
     local ghostty_dir="$PROJECT_DIR/ghostty"
@@ -107,7 +102,7 @@ xcodebuild -scheme cmux -sdk iphonesimulator -configuration Debug \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     -quiet
 
-copy_local_config_if_present "$DERIVED_DATA_PATH/Build/Products/Debug-iphonesimulator/cmux DEV.app"
+copy_local_config_if_present "$DERIVED_DATA_PATH/Build/Products/Debug-iphonesimulator/cmux DEV.app" "$LOCAL_CONFIG_SOURCE"
 
 echo "📲 Installing on simulator(s)..."
 # Install and launch on ALL booted simulators
@@ -146,7 +141,8 @@ if [ -n "$DEVICE_ID" ]; then
         -allowProvisioningDeviceRegistration \
         -quiet
 
-    copy_local_config_if_present "$DERIVED_DATA_PATH/Build/Products/Debug-iphoneos/cmux DEV.app"
+    copy_local_config_if_present "$DERIVED_DATA_PATH/Build/Products/Debug-iphoneos/cmux DEV.app" "$LOCAL_CONFIG_SOURCE"
+    rewrite_localhost_for_device "$DERIVED_DATA_PATH/Build/Products/Debug-iphoneos/cmux DEV.app/LocalConfig.plist"
 
     echo "📲 Installing on device..."
     xcrun devicectl device install app --device "$DEVICE_ID" "$DERIVED_DATA_PATH/Build/Products/Debug-iphoneos/cmux DEV.app"

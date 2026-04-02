@@ -136,7 +136,7 @@ enum Environment {
     }
 
     private static var allowsInsecureLocalAPIBaseURL: Bool {
-        #if targetEnvironment(simulator) && DEBUG
+        #if DEBUG
         return true
         #else
         return false
@@ -152,6 +152,13 @@ enum Environment {
               let scheme = url.scheme?.lowercased() else {
             return secureFallbackAPIBaseURL(for: environment)
         }
+
+        #if DEBUG && !targetEnvironment(simulator)
+        if let host = url.host?.lowercased(),
+           host == "localhost" || host == "127.0.0.1" {
+            NSLog("⚠️ API base URL '%@' uses localhost, unreachable from physical device. Run ./scripts/reload.sh to auto-detect Mac IP.", candidate)
+        }
+        #endif
 
         if scheme == "https" || allowInsecureLocalOverride {
             return candidate

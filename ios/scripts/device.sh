@@ -14,6 +14,11 @@ fi
 DEVICE_NAME=$(xcrun xctrace list devices 2>&1 | grep "$DEVICE_ID" | sed 's/ ([0-9].*//')
 echo "📱 Building for $DEVICE_NAME..."
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOCAL_CONFIG_SOURCE="$(cd "$SCRIPT_DIR/.." && pwd)/Sources/Config/LocalConfig.plist"
+
+source "$SCRIPT_DIR/common.sh"
+
 xcodegen generate
 xcodebuild -scheme cmux -configuration Debug \
     -destination "id=$DEVICE_ID" \
@@ -21,6 +26,9 @@ xcodebuild -scheme cmux -configuration Debug \
     -allowProvisioningUpdates \
     -allowProvisioningDeviceRegistration \
     -quiet
+
+copy_local_config_if_present "build/Build/Products/Debug-iphoneos/cmux DEV.app" "$LOCAL_CONFIG_SOURCE"
+rewrite_localhost_for_device "build/Build/Products/Debug-iphoneos/cmux DEV.app/LocalConfig.plist"
 
 echo "📲 Installing..."
 xcrun devicectl device install app --device "$DEVICE_ID" "build/Build/Products/Debug-iphoneos/cmux DEV.app"
