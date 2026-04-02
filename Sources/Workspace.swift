@@ -5619,12 +5619,19 @@ final class Workspace: Identifiable, ObservableObject {
             .eraseToAnyPublisher()
     }
 
-    lazy var sidebarObservationPublisher: AnyPublisher<Void, Never> = {
+    lazy var sidebarImmediateObservationPublisher: AnyPublisher<Void, Never> = {
         let publishers: [AnyPublisher<Void, Never>] = [
             sidebarObservationSignal($title),
             sidebarObservationSignal($customDescription),
             sidebarObservationSignal($isPinned),
             sidebarObservationSignal($customColor),
+        ]
+
+        return Publishers.MergeMany(publishers).eraseToAnyPublisher()
+    }()
+
+    lazy var sidebarObservationPublisher: AnyPublisher<Void, Never> = {
+        let publishers: [AnyPublisher<Void, Never>] = [
             sidebarObservationSignal($currentDirectory),
             $panels
                 .map(SidebarPanelObservationState.init)

@@ -12730,6 +12730,7 @@ private struct TabItemView: View, Equatable {
                     markdown: description,
                     isActive: usesInvertedActiveForeground
                 )
+                .id(description)
             }
 
             if let subtitle = effectiveSubtitle {
@@ -12961,6 +12962,22 @@ private struct TabItemView: View, Equatable {
             }
         }
         .onReceive(
+            tab.sidebarImmediateObservationPublisher
+                .receive(on: RunLoop.main)
+        ) { _ in
+#if DEBUG
+            let description = tab.customDescription ?? ""
+            dlog(
+                "sidebar.row.invalidate workspace=\(tab.id.uuidString.prefix(8)) " +
+                "source=immediate " +
+                "title=\"\(debugCommandPaletteTextPreview(tab.title))\" " +
+                "descLen=\((description as NSString).length) " +
+                "desc=\"\(debugCommandPaletteTextPreview(description))\""
+            )
+#endif
+            workspaceObservationGeneration &+= 1
+        }
+        .onReceive(
             tab.sidebarObservationPublisher
                 .receive(on: RunLoop.main)
                 // Prompt-time sidebar telemetry can arrive as a short burst
@@ -12968,6 +12985,16 @@ private struct TabItemView: View, Equatable {
                 // row redraws once with the settled state instead of blinking.
                 .debounce(for: Self.workspaceObservationCoalesceInterval, scheduler: RunLoop.main)
         ) { _ in
+#if DEBUG
+            let description = tab.customDescription ?? ""
+            dlog(
+                "sidebar.row.invalidate workspace=\(tab.id.uuidString.prefix(8)) " +
+                "source=debounced " +
+                "title=\"\(debugCommandPaletteTextPreview(tab.title))\" " +
+                "descLen=\((description as NSString).length) " +
+                "desc=\"\(debugCommandPaletteTextPreview(description))\""
+            )
+#endif
             workspaceObservationGeneration &+= 1
         }
         .onDrag {
@@ -13893,9 +13920,8 @@ private struct SidebarWorkspaceDescriptionText: View {
     let markdown: String
     let isActive: Bool
 
-    @State private var renderedMarkdown: AttributedString?
-
     var body: some View {
+        let renderedMarkdown = SidebarMarkdownRenderer.renderWorkspaceDescription(markdown)
         Group {
             if let renderedMarkdown {
                 Text(renderedMarkdown)
@@ -13909,10 +13935,32 @@ private struct SidebarWorkspaceDescriptionText: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("SidebarWorkspaceDescriptionText")
-        .accessibilityLabel(accessibilityText)
-        .onAppear(perform: renderMarkdown)
-        .onChange(of: markdown) { _ in
-            renderMarkdown()
+        .accessibilityLabel(accessibilityText(renderedMarkdown: renderedMarkdown))
+        .onAppear {
+#if DEBUG
+            let newlineCount = markdown.reduce(into: 0) { count, character in
+                if character == "\n" { count += 1 }
+            }
+            dlog(
+                "sidebar.description.render workspaceState=appear " +
+                "len=\((markdown as NSString).length) " +
+                "newlines=\(newlineCount) " +
+                "text=\"\(debugCommandPaletteTextPreview(markdown))\""
+            )
+#endif
+        }
+        .onChange(of: markdown) { newValue in
+#if DEBUG
+            let newlineCount = newValue.reduce(into: 0) { count, character in
+                if character == "\n" { count += 1 }
+            }
+            dlog(
+                "sidebar.description.render workspaceState=change " +
+                "len=\((newValue as NSString).length) " +
+                "newlines=\(newlineCount) " +
+                "text=\"\(debugCommandPaletteTextPreview(newValue))\""
+            )
+#endif
         }
     }
 
@@ -13920,15 +13968,11 @@ private struct SidebarWorkspaceDescriptionText: View {
         isActive ? .white.opacity(0.84) : .secondary.opacity(0.95)
     }
 
-    private var accessibilityText: String {
+    private func accessibilityText(renderedMarkdown: AttributedString?) -> String {
         if let renderedMarkdown {
             return String(renderedMarkdown.characters)
         }
         return markdown
-    }
-
-    private func renderMarkdown() {
-        renderedMarkdown = SidebarMarkdownRenderer.renderWorkspaceDescription(markdown)
     }
 }
 
