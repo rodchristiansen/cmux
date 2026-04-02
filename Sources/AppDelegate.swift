@@ -9922,6 +9922,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .editWorkspaceDescription)) {
+#if DEBUG
+            dlog(
+                "shortcut.editWorkspaceDescription matched target={\(debugWindowToken(commandPaletteTargetWindow ?? event.window ?? NSApp.keyWindow ?? NSApp.mainWindow))} " +
+                "\(debugShortcutRouteSnapshot(event: event))"
+            )
+#endif
             return requestEditWorkspaceDescriptionViaCommandPalette(
                 preferredWindow: commandPaletteTargetWindow ?? event.window ?? NSApp.keyWindow ?? NSApp.mainWindow
             )
@@ -10903,6 +10909,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @discardableResult
     func requestEditWorkspaceDescriptionViaCommandPalette(preferredWindow: NSWindow? = nil) -> Bool {
         let targetWindow = preferredWindow ?? NSApp.keyWindow ?? NSApp.mainWindow
+#if DEBUG
+        dlog(
+            "shortcut.editWorkspaceDescription request target={\(debugWindowToken(targetWindow))} " +
+            "fr=\(targetWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")"
+        )
+#endif
         requestCommandPaletteEditWorkspaceDescription(
             preferredWindow: targetWindow,
             source: "shortcut.editWorkspaceDescription"
