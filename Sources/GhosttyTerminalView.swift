@@ -83,6 +83,7 @@ private func cmuxScalarHex(_ value: String?) -> String {
         .map { String(format: "%04X", $0.value) }
         .joined(separator: ",")
 }
+
 #endif
 
 enum GhosttyPasteboardHelper {
@@ -697,11 +698,16 @@ private func terminalHoveredColumn(
     return line.distance(from: line.startIndex, to: chosenRange.lowerBound)
 }
 
-func resolveTerminalLocalFileURL(
+struct TerminalResolvedLocalFileTarget {
+    let url: URL
+    let columnRange: ClosedRange<Int>
+}
+
+func resolveTerminalLocalFileTarget(
     inLine rawLine: String,
     hoveredColumn: Int,
     currentDirectory: String? = nil
-) -> URL? {
+) -> TerminalResolvedLocalFileTarget? {
     let line = rawLine.trimmingCharacters(in: .newlines)
     let tokenRanges = terminalWhitespaceTokenRanges(in: line)
     guard let hoveredTokenIndex = terminalHoveredTokenIndex(
@@ -711,7 +717,7 @@ func resolveTerminalLocalFileURL(
     ) else { return nil }
 
     let maxTokenSpan = 8
-    var bestMatch: (url: URL, tokenCount: Int, characterCount: Int)?
+    var bestMatch: (target: TerminalResolvedLocalFileTarget, tokenCount: Int, characterCount: Int)?
 
     for startIndex in 0...hoveredTokenIndex {
         for endIndex in hoveredTokenIndex..<tokenRanges.count {
@@ -724,17 +730,56 @@ func resolveTerminalLocalFileURL(
                 continue
             }
 
+            let startColumn = line.distance(from: line.startIndex, to: candidateRange.lowerBound)
+            let endColumn = line.distance(from: line.startIndex, to: candidateRange.upperBound) - 1
+            let target = TerminalResolvedLocalFileTarget(
+                url: resolved,
+                columnRange: startColumn...max(startColumn, endColumn)
+            )
             let characterCount = candidate.count
+
             if let bestMatch {
                 if tokenCount < bestMatch.tokenCount { continue }
                 if tokenCount == bestMatch.tokenCount, characterCount <= bestMatch.characterCount { continue }
             }
 
-            bestMatch = (resolved, tokenCount, characterCount)
+            bestMatch = (target, tokenCount, characterCount)
         }
     }
 
-    return bestMatch?.url
+    return bestMatch?.target
+}
+
+func resolveTerminalLocalFileURL(
+    inLine rawLine: String,
+    hoveredColumn: Int,
+    currentDirectory: String? = nil
+) -> URL? {
+    resolveTerminalLocalFileTarget(
+        inLine: rawLine,
+        hoveredColumn: hoveredColumn,
+        currentDirectory: currentDirectory
+    )?.url
+}
+
+func resolveTerminalLocalFileTarget(
+    inLine rawLine: String,
+    hoveredWord: String,
+    preferredColumn: Int? = nil,
+    currentDirectory: String? = nil
+) -> TerminalResolvedLocalFileTarget? {
+    let line = rawLine.trimmingCharacters(in: .newlines)
+    guard let hoveredColumn = terminalHoveredColumn(
+        in: line,
+        hoveredWord: hoveredWord,
+        preferredColumn: preferredColumn
+    ) else { return nil }
+
+    return resolveTerminalLocalFileTarget(
+        inLine: line,
+        hoveredColumn: hoveredColumn,
+        currentDirectory: currentDirectory
+    )
 }
 
 func resolveTerminalLocalFileURL(
@@ -743,18 +788,12 @@ func resolveTerminalLocalFileURL(
     preferredColumn: Int? = nil,
     currentDirectory: String? = nil
 ) -> URL? {
-    let line = rawLine.trimmingCharacters(in: .newlines)
-    guard let hoveredColumn = terminalHoveredColumn(
-        in: line,
+    resolveTerminalLocalFileTarget(
+        inLine: rawLine,
         hoveredWord: hoveredWord,
-        preferredColumn: preferredColumn
-    ) else { return nil }
-
-    return resolveTerminalLocalFileURL(
-        inLine: line,
-        hoveredColumn: hoveredColumn,
+        preferredColumn: preferredColumn,
         currentDirectory: currentDirectory
-    )
+    )?.url
 }
 
 @MainActor
@@ -4775,6 +4814,12 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         let preferredColumn: Int
     }
 
+    private struct ResolvedWordPathHoverTarget {
+        let url: URL
+        let row: Int
+        let columnRange: ClosedRange<Int>
+    }
+
     private static let focusDebugEnabled: Bool = {
         if ProcessInfo.processInfo.environment["CMUX_FOCUS_DEBUG"] == "1" {
             return true
@@ -4854,6 +4899,15 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         )
     }
 
+    private func clearWordPathHover(clearTarget: Bool = true) {
+        if clearTarget {
+            resolvedWordPathHoverTarget = nil
+        }
+        guard wordPathHoverActive else { return }
+        wordPathHoverActive = false
+        NSCursor.pop()
+    }
+
     var desiredFocus: Bool = false
     var suppressingReparentFocus: Bool = false
     var tabId: UUID?
@@ -4867,6 +4921,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private var keyTables: [String] = []
     fileprivate private(set) var keyboardCopyModeActive = false
     private var wordPathHoverActive = false
+    private var resolvedWordPathHoverTarget: ResolvedWordPathHoverTarget?
     private var keyboardCopyModeConsumedKeyUps: Set<UInt16> = []
     private var keyboardCopyModeInputState = TerminalKeyboardCopyModeInputState()
     private var keyboardCopyModeViewportRow: Int?
@@ -5117,10 +5172,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             self.windowObserver = nil
         }
         // Balance the cursor stack if the view is removed while hover is active
-        if wordPathHoverActive {
-            wordPathHoverActive = false
-            NSCursor.pop()
-        }
+        clearWordPathHover()
 #if DEBUG
         dlog(
             "surface.view.windowMove surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
@@ -6968,18 +7020,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         return line
     }
 
-    private func resolvedLinePathUnderCursor(at point: CGPoint, currentDirectory: String?) -> URL? {
-        if let snapshot = quicklookWordSnapshotUnderCursor(),
-           let line = readViewportLine(at: snapshot.hoveredRow),
-           let resolved = resolveTerminalLocalFileURL(
-               inLine: line,
-               hoveredWord: snapshot.text,
-               preferredColumn: snapshot.preferredColumn,
-               currentDirectory: currentDirectory
-           ) {
-            return resolved
-        }
-
+    private func viewportPosition(at point: CGPoint) -> (column: Int, row: Int)? {
         guard let surface = surface else { return nil }
 
         let surfaceSize = ghostty_surface_size(surface)
@@ -7000,13 +7041,80 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         )
         let hoveredColumn = max(0, min(Int(floor(visiblePoint.x / resolvedCellWidth)), columns - 1))
         let hoveredRow = max(0, min(Int(floor(max(visiblePoint.y - 1, 0) / resolvedCellHeight)), rows - 1))
-        guard let line = readViewportLine(at: hoveredRow) else { return nil }
+        return (hoveredColumn, hoveredRow)
+    }
 
-        return resolveTerminalLocalFileURL(
-            inLine: line,
-            hoveredColumn: hoveredColumn,
-            currentDirectory: currentDirectory
+    private func resolvedLineTargetUnderCursor(
+        at point: CGPoint,
+        currentDirectory: String?,
+        allowCachedHoverTarget: Bool = false
+    ) -> ResolvedWordPathHoverTarget? {
+        if let snapshot = quicklookWordSnapshotUnderCursor(),
+           let line = readViewportLine(at: snapshot.hoveredRow),
+           let resolved = resolveTerminalLocalFileTarget(
+               inLine: line,
+               hoveredWord: snapshot.text,
+               preferredColumn: snapshot.preferredColumn,
+               currentDirectory: currentDirectory
+           ) {
+            return ResolvedWordPathHoverTarget(
+                url: resolved.url,
+                row: snapshot.hoveredRow,
+                columnRange: resolved.columnRange
+            )
+        }
+
+        guard let position = viewportPosition(at: point) else { return nil }
+
+        if let line = readViewportLine(at: position.row),
+           let resolved = resolveTerminalLocalFileTarget(
+               inLine: line,
+               hoveredColumn: position.column,
+               currentDirectory: currentDirectory
+           ) {
+            return ResolvedWordPathHoverTarget(
+                url: resolved.url,
+                row: position.row,
+                columnRange: resolved.columnRange
+            )
+        }
+
+        if allowCachedHoverTarget,
+           let cachedTarget = resolvedWordPathHoverTarget,
+           cachedTarget.row == position.row,
+           cachedTarget.columnRange.contains(position.column) {
+            return cachedTarget
+        }
+
+        return nil
+    }
+
+    private func refreshResolvedWordPathTarget(
+        at point: CGPoint,
+        allowCachedHoverTarget: Bool
+    ) -> ResolvedWordPathHoverTarget? {
+        guard let termSurface = terminalSurface,
+              let workspace = termSurface.owningWorkspace(),
+              !workspace.isRemoteTerminalSurface(termSurface.id) else {
+            resolvedWordPathHoverTarget = nil
+            return nil
+        }
+
+        let target = resolvedLineTargetUnderCursor(
+            at: point,
+            currentDirectory: currentDirectoryForWordPathResolution(),
+            allowCachedHoverTarget: allowCachedHoverTarget
         )
+        resolvedWordPathHoverTarget = target
+        return target
+    }
+
+    private func resolvedLinePathUnderCursor(at point: CGPoint, currentDirectory: String?) -> URL? {
+        resolvedLineTargetUnderCursor(
+            at: point,
+            currentDirectory: currentDirectory,
+            allowCachedHoverTarget: true
+        )?.url
     }
 
     /// Check if the word under the mouse cursor resolves to an existing local
@@ -7029,22 +7137,22 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     /// Update the pointing-hand cursor when Cmd-hovering over a local file path
     /// or file URL, including bare relative names from commands like `ls`.
     private func updateWordPathHover(cmdHeld: Bool, point: CGPoint) {
+        let resolvedTarget = refreshResolvedWordPathTarget(
+            at: point,
+            allowCachedHoverTarget: true
+        )
         guard cmdHeld else {
-            if wordPathHoverActive {
-                wordPathHoverActive = false
-                NSCursor.pop()
-            }
+            clearWordPathHover(clearTarget: false)
             return
         }
 
-        if resolveWordUnderCursorAsLocalFileURL(at: point) != nil {
+        if resolvedTarget != nil {
             if !wordPathHoverActive {
                 wordPathHoverActive = true
                 NSCursor.pointingHand.push()
             }
-        } else if wordPathHoverActive {
-            wordPathHoverActive = false
-            NSCursor.pop()
+        } else {
+            clearWordPathHover()
         }
     }
 
@@ -7277,10 +7385,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     }
 
     override func mouseExited(with event: NSEvent) {
-        if wordPathHoverActive {
-            wordPathHoverActive = false
-            NSCursor.pop()
-        }
+        clearWordPathHover()
         guard let surface = surface else { return }
         if NSEvent.pressedMouseButtons != 0 {
             return

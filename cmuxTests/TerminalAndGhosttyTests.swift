@@ -3872,11 +3872,40 @@ final class TerminalLocalFileURLResolutionTests: XCTestCase {
             XCTAssertEqual(
                 resolveTerminalLocalFileURL(
                     inLine: "- Group 8.png",
+                    hoveredColumn: 7,
+                    currentDirectory: root.path
+                )?.path,
+                imageURL.path
+            )
+            XCTAssertEqual(
+                resolveTerminalLocalFileURL(
+                    inLine: "- Group 8.png",
                     hoveredColumn: 9,
                     currentDirectory: root.path
                 )?.path,
                 imageURL.path
             )
+        }
+    }
+
+    func testResolvedLineTargetWithSpacesTracksFullColumnRange() throws {
+        try withTemporaryDirectory { root in
+            let imageURL = root.appendingPathComponent("Group 8.png")
+            try Data().write(to: imageURL)
+
+            let target = try XCTUnwrap(
+                resolveTerminalLocalFileTarget(
+                    inLine: "  - Group 8.png",
+                    hoveredWord: "Group",
+                    preferredColumn: 4,
+                    currentDirectory: root.path
+                )
+            )
+
+            XCTAssertEqual(target.url.path, imageURL.path)
+            XCTAssertTrue(target.columnRange.contains(4))
+            XCTAssertTrue(target.columnRange.contains(9))
+            XCTAssertTrue(target.columnRange.contains(14))
         }
     }
 
