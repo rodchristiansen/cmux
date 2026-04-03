@@ -12425,6 +12425,8 @@ private struct TabItemView: View, Equatable {
     let allRemoteContextMenuTargetsDisconnected: Bool
     let settings: SidebarTabItemSettingsSnapshot
     @State private var workspaceObservationGeneration: UInt64 = 0
+    @State private var contextMenuVisible = false
+    @State private var hasDeferredWorkspaceObservationInvalidation = false
     @State private var isHovering = false
     @State private var rowHeight: CGFloat = 1
 
@@ -13022,7 +13024,7 @@ private struct TabItemView: View, Equatable {
                 "desc=\"\(debugCommandPaletteTextPreview(description))\""
             )
 #endif
-            workspaceObservationGeneration &+= 1
+            scheduleWorkspaceObservationInvalidation()
         }
         .onReceive(
             tab.sidebarObservationPublisher
@@ -13042,7 +13044,7 @@ private struct TabItemView: View, Equatable {
                 "desc=\"\(debugCommandPaletteTextPreview(description))\""
             )
 #endif
-            workspaceObservationGeneration &+= 1
+            scheduleWorkspaceObservationInvalidation()
         }
         .onDrag {
             #if DEBUG
@@ -13084,7 +13086,31 @@ private struct TabItemView: View, Equatable {
         .accessibilityAction(named: Text(moveDownActionText)) {
             moveBy(1)
         }
-        .contextMenu { workspaceContextMenu }
+        .contextMenu {
+            workspaceContextMenu
+                .onAppear {
+                    contextMenuVisible = true
+                }
+                .onDisappear {
+                    contextMenuVisible = false
+                    flushDeferredWorkspaceObservationInvalidation()
+                }
+        }
+    }
+
+    private func scheduleWorkspaceObservationInvalidation() {
+        // Keep the context menu stable while background workspace telemetry keeps arriving.
+        if contextMenuVisible {
+            hasDeferredWorkspaceObservationInvalidation = true
+            return
+        }
+        workspaceObservationGeneration &+= 1
+    }
+
+    private func flushDeferredWorkspaceObservationInvalidation() {
+        guard hasDeferredWorkspaceObservationInvalidation else { return }
+        hasDeferredWorkspaceObservationInvalidation = false
+        workspaceObservationGeneration &+= 1
     }
 
     private func contextMenuLabel(multi: String, single: String, isMulti: Bool) -> String {
