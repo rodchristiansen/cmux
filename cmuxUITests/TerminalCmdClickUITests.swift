@@ -160,10 +160,61 @@ final class TerminalCmdClickUITests: XCTestCase {
         )
     }
 
+    func testCmdClickRawLsStylePathPrefersSnapshotWhenQuicklookDisagrees() throws {
+        let app = launchApp(
+            displayMode: .raw,
+            captureOpenPaths: true,
+            captureHoverDiagnostics: false,
+            quicklookOverride: "OtherFile"
+        )
+        defer { app.terminate() }
+
+        let fileName = "Cmd Click Fixture.txt"
+        let setup = try waitForReadySetup()
+        let expectedPath = fixtureDirectoryURL.appendingPathComponent(fileName).path
+        let wrongQuicklookPath = fixtureDirectoryURL.appendingPathComponent("OtherFile").path
+
+        XCTAssertEqual(setup.expectedPath, expectedPath)
+
+        let result = try runCommand(action: "cmd_click_token")
+        XCTAssertEqual(
+            result["lastCommandSucceeded"] as? String,
+            "1",
+            "Expected cmd-click to prefer the snapshot-expanded raw-space path when quicklook disagrees. result=\(result)"
+        )
+        XCTAssertEqual(
+            result["lastCommandOpenedPath"] as? String,
+            expectedPath,
+            "Expected cmd-click to prefer the snapshot-expanded raw-space path when quicklook disagrees. result=\(result)"
+        )
+        if let lastCommandResult = result["lastCommandResult"] as? [String: Any] {
+            XCTAssertEqual(
+                lastCommandResult["resolutionSource"] as? String,
+                "snapshot",
+                "Expected disagreement cases to resolve through the snapshot path expander. result=\(result)"
+            )
+        }
+
+        guard let openedPaths = waitForCapturedOpenPaths(timeout: 5.0) else {
+            XCTFail("Expected cmd-click capture log after forcing a quicklook mismatch. result=\(result)")
+            return
+        }
+
+        XCTAssertTrue(
+            openedPaths.contains(expectedPath),
+            "Expected cmd-click to open the intended raw-space path. opened=\(openedPaths) expected=\(expectedPath)"
+        )
+        XCTAssertFalse(
+            openedPaths.contains(wrongQuicklookPath),
+            "Expected cmd-click to reject the mismatched quicklook path. opened=\(openedPaths) wrong=\(wrongQuicklookPath)"
+        )
+    }
+
     private func launchApp(
         displayMode: DisplayMode = .escaped,
         captureOpenPaths: Bool,
-        captureHoverDiagnostics: Bool
+        captureHoverDiagnostics: Bool,
+        quicklookOverride: String? = nil
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_TAG"] = "ui-test-terminal-cmd-click"
@@ -179,6 +230,9 @@ final class TerminalCmdClickUITests: XCTestCase {
         }
         if captureHoverDiagnostics {
             app.launchEnvironment["CMUX_UI_TEST_CMD_HOVER_DIAGNOSTICS_PATH"] = hoverDiagnosticsPath
+        }
+        if let quicklookOverride {
+            app.launchEnvironment["CMUX_UI_TEST_TERMINAL_CMD_CLICK_QUICKLOOK_OVERRIDE"] = quicklookOverride
         }
         launchAndEnsureForeground(app)
         return app
