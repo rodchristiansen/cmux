@@ -210,11 +210,67 @@ final class TerminalCmdClickUITests: XCTestCase {
         )
     }
 
+    func testCmdClickRawLsStylePathPrefersPointSnapshotWhenViewportOffsetDisagrees() throws {
+        let app = launchApp(
+            displayMode: .raw,
+            captureOpenPaths: true,
+            captureHoverDiagnostics: false,
+            viewportOffsetDelta: 24
+        )
+        defer { app.terminate() }
+
+        let fileName = "Cmd Click Fixture.txt"
+        let setup = try waitForReadySetup()
+        let expectedPath = fixtureDirectoryURL.appendingPathComponent(fileName).path
+        let wrongViewportPath = fixtureDirectoryURL.appendingPathComponent("OtherFile").path
+
+        XCTAssertEqual(setup.expectedPath, expectedPath)
+
+        let result = try runCommand(action: "cmd_click_token")
+        XCTAssertEqual(
+            result["lastCommandSucceeded"] as? String,
+            "1",
+            "Expected cmd-click to prefer the click-point snapshot when viewport offsets disagree. result=\(result)"
+        )
+        XCTAssertEqual(
+            result["lastCommandOpenedPath"] as? String,
+            expectedPath,
+            "Expected cmd-click to keep the clicked raw-space path when viewport offsets disagree. result=\(result)"
+        )
+        if let lastCommandResult = result["lastCommandResult"] as? [String: Any] {
+            XCTAssertEqual(
+                lastCommandResult["resolutionSource"] as? String,
+                "snapshot",
+                "Expected disagreement cases to resolve through the click-point snapshot. result=\(result)"
+            )
+            XCTAssertEqual(
+                lastCommandResult["rawToken"] as? String,
+                fileName,
+                "Expected disagreement cases to keep the clicked raw token. result=\(result)"
+            )
+        }
+
+        guard let openedPaths = waitForCapturedOpenPaths(timeout: 5.0) else {
+            XCTFail("Expected cmd-click capture log after forcing a viewport mismatch. result=\(result)")
+            return
+        }
+
+        XCTAssertTrue(
+            openedPaths.contains(expectedPath),
+            "Expected cmd-click to open the clicked raw-space path. opened=\(openedPaths) expected=\(expectedPath)"
+        )
+        XCTAssertFalse(
+            openedPaths.contains(wrongViewportPath),
+            "Expected cmd-click to reject the mismatched viewport path. opened=\(openedPaths) wrong=\(wrongViewportPath)"
+        )
+    }
+
     private func launchApp(
         displayMode: DisplayMode = .escaped,
         captureOpenPaths: Bool,
         captureHoverDiagnostics: Bool,
-        quicklookOverride: String? = nil
+        quicklookOverride: String? = nil,
+        viewportOffsetDelta: Int? = nil
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_TAG"] = "ui-test-terminal-cmd-click"
@@ -233,6 +289,9 @@ final class TerminalCmdClickUITests: XCTestCase {
         }
         if let quicklookOverride {
             app.launchEnvironment["CMUX_UI_TEST_TERMINAL_CMD_CLICK_QUICKLOOK_OVERRIDE"] = quicklookOverride
+        }
+        if let viewportOffsetDelta {
+            app.launchEnvironment["CMUX_UI_TEST_TERMINAL_CMD_CLICK_VIEWPORT_OFFSET_DELTA"] = String(viewportOffsetDelta)
         }
         launchAndEnsureForeground(app)
         return app

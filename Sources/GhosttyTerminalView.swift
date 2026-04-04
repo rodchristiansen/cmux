@@ -7173,11 +7173,20 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             }
 
             if text.offset_len > 0,
+#if DEBUG
+               let expandedResolution = resolveVisibleWordPathFromViewportOffset(
+                   cmuxTerminalCmdClickViewportOffsetDelta(Int(text.offset_start)),
+                   cwd: cwd,
+                   workspace: workspace,
+                   terminalSurface: termSurface
+               ) {
+#else
                let expandedResolution = resolveVisibleWordPathFromViewportOffset(
                    Int(text.offset_start),
                    cwd: cwd,
                    workspace: workspace,
                    terminalSurface: termSurface
+#endif
                ) {
                 // Ghostty quicklook can return a resolvable but incomplete token for
                 // multi-word `ls` entries. Prefer the viewport-expanded path when it
@@ -7206,6 +7215,16 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             return decodedWord
         }
         return override
+    }
+
+    private func cmuxTerminalCmdClickViewportOffsetDelta(_ viewportOffsetStart: Int) -> Int {
+        let env = ProcessInfo.processInfo.environment
+        guard let delta = env["CMUX_UI_TEST_TERMINAL_CMD_CLICK_VIEWPORT_OFFSET_DELTA"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              let parsedDelta = Int(delta) else {
+            return viewportOffsetStart
+        }
+        return max(0, viewportOffsetStart + parsedDelta)
     }
     #endif
 
