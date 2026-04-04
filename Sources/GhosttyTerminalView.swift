@@ -10100,7 +10100,7 @@ final class GhosttySurfaceScrollView: NSView {
         }
 
         if !isLiveScrolling {
-            let cellHeight = surfaceView.cellSize.height
+            let cellHeight = scrollGeometryCellHeight()
             if cellHeight > 0, let scrollbar = surfaceView.scrollbar {
                 let offsetY =
                     CGFloat(scrollbar.total - scrollbar.offset - scrollbar.len) * cellHeight
@@ -10143,7 +10143,7 @@ final class GhosttySurfaceScrollView: NSView {
     }
 
     private func handleLiveScroll() {
-        let cellHeight = surfaceView.cellSize.height
+        let cellHeight = scrollGeometryCellHeight()
         guard cellHeight > 0 else { return }
 
         let visibleRect = scrollView.contentView.documentVisibleRect
@@ -10192,9 +10192,26 @@ final class GhosttySurfaceScrollView: NSView {
         _ = synchronizeCoreSurface()
     }
 
+    private func scrollGeometryCellHeight() -> CGFloat {
+        let cellHeight = surfaceView.cellSize.height
+        guard cellHeight > 0 else { return 0 }
+
+        // Ghostty reports cell metrics in backing pixels, while scroll view
+        // geometry is maintained in AppKit points.
+        let scale = max(
+            1.0,
+            window?.backingScaleFactor
+                ?? surfaceView.layer?.contentsScale
+                ?? layer?.contentsScale
+                ?? NSScreen.main?.backingScaleFactor
+                ?? 1.0
+        )
+        return cellHeight / scale
+    }
+
     private func documentHeight() -> CGFloat {
         let contentHeight = scrollView.contentSize.height
-        let cellHeight = surfaceView.cellSize.height
+        let cellHeight = scrollGeometryCellHeight()
         if cellHeight > 0, let scrollbar = surfaceView.scrollbar {
             let documentGridHeight = CGFloat(scrollbar.total) * cellHeight
             let padding = contentHeight - (CGFloat(scrollbar.len) * cellHeight)
