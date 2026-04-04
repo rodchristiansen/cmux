@@ -6515,19 +6515,48 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         keyEvent.text = nil
         keyEvent.composing = false
         _ = ghostty_surface_key(surface, keyEvent)
+
+        let suppressCommandPathHover = shouldSuppressCommandPathHover(for: event.modifierFlags)
         // Refresh ghostty's mouse position so quicklook_word uses current coordinates
         // when Cmd is pressed while the pointer is stationary.
         let point = convert(event.locationInWindow, from: nil)
-        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, modsFromEvent(event))
-        updateWordPathHover(cmdHeld: event.modifierFlags.contains(.command))
+        ghostty_surface_mouse_pos(
+            surface,
+            point.x,
+            bounds.height - point.y,
+            hoverModsFromFlags(event.modifierFlags, suppressCommandPathHover: suppressCommandPathHover)
+        )
+        updateWordPathHover(
+            cmdHeld: event.modifierFlags.contains(.command),
+            suppressPathHover: suppressCommandPathHover
+        )
+    }
+
+    private func shouldSuppressCommandPathHover(for flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags.contains(.command), let surface else { return false }
+        return ghostty_surface_has_selection(surface)
+    }
+
+    private func hoverModsFromFlags(
+        _ flags: NSEvent.ModifierFlags,
+        suppressCommandPathHover: Bool
+    ) -> ghostty_input_mods_e {
+        if suppressCommandPathHover {
+            return modsFromFlags(flags.subtracting(.command))
+        }
+        return modsFromFlags(flags)
     }
 
     private func modsFromEvent(_ event: NSEvent) -> ghostty_input_mods_e {
+        modsFromFlags(event.modifierFlags)
+    }
+
+    private func modsFromFlags(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
         var mods = GHOSTTY_MODS_NONE.rawValue
-        if event.modifierFlags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
-        if event.modifierFlags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
-        if event.modifierFlags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
-        if event.modifierFlags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
+        if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
+        if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
+        if flags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
+        if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
         return ghostty_input_mods_e(rawValue: mods)
     }
 
@@ -6824,8 +6853,8 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     /// Update the pointing-hand cursor when Cmd-hovering over a bare filename
     /// that exists in the terminal's CWD.
-    private func updateWordPathHover(cmdHeld: Bool) {
-        guard cmdHeld else {
+    private func updateWordPathHover(cmdHeld: Bool, suppressPathHover: Bool = false) {
+        guard cmdHeld, !suppressPathHover else {
             if wordPathHoverActive {
                 wordPathHoverActive = false
                 NSCursor.pop()
@@ -7005,17 +7034,36 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     override func mouseMoved(with event: NSEvent) {
         maybeRequestFirstResponderForMouseFocus()
         guard let surface = surface else { return }
+        let suppressCommandPathHover = shouldSuppressCommandPathHover(for: event.modifierFlags)
         let point = convert(event.locationInWindow, from: nil)
-        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, modsFromEvent(event))
-        updateWordPathHover(cmdHeld: event.modifierFlags.contains(.command))
+        ghostty_surface_mouse_pos(
+            surface,
+            point.x,
+            bounds.height - point.y,
+            hoverModsFromFlags(event.modifierFlags, suppressCommandPathHover: suppressCommandPathHover)
+        )
+        updateWordPathHover(
+            cmdHeld: event.modifierFlags.contains(.command),
+            suppressPathHover: suppressCommandPathHover
+        )
     }
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
         maybeRequestFirstResponderForMouseFocus()
         guard let surface = surface else { return }
+        let suppressCommandPathHover = shouldSuppressCommandPathHover(for: event.modifierFlags)
         let point = convert(event.locationInWindow, from: nil)
-        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, modsFromEvent(event))
+        ghostty_surface_mouse_pos(
+            surface,
+            point.x,
+            bounds.height - point.y,
+            hoverModsFromFlags(event.modifierFlags, suppressCommandPathHover: suppressCommandPathHover)
+        )
+        updateWordPathHover(
+            cmdHeld: event.modifierFlags.contains(.command),
+            suppressPathHover: suppressCommandPathHover
+        )
     }
 
     private func maybeRequestFirstResponderForMouseFocus() {
