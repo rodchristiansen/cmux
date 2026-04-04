@@ -6524,7 +6524,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             surface,
             point.x,
             bounds.height - point.y,
-            modsFromEvent(event)
+            hoverModsFromFlags(
+                event.modifierFlags,
+                suppressCommandPathHover: suppressCommandPathHover
+            )
         )
         updateWordPathHover(
             cmdHeld: event.modifierFlags.contains(.command),
@@ -6535,6 +6538,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private func shouldSuppressCommandPathHover(for flags: NSEvent.ModifierFlags) -> Bool {
         guard flags.contains(.command), let surface else { return false }
         return ghostty_surface_has_selection(surface)
+    }
+
+    private func hoverModsFromFlags(
+        _ flags: NSEvent.ModifierFlags,
+        suppressCommandPathHover: Bool
+    ) -> ghostty_input_mods_e {
+        let effectiveFlags = suppressCommandPathHover ? flags.subtracting(.command) : flags
+        return modsFromFlags(effectiveFlags)
     }
 
     private func modsFromEvent(_ event: NSEvent) -> ghostty_input_mods_e {
@@ -6783,7 +6794,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         // Fallback: if Cmd was held and ghostty didn't handle the click as a link,
         // check if the word under cursor is a valid file/directory in the terminal's CWD.
         // This enables cmd-click on bare filenames from commands like `ls`.
-        if !consumed && event.modifierFlags.contains(.command) {
+        let suppressCommandPathHover = shouldSuppressCommandPathHover(for: event.modifierFlags)
+        if !consumed,
+           event.modifierFlags.contains(.command),
+           !suppressCommandPathHover {
             // Refresh ghostty's cached mouse position so quicklook_word reads
             // up-to-date coordinates (mouseDown skips pos update on double-click).
             let point = convert(event.locationInWindow, from: nil)
@@ -7030,7 +7044,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             surface,
             point.x,
             bounds.height - point.y,
-            modsFromEvent(event)
+            hoverModsFromFlags(
+                event.modifierFlags,
+                suppressCommandPathHover: suppressCommandPathHover
+            )
         )
         updateWordPathHover(
             cmdHeld: event.modifierFlags.contains(.command),
@@ -7048,7 +7065,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             surface,
             point.x,
             bounds.height - point.y,
-            modsFromEvent(event)
+            hoverModsFromFlags(
+                event.modifierFlags,
+                suppressCommandPathHover: suppressCommandPathHover
+            )
         )
         updateWordPathHover(
             cmdHeld: event.modifierFlags.contains(.command),
