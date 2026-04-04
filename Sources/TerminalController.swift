@@ -1040,6 +1040,26 @@ class TerminalController {
             workspace.surfaceListeningPorts[panelId] = ports.isEmpty ? nil : ports
             workspace.recomputeListeningPorts()
         }
+        PortScanner.shared.onAgentPortsUpdated = { [weak self] workspaceId, ports in
+            guard let self, let tabManager = self.tabManager else { return }
+            guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return }
+            if workspace.agentListeningPorts != ports {
+                workspace.agentListeningPorts = ports
+                workspace.recomputeListeningPorts()
+            }
+        }
+        PortScanner.shared.agentPIDsProvider = { [weak self] workspaceIds in
+            guard let self, let tabManager = self.tabManager else { return [:] }
+            var pidsByWorkspace: [UUID: Set<Int>] = [:]
+            for workspaceId in workspaceIds {
+                guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { continue }
+                let pids = Set(workspace.agentPIDs.values.compactMap { $0 > 0 ? Int($0) : nil })
+                if !pids.isEmpty {
+                    pidsByWorkspace[workspaceId] = pids
+                }
+            }
+            return pidsByWorkspace
+        }
 
         // Accept connections in background thread
         Thread.detachNewThread { [weak self] in
@@ -2088,6 +2108,8 @@ class TerminalController {
             return v2Result(id: id, self.v2WorkspaceEqualizeSplits(params: params))
         case "workspace.remote.configure":
             return v2Result(id: id, self.v2WorkspaceRemoteConfigure(params: params))
+        case "workspace.remote.foreground_auth_ready":
+            return v2Result(id: id, self.v2WorkspaceRemoteForegroundAuthReady(params: params))
         case "workspace.remote.reconnect":
             return v2Result(id: id, self.v2WorkspaceRemoteReconnect(params: params))
         case "workspace.remote.disconnect":
@@ -2464,6 +2486,7 @@ class TerminalController {
             "workspace.last",
             "workspace.equalize_splits",
             "workspace.remote.configure",
+            "workspace.remote.foreground_auth_ready",
             "workspace.remote.reconnect",
             "workspace.remote.disconnect",
             "workspace.remote.status",
@@ -3823,6 +3846,8 @@ class TerminalController {
         }
         let relayID = v2RawString(params, "relay_id")?.trimmingCharacters(in: .whitespacesAndNewlines)
         let relayToken = v2RawString(params, "relay_token")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let foregroundAuthToken = v2RawString(params, "foreground_auth_token")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let localSocketPath = v2RawString(params, "local_socket_path")
         let terminalStartupCommand = v2RawString(params, "terminal_startup_command")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3867,7 +3892,8 @@ class TerminalController {
                 relayID: relayID?.isEmpty == true ? nil : relayID,
                 relayToken: relayToken?.isEmpty == true ? nil : relayToken,
                 localSocketPath: localSocketPath,
-                terminalStartupCommand: terminalStartupCommand?.isEmpty == true ? nil : terminalStartupCommand
+                terminalStartupCommand: terminalStartupCommand?.isEmpty == true ? nil : terminalStartupCommand,
+                foregroundAuthToken: foregroundAuthToken?.isEmpty == true ? nil : foregroundAuthToken
             )
             workspace.configureRemoteConnection(config, autoConnect: autoConnect)
 
@@ -3954,6 +3980,45 @@ class TerminalController {
             }
 
             workspace.reconnectRemoteConnection()
+            let windowId = v2ResolveWindowId(tabManager: owner)
+            result = .ok([
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "workspace_id": workspace.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "remote": workspace.remoteStatusPayload(),
+            ])
+        }
+
+        return result
+    }
+
+    private func v2WorkspaceRemoteForegroundAuthReady(params: [String: Any]) -> V2CallResult {
+        let requestedWorkspaceId = v2UUID(params, "workspace_id")
+        if v2HasNonNullParam(params, "workspace_id"), requestedWorkspaceId == nil {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+        let fallbackTabManager = v2ResolveTabManager(params: params)
+        let workspaceId = requestedWorkspaceId ?? fallbackTabManager?.selectedTabId
+        guard let workspaceId else {
+            return .err(code: "invalid_params", message: "Missing workspace_id", data: nil)
+        }
+
+        let foregroundAuthToken = v2RawString(params, "foreground_auth_token")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var result: V2CallResult = .err(code: "not_found", message: "Workspace not found", data: [
+            "workspace_id": workspaceId.uuidString,
+            "workspace_ref": v2Ref(kind: .workspace, uuid: workspaceId),
+        ])
+
+        // Must run on main for v2MainSync because this may arm a pending connect or start reconnecting immediately.
+        v2MainSync {
+            guard let owner = AppDelegate.shared?.tabManagerFor(tabId: workspaceId),
+                  let workspace = owner.tabs.first(where: { $0.id == workspaceId }) else {
+                return
+            }
+
+            workspace.notifyRemoteForegroundAuthenticationReady(token: foregroundAuthToken)
             let windowId = v2ResolveWindowId(tabManager: owner)
             result = .ok([
                 "window_id": v2OrNull(windowId?.uuidString),
@@ -14562,6 +14627,7 @@ class TerminalController {
                 // Still update PID tracking even if the status display hasn't changed.
                 if let pidValue {
                     tab.agentPIDs[key] = pidValue
+                    self.refreshTrackedAgentPorts(for: tab)
                 }
                 return
             }
@@ -14577,6 +14643,7 @@ class TerminalController {
             )
             if let pidValue {
                 tab.agentPIDs[key] = pidValue
+                self.refreshTrackedAgentPorts(for: tab)
             }
         }
         return "OK"
@@ -14597,7 +14664,9 @@ class TerminalController {
             if tab.statusEntries.removeValue(forKey: key) == nil {
                 result = "OK (key not found)"
             }
-            tab.agentPIDs.removeValue(forKey: key)
+            if tab.agentPIDs.removeValue(forKey: key) != nil {
+                self.refreshTrackedAgentPorts(for: tab)
+            }
         }
         return result
     }
@@ -14618,6 +14687,7 @@ class TerminalController {
         DispatchQueue.main.async { [weak self] in
             guard let self, let tab = self.tabForSidebarMutation(id: targetTabId) else { return }
             tab.agentPIDs[key] = pid
+            self.refreshTrackedAgentPorts(for: tab)
         }
         return "OK"
     }
@@ -14637,8 +14707,14 @@ class TerminalController {
         DispatchQueue.main.async { [weak self] in
             guard let self, let tab = self.tabForSidebarMutation(id: targetTabId) else { return }
             tab.agentPIDs.removeValue(forKey: key)
+            self.refreshTrackedAgentPorts(for: tab)
         }
         return "OK"
+    }
+
+    private func refreshTrackedAgentPorts(for tab: Workspace) {
+        let agentPIDs = Set(tab.agentPIDs.values.compactMap { $0 > 0 ? Int($0) : nil })
+        PortScanner.shared.refreshAgentPorts(workspaceId: tab.id, agentPIDs: agentPIDs)
     }
 
     private func sidebarMetadataLine(_ entry: SidebarStatusEntry) -> String {
