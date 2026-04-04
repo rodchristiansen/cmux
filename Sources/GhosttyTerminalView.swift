@@ -470,7 +470,118 @@ func cmuxPasteboardImagePathForTesting(_ pasteboard: NSPasteboard) -> String? {
     GhosttyPasteboardHelper.saveClipboardImageIfNeeded(from: pasteboard)
 }
 
+func cmuxResolveQuicklookPathForTesting(
+    _ rawText: String,
+    cwd: String,
+    existingPaths: Set<String>
+) -> String? {
+    cmuxResolveQuicklookPath(
+        rawText,
+        cwd: cwd,
+        fileExists: { path in
+            existingPaths.contains((path as NSString).standardizingPath)
+        }
+    )
+}
 #endif
+
+private func cmuxResolveQuicklookPath(
+    _ rawText: String,
+    cwd: String?,
+    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+) -> String? {
+    let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    var seenPaths: Set<String> = []
+    for token in cmuxQuicklookPathCandidates(from: trimmed) {
+        let normalizedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedToken.isEmpty else { continue }
+
+        let expandedToken = (normalizedToken as NSString).expandingTildeInPath
+        let candidatePath: String
+        if expandedToken.hasPrefix("/") {
+            candidatePath = expandedToken
+        } else {
+            guard let cwd, !cwd.isEmpty else { continue }
+            candidatePath = (cwd as NSString).appendingPathComponent(expandedToken)
+        }
+
+        let standardizedPath = (candidatePath as NSString).standardizingPath
+        guard seenPaths.insert(standardizedPath).inserted else { continue }
+        if fileExists(standardizedPath) {
+            return standardizedPath
+        }
+    }
+
+    return nil
+}
+
+private func cmuxQuicklookPathCandidates(from rawText: String) -> [String] {
+    var candidates: [String] = []
+
+    func append(_ candidate: String?) {
+        guard let candidate else { return }
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !candidates.contains(trimmed) else { return }
+        candidates.append(trimmed)
+    }
+
+    append(rawText)
+
+    let unescaped = cmuxUnescapeShellToken(rawText)
+    if unescaped != rawText {
+        append(unescaped)
+    }
+
+    if let unquoted = cmuxUnquoteShellToken(rawText) {
+        append(unquoted)
+        let unescapedUnquoted = cmuxUnescapeShellToken(unquoted)
+        if unescapedUnquoted != unquoted {
+            append(unescapedUnquoted)
+        }
+    }
+
+    return candidates
+}
+
+private func cmuxUnquoteShellToken(_ token: String) -> String? {
+    guard token.count >= 2,
+          let first = token.first,
+          let last = token.last,
+          first == last,
+          first == "'" || first == "\"" else {
+        return nil
+    }
+    return String(token.dropFirst().dropLast())
+}
+
+private func cmuxUnescapeShellToken(_ token: String) -> String {
+    var output = String.UnicodeScalarView()
+    output.reserveCapacity(token.unicodeScalars.count)
+    var escaping = false
+
+    for scalar in token.unicodeScalars {
+        if escaping {
+            output.append(scalar)
+            escaping = false
+            continue
+        }
+
+        if scalar == "\\" {
+            escaping = true
+            continue
+        }
+
+        output.append(scalar)
+    }
+
+    if escaping {
+        output.append(UnicodeScalar(0x5C)!)
+    }
+
+    return String(output)
+}
 
 enum TerminalOpenURLTarget: Equatable {
     case embeddedBrowser(URL)
@@ -6843,8 +6954,6 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard text.text_len > 0, let ptr = text.text else { return nil }
         let wordData = Data(bytes: ptr, count: Int(text.text_len))
         guard let decodedWord = String(bytes: wordData, encoding: .utf8) else { return nil }
-        let word = decodedWord.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !word.isEmpty, !word.hasPrefix("/") else { return nil }
 
         guard let termSurface = terminalSurface,
               let workspace = termSurface.owningWorkspace(),
@@ -6861,11 +6970,8 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             let dir = workspace.currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
             return dir.isEmpty ? nil : dir
         }()
-        guard let cwd else { return nil }
 
-        let resolvedPath = (cwd as NSString).appendingPathComponent(word)
-        guard FileManager.default.fileExists(atPath: resolvedPath) else { return nil }
-        return resolvedPath
+        return cmuxResolveQuicklookPath(decodedWord, cwd: cwd)
     }
 
     /// Update the pointing-hand cursor when Cmd-hovering over a bare filename
