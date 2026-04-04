@@ -4707,6 +4707,11 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private let _scrollbarLock = NSLock()
     var cellSize: CGSize = .zero
 
+    @MainActor
+    func isAlternateScreenActiveForScrollGeometry() -> Bool? {
+        nil
+    }
+
     /// Coalesce high-frequency scrollbar updates into a single main-thread
     /// dispatch.  The action callback (which may fire thousands of times per
     /// second during bulk output like `seq 1 100000`) stores the latest value

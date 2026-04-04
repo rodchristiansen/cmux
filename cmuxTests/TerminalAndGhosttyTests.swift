@@ -2032,6 +2032,14 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         }
     }
 
+    private final class AlternateScreenSurfaceView: GhosttyNSView {
+        var alternateScreenActive = false
+
+        override func isAlternateScreenActiveForScrollGeometry() -> Bool? {
+            alternateScreenActive
+        }
+    }
+
     private func makeScrollbar(total: UInt64, offset: UInt64, len: UInt64) -> GhosttyScrollbar {
         GhosttyScrollbar(
             c: ghostty_action_scrollbar_s(
@@ -2296,6 +2304,43 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
             expectedScrollbackHeight,
             accuracy: 0.01,
             "Scrollbar-driven viewport origin should be derived from point-sized rows"
+        )
+    }
+
+    func testAlternateScreenIgnoresScrollbarDocumentGrowth() throws {
+        let surfaceView = AlternateScreenSurfaceView(frame: NSRect(x: 0, y: 0, width: 160, height: 100))
+        surfaceView.cellSize = CGSize(width: 20, height: 20)
+        surfaceView.alternateScreenActive = true
+
+        let (window, scrollView) = try makeHostedScrollView(surfaceView: surfaceView)
+        defer { window.orderOut(nil) }
+
+        let expectedDocumentHeight = scrollView.contentSize.height
+        NotificationCenter.default.post(
+            name: .ghosttyDidUpdateScrollbar,
+            object: surfaceView,
+            userInfo: [GhosttyNotificationKey.scrollbar: makeScrollbar(total: 12, offset: 0, len: 10)]
+        )
+
+        XCTAssertTrue(
+            waitUntil(description: "alternate-screen ignores scrollbar growth") {
+                let documentHeight = scrollView.documentView?.frame.height ?? 0
+                let originY = scrollView.contentView.bounds.origin.y
+                return abs(documentHeight - expectedDocumentHeight) < 0.01
+                    && abs(originY) < 0.01
+            }
+        )
+        XCTAssertEqual(
+            scrollView.documentView?.frame.height ?? 0,
+            expectedDocumentHeight,
+            accuracy: 0.01,
+            "Alternate-screen scrollbar packets should not grow the document height"
+        )
+        XCTAssertEqual(
+            scrollView.contentView.bounds.origin.y,
+            0,
+            accuracy: 0.01,
+            "Alternate-screen scrollbar packets should not offset the viewport"
         )
     }
 
