@@ -4935,6 +4935,18 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         let rawToken: String
     }
 
+    private func makeWordPathResolution(
+        path: String,
+        source: WordPathResolutionSource,
+        rawToken: String
+    ) -> WordPathResolution {
+        WordPathResolution(
+            path: path,
+            source: source,
+            rawToken: rawToken
+        )
+    }
+
     fileprivate static func focusLog(_ message: String) {
         guard focusDebugEnabled else { return }
         FocusLogStore.shared.append(message)
@@ -7141,15 +7153,22 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         var text = ghostty_text_s()
         if ghostty_surface_quicklook_word(surface, &text) {
             defer { ghostty_surface_free_text(surface, &text) }
+            var quicklookResolution: WordPathResolution?
             if text.text_len > 0, let ptr = text.text {
                 let wordData = Data(bytes: ptr, count: Int(text.text_len))
-                if let decodedWord = String(bytes: wordData, encoding: .utf8),
-                   let resolvedPath = cmuxResolveQuicklookPath(decodedWord, cwd: cwd) {
-                    return WordPathResolution(
-                        path: resolvedPath,
-                        source: .quicklook,
-                        rawToken: decodedWord
-                    )
+                if let decodedWord = String(bytes: wordData, encoding: .utf8) {
+#if DEBUG
+                    let resolvedQuicklookWord = cmuxTerminalCmdClickQuicklookOverride(decodedWord)
+#else
+                    let resolvedQuicklookWord = decodedWord
+#endif
+                    if let resolvedPath = cmuxResolveQuicklookPath(resolvedQuicklookWord, cwd: cwd) {
+                        quicklookResolution = makeWordPathResolution(
+                            path: resolvedPath,
+                            source: .quicklook,
+                            rawToken: resolvedQuicklookWord
+                        )
+                    }
                 }
             }
 
@@ -7160,13 +7179,35 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                    workspace: workspace,
                    terminalSurface: termSurface
                ) {
+                // Ghostty quicklook can return a resolvable but incomplete token for
+                // multi-word `ls` entries. Prefer the viewport-expanded path when it
+                // disagrees, and fall back to quicklook when expansion fails.
+                if let quicklookResolution, quicklookResolution.path == expandedResolution.path {
+                    return quicklookResolution
+                }
                 return expandedResolution
+            }
+
+            if let quicklookResolution {
+                return quicklookResolution
             }
         }
 
         guard let snapshotPoint = preferredPointerPoint(from: point) else { return nil }
         return resolveVisibleWordPath(at: snapshotPoint, cwd: cwd, workspace: workspace, terminalSurface: termSurface)
     }
+
+    #if DEBUG
+    private func cmuxTerminalCmdClickQuicklookOverride(_ decodedWord: String) -> String {
+        let env = ProcessInfo.processInfo.environment
+        guard let override = env["CMUX_UI_TEST_TERMINAL_CMD_CLICK_QUICKLOOK_OVERRIDE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !override.isEmpty else {
+            return decodedWord
+        }
+        return override
+    }
+    #endif
 
     /// Update the pointing-hand cursor when Cmd-hovering over a bare filename
     /// that exists in the terminal's CWD.
@@ -7313,7 +7354,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             return nil
         }
 
-        return WordPathResolution(
+        return makeWordPathResolution(
             path: resolution.path,
             source: .snapshot,
             rawToken: resolution.rawToken
@@ -7361,7 +7402,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             return nil
         }
 
-        return WordPathResolution(
+        return makeWordPathResolution(
             path: resolution.path,
             source: .snapshot,
             rawToken: resolution.rawToken
