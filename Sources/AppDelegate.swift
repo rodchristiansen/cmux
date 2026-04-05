@@ -5025,6 +5025,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
     }
 
+    /// Set the Ghostty color scheme on every terminal surface so that
+    /// background surfaces that missed `viewDidChangeEffectiveAppearance`
+    /// have the correct `config_conditional_state` before a config update.
+    func syncAllSurfaceColorSchemes(to scheme: ghostty_color_scheme_e) {
+        forEachTerminalPanel { terminalPanel in
+            guard let surface = terminalPanel.surface.surface else { return }
+            ghostty_surface_set_color_scheme(surface, scheme)
+        }
+    }
+
     private func forEachTerminalPanel(_ body: (TerminalPanel) -> Void) {
         var seenManagers: Set<ObjectIdentifier> = []
 
