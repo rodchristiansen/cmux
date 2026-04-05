@@ -962,6 +962,7 @@ class GhosttyApp {
     /// pending tick on the main queue at any time.
     private var _tickScheduled = false
     private let _tickLock = NSLock()
+    private var isReloadingConfiguration = false
     private(set) var defaultBackgroundColor: NSColor = .windowBackgroundColor
     private(set) var defaultBackgroundOpacity: Double = 1.0
     private static func resolveBackgroundLogURL(
@@ -2053,6 +2054,12 @@ class GhosttyApp {
         source: String = "unspecified",
         reloadSettingsFromFile: Bool = true
     ) {
+        // Guard against reentrancy from ghostty_surface_set_color_scheme
+        // triggering notifyConfigConditionalState → reload_config actions.
+        guard !isReloadingConfiguration else { return }
+        isReloadingConfiguration = true
+        defer { isReloadingConfiguration = false }
+
         if reloadSettingsFromFile {
             KeyboardShortcutSettings.settingsFileStore.reload()
         }
@@ -2076,6 +2083,21 @@ class GhosttyApp {
             return
         }
         loadDefaultConfigFilesWithLegacyFallback(newConfig)
+
+        // Sync all surfaces to the current color scheme before applying
+        // the new config. Background surfaces that missed
+        // viewDidChangeEffectiveAppearance still have a stale
+        // config_conditional_state, which would resolve to the wrong
+        // theme colors in ghostty_app_update_config.
+        let currentScheme = GhosttyConfig.currentColorSchemePreference()
+        let ghosttyScheme: ghostty_color_scheme_e = currentScheme == .dark
+            ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                AppDelegate.shared?.syncAllSurfaceColorSchemes(to: ghosttyScheme)
+            }
+        }
+
         ghostty_app_update_config(app, newConfig)
         updateDefaultBackground(
             from: newConfig,
