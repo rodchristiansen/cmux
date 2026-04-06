@@ -1501,6 +1501,19 @@ final class WindowTerminalPortal: NSObject {
                 hostedView.reconcileGeometryNow()
                 hostedView.refreshSurfaceNow(reason: "portal.frameChange")
             }
+
+            // On macOS 26, round the terminal's leading corners when a sidebar
+            // is visible to its left, matching the NavigationSplitView glass shape.
+            if #available(macOS 26.0, *) {
+                let hasSidebarToLeft = targetFrame.origin.x > 20
+                let desiredRadius: CGFloat = hasSidebarToLeft ? 16 : 0
+                if hostedView.layer?.cornerRadius != desiredRadius {
+                    hostedView.layer?.cornerRadius = desiredRadius
+                    hostedView.layer?.maskedCorners = hasSidebarToLeft
+                        ? [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+                        : []
+                }
+            }
         }
 
         if shouldDeferReveal {
