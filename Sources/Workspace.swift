@@ -6779,7 +6779,14 @@ final class Workspace: Identifiable, ObservableObject {
         from backgroundColor: NSColor,
         backgroundOpacity: Double
     ) -> BonsplitConfiguration.Appearance {
-        BonsplitConfiguration.Appearance(
+        let hideTabBar: Bool
+        if #available(macOS 26.0, *) {
+            hideTabBar = true
+        } else {
+            hideTabBar = false
+        }
+        return BonsplitConfiguration.Appearance(
+            tabBarHeight: hideTabBar ? 0 : 33,
             splitButtonTooltips: Self.currentSplitButtonTooltips(),
             enableAnimations: false,
             chromeColors: .init(

@@ -11,20 +11,37 @@ import Darwin
 
 final class MainWindowHostingView<Content: View>: NSHostingView<Content> {
     private let zeroSafeAreaLayoutGuide = NSLayoutGuide()
+    private let usesSystemSafeArea: Bool
 
-    override var safeAreaInsets: NSEdgeInsets { NSEdgeInsetsZero }
-    override var safeAreaRect: NSRect { bounds }
-    override var safeAreaLayoutGuide: NSLayoutGuide { zeroSafeAreaLayoutGuide }
+    override var safeAreaInsets: NSEdgeInsets {
+        usesSystemSafeArea ? super.safeAreaInsets : NSEdgeInsetsZero
+    }
+    override var safeAreaRect: NSRect {
+        usesSystemSafeArea ? super.safeAreaRect : bounds
+    }
+    override var safeAreaLayoutGuide: NSLayoutGuide {
+        usesSystemSafeArea ? super.safeAreaLayoutGuide : zeroSafeAreaLayoutGuide
+    }
 
     required init(rootView: Content) {
+        if #available(macOS 26.0, *) {
+            // On macOS 26, use system safe area so:
+            // - Sidebar (.ignoresSafeArea) extends under the glass titlebar
+            // - Terminal content respects the titlebar and stays below it
+            self.usesSystemSafeArea = true
+        } else {
+            self.usesSystemSafeArea = false
+        }
         super.init(rootView: rootView)
-        addLayoutGuide(zeroSafeAreaLayoutGuide)
-        NSLayoutConstraint.activate([
-            zeroSafeAreaLayoutGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
-            zeroSafeAreaLayoutGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
-            zeroSafeAreaLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
-            zeroSafeAreaLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        if !usesSystemSafeArea {
+            addLayoutGuide(zeroSafeAreaLayoutGuide)
+            NSLayoutConstraint.activate([
+                zeroSafeAreaLayoutGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
+                zeroSafeAreaLayoutGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
+                zeroSafeAreaLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
+                zeroSafeAreaLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
     }
 
     @available(*, unavailable)
@@ -2581,7 +2598,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             syncMenuBarExtraVisibility()
             updateController.startUpdaterIfNeeded()
         }
-        titlebarAccessoryController.start()
+        if #available(macOS 26.0, *) {
+            // On macOS 26, native SwiftUI .toolbar handles titlebar controls.
+        } else {
+            titlebarAccessoryController.start()
+        }
         windowDecorationsController.start()
         installMainWindowKeyObserver()
         refreshGhosttyGotoSplitShortcuts()
@@ -7084,10 +7105,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             window.collectionBehavior.insert(.fullScreenDisallowsTiling)
         }
         window.title = ""
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
+        if #available(macOS 26.0, *) {
+            // On macOS 26+, let the system render the native glass titlebar
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = false
+        } else {
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+        }
         window.isMovableByWindowBackground = false
-        window.isMovable = false
+        if #available(macOS 26.0, *) {
+            window.isMovable = true
+        } else {
+            window.isMovable = false
+        }
         let restoredFrame = resolvedWindowFrame(from: sessionWindowSnapshot)
         if let restoredFrame {
             window.setFrame(restoredFrame, display: false)
@@ -10119,6 +10150,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
     func attachUpdateAccessory(to window: NSWindow) {
+        if #available(macOS 26.0, *) {
+            // On macOS 26, toolbar buttons are native SwiftUI .toolbar items
+            // in the NavigationSplitView. Skip the old titlebar accessory controllers.
+            return
+        }
         titlebarAccessoryController.start()
         titlebarAccessoryController.attach(to: window)
     }

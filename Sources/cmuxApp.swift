@@ -316,40 +316,42 @@ struct cmuxApp: App {
         defaults.set(targetVersion, forKey: migrationKey)
     }
 
-    var body: some Scene {
-        WindowGroup {
-            ContentView(updateViewModel: appDelegate.updateViewModel, windowId: primaryWindowId)
-                .environmentObject(tabManager)
-                .environmentObject(notificationStore)
-                .environmentObject(sidebarState)
-                .environmentObject(sidebarSelectionState)
-                .environmentObject(cmuxConfigStore)
-                .onAppear {
+    @ViewBuilder
+    private var mainWindowContent: some View {
+        ContentView(updateViewModel: appDelegate.updateViewModel, windowId: primaryWindowId)
+            .environmentObject(tabManager)
+            .environmentObject(notificationStore)
+            .environmentObject(sidebarState)
+            .environmentObject(sidebarSelectionState)
+            .environmentObject(cmuxConfigStore)
+            .onAppear {
 #if DEBUG
-                    if ProcessInfo.processInfo.environment["CMUX_UI_TEST_MODE"] == "1" {
-                        UpdateLogStore.shared.append("ui test: cmuxApp onAppear")
-                    }
+                if ProcessInfo.processInfo.environment["CMUX_UI_TEST_MODE"] == "1" {
+                    UpdateLogStore.shared.append("ui test: cmuxApp onAppear")
+                }
 #endif
-                    // Start the Unix socket controller for programmatic access
-                    updateSocketController()
-                    appDelegate.configure(tabManager: tabManager, notificationStore: notificationStore, sidebarState: sidebarState)
-                    cmuxConfigStore.wireDirectoryTracking(tabManager: tabManager)
-                    cmuxConfigStore.loadAll()
-                    applyAppearance()
-                    if ProcessInfo.processInfo.environment["CMUX_UI_TEST_SHOW_SETTINGS"] == "1" {
-                        DispatchQueue.main.async {
-                            appDelegate.openPreferencesWindow(debugSource: "uiTestShowSettings")
-                        }
+                // Start the Unix socket controller for programmatic access
+                updateSocketController()
+                appDelegate.configure(tabManager: tabManager, notificationStore: notificationStore, sidebarState: sidebarState)
+                cmuxConfigStore.wireDirectoryTracking(tabManager: tabManager)
+                cmuxConfigStore.loadAll()
+                applyAppearance()
+                if ProcessInfo.processInfo.environment["CMUX_UI_TEST_SHOW_SETTINGS"] == "1" {
+                    DispatchQueue.main.async {
+                        appDelegate.openPreferencesWindow(debugSource: "uiTestShowSettings")
                     }
                 }
-                .onChange(of: appearanceMode) { _ in
-                    applyAppearance()
-                }
-                .onChange(of: socketControlMode) { _ in
-                    updateSocketController()
-                }
-        }
-        .windowStyle(.hiddenTitleBar)
+            }
+            .onChange(of: appearanceMode) { _ in
+                applyAppearance()
+            }
+            .onChange(of: socketControlMode) { _ in
+                updateSocketController()
+            }
+    }
+
+    var body: some Scene {
+        WindowGroup { mainWindowContent }
         .commands {
             CommandGroup(replacing: .appSettings) {
                 splitCommandButton(title: String(localized: "menu.app.settings", defaultValue: "Settings…"), shortcut: menuShortcut(for: .openSettings)) {
@@ -3710,6 +3712,13 @@ enum AppIconSettings {
     }
 
     static func applyIcon(_ mode: AppIconMode, environment: Environment = .live()) {
+        // On macOS 26+, the system handles dark/light/tinted icons natively
+        // via the asset catalog appearances. Don't override with custom code.
+        if #available(macOS 26.0, *) {
+            environment.stopAppearanceObservation()
+            return
+        }
+
         switch mode {
         case .automatic:
             environment.startAppearanceObservation()

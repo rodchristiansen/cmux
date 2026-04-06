@@ -2676,9 +2676,17 @@ struct ContentView: View {
                 .allowsHitTesting(sidebarSelectionState.selection == .notifications)
                 .accessibilityHidden(sidebarSelectionState.selection != .notifications)
         }
-        .padding(.top, effectiveTitlebarPadding)
+        .padding(.top, {
+            if #available(macOS 26.0, *) {
+                return 0  // Native glass titlebar handles spacing via safe area
+            }
+            return effectiveTitlebarPadding
+        }())
         .overlay(alignment: .top) {
-            if !isMinimalMode {
+            if #available(macOS 26.0, *) {
+                // On macOS 26, native glass titlebar + SwiftUI .toolbar handles controls
+                EmptyView()
+            } else if !isMinimalMode {
                 // Titlebar overlay is only over terminal content, not the sidebar.
                 customTitlebar
             }
@@ -2869,6 +2877,53 @@ struct ContentView: View {
     }
 
     private var contentAndSidebarLayout: AnyView {
+        // On macOS 26, use NavigationSplitView so the system recognizes
+        // the sidebar column and applies native Liquid Glass treatment.
+        if #available(macOS 26.0, *) {
+            return AnyView(
+                NavigationSplitView(columnVisibility: Binding(
+                    get: { sidebarState.isVisible ? .all : .detailOnly },
+                    set: { newValue in
+                        let shouldShow = (newValue != .detailOnly)
+                        if shouldShow != sidebarState.isVisible {
+                            _ = sidebarState.toggle()
+                        }
+                    }
+                )) {
+                    sidebarView
+                        .navigationSplitViewColumnWidth(min: 120, ideal: sidebarWidth, max: 400)
+                } detail: {
+                    terminalContentWithSidebarDropOverlay
+                        .padding(8)
+                }
+                .navigationSplitViewStyle(.prominentDetail)
+                .background(SplitViewDividerHider())
+                .toolbar {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        Button {
+                            _ = AppDelegate.shared?.toggleNotificationsPopover(animated: true)
+                        } label: {
+                            Image(systemName: "bell")
+                        }
+                        .buttonStyle(.accessoryBarAction)
+                        .accessibilityIdentifier("toolbar.notifications")
+
+                        Button {
+                            if let appDelegate = AppDelegate.shared {
+                                if appDelegate.addWorkspaceInPreferredMainWindow(debugSource: "toolbar.newTab") == nil {
+                                    appDelegate.openNewMainWindow(nil)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .buttonStyle(.accessoryBarAction)
+                        .accessibilityIdentifier("toolbar.newTab")
+                    }
+                }
+            )
+        }
+
         let layout: AnyView
         // When matching terminal background, use HStack so both sidebar and terminal
         // sit directly on the window background with no intermediate layers.
@@ -3429,13 +3484,25 @@ struct ContentView: View {
 
         view = AnyView(view.background(WindowAccessor { [sidebarBlendMode, bgGlassEnabled, bgGlassTintHex, bgGlassTintOpacity] window in
             window.identifier = NSUserInterfaceItemIdentifier(windowIdentifier)
-            window.titlebarAppearsTransparent = true
-            // Keep window immovable; the sidebar's WindowDragHandleView handles
-            // drag-to-move via performDrag with temporary movable override.
-            // isMovableByWindowBackground=true breaks tab reordering, and
-            // isMovable=true blocks clicks on sidebar buttons in minimal mode.
-            window.isMovableByWindowBackground = false
-            window.isMovable = false
+            if #available(macOS 26.0, *) {
+                window.titlebarAppearsTransparent = false
+                window.titlebarSeparatorStyle = .none
+            } else {
+                window.titlebarAppearsTransparent = true
+            }
+            if #available(macOS 26.0, *) {
+                // On macOS 26 without fullSizeContentView, the system titlebar
+                // handles drag natively.
+                window.isMovable = true
+                window.isMovableByWindowBackground = false
+            } else {
+                // Keep window immovable; the sidebar's WindowDragHandleView handles
+                // drag-to-move via performDrag with temporary movable override.
+                // isMovableByWindowBackground=true breaks tab reordering, and
+                // isMovable=true blocks clicks on sidebar buttons in minimal mode.
+                window.isMovableByWindowBackground = false
+                window.isMovable = false
+            }
             window.styleMask.insert(.fullSizeContentView)
 
             // Track this window for fullscreen notifications
@@ -3467,37 +3534,41 @@ struct ContentView: View {
             // User settings decide whether window glass is active. The native Tahoe
             // NSGlassEffectView path vs the older NSVisualEffectView fallback is chosen
             // inside WindowGlassEffect.apply.
+            // On macOS 26+, the system handles glass compositing natively.
+            // Do NOT manually insert NSGlassEffectView -- it fights the system.
             let currentThemeBackground = GhosttyBackgroundTheme.currentColor()
-            let shouldApplyWindowGlass = cmuxShouldApplyWindowGlass(
-                sidebarBlendMode: sidebarBlendMode,
-                bgGlassEnabled: bgGlassEnabled,
-                glassEffectAvailable: WindowGlassEffect.isAvailable
-            )
-            let shouldForceTransparentHosting =
-                shouldApplyWindowGlass || currentThemeBackground.alphaComponent < 0.999
-
-            if shouldForceTransparentHosting {
-                window.isOpaque = false
-                // Keep the window clear whenever translucency is active. Relying only on
-                // terminal focus-driven updates can leave stale opaque window fills.
-                window.backgroundColor = NSColor.white.withAlphaComponent(0.001)
-                // Configure contentView hierarchy for transparency.
-                if let contentView = window.contentView {
-                    makeViewHierarchyTransparent(contentView)
-                }
-            } else {
-                // Browser-focused workspaces may not have an active terminal panel to refresh
-                // the NSWindow background. Keep opaque theme changes applied here as well.
+            if #available(macOS 26.0, *) {
+                // On macOS 26, NavigationSplitView handles glass compositing.
+                // Keep standard window background for the terminal area.
                 window.backgroundColor = currentThemeBackground
                 window.isOpaque = currentThemeBackground.alphaComponent >= 0.999
-            }
-
-            if shouldApplyWindowGlass {
-                // Apply liquid glass effect to the window with tint from settings
-                let tintColor = (NSColor(hex: bgGlassTintHex) ?? .black).withAlphaComponent(bgGlassTintOpacity)
-                WindowGlassEffect.apply(to: window, tintColor: tintColor)
-            } else {
                 WindowGlassEffect.remove(from: window)
+            } else {
+                let shouldApplyWindowGlass = cmuxShouldApplyWindowGlass(
+                    sidebarBlendMode: sidebarBlendMode,
+                    bgGlassEnabled: bgGlassEnabled,
+                    glassEffectAvailable: WindowGlassEffect.isAvailable
+                )
+                let shouldForceTransparentHosting =
+                    shouldApplyWindowGlass || currentThemeBackground.alphaComponent < 0.999
+
+                if shouldForceTransparentHosting {
+                    window.isOpaque = false
+                    window.backgroundColor = NSColor.white.withAlphaComponent(0.001)
+                    if let contentView = window.contentView {
+                        makeViewHierarchyTransparent(contentView)
+                    }
+                } else {
+                    window.backgroundColor = currentThemeBackground
+                    window.isOpaque = currentThemeBackground.alphaComponent >= 0.999
+                }
+
+                if shouldApplyWindowGlass {
+                    let tintColor = (NSColor(hex: bgGlassTintHex) ?? .black).withAlphaComponent(bgGlassTintOpacity)
+                    WindowGlassEffect.apply(to: window, tintColor: tintColor)
+                } else {
+                    WindowGlassEffect.remove(from: window)
+                }
             }
             AppDelegate.shared?.attachUpdateAccessory(to: window)
             AppDelegate.shared?.applyWindowDecorations(to: window)
@@ -10105,10 +10176,6 @@ struct VerticalTabsSidebar: View {
                     .frame(width: 0, height: 0)
                 )
                 .overlay(alignment: .top) {
-                    SidebarTopScrim(height: trafficLightPadding + 20)
-                        .allowsHitTesting(false)
-                }
-                .overlay(alignment: .top) {
                     // Match native titlebar behavior in the sidebar top strip:
                     // drag-to-move and double-click action (zoom/minimize).
                     WindowDragHandleView()
@@ -10130,9 +10197,19 @@ struct VerticalTabsSidebar: View {
         }
         .accessibilityIdentifier("Sidebar")
         .ignoresSafeArea()
-        .background(SidebarBackdrop().ignoresSafeArea())
+        .background {
+            if #available(macOS 26.0, *) {
+                // On macOS 26, NavigationSplitView provides native glass.
+                // Don't paint any background over it.
+                Color.clear.ignoresSafeArea()
+            } else {
+                SidebarBackdrop().ignoresSafeArea()
+            }
+        }
         .overlay(alignment: .trailing) {
-            SidebarTrailingBorder()
+            if #unavailable(macOS 26.0) {
+                SidebarTrailingBorder()
+            }
         }
         .background(
             WindowAccessor { window in
@@ -12196,11 +12273,30 @@ private struct SidebarFooterIconButtonStyleBody: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(backgroundOpacity))
             )
+            .modifier(FooterButtonGlassModifier(isHovered: isHovered))
             .onHover { hovering in
                 isHovered = hovering
             }
             .animation(.easeOut(duration: 0.12), value: isHovered)
             .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
+/// On macOS 26+, adds a subtle Liquid Glass effect to sidebar footer buttons on hover.
+private struct FooterButtonGlassModifier: ViewModifier {
+    let isHovered: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *), isHovered {
+            content.glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 
@@ -12227,39 +12323,6 @@ private struct SidebarDevFooter: View {
 }
 #endif
 
-private struct SidebarTopScrim: View {
-    let height: CGFloat
-
-    var body: some View {
-        SidebarTopBlurEffect()
-            .frame(height: height)
-            .mask(
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0.95),
-                        Color.black.opacity(0.75),
-                        Color.black.opacity(0.35),
-                        Color.clear
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-    }
-}
-
-private struct SidebarTopBlurEffect: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.blendingMode = .withinWindow
-        view.material = .underWindowBackground
-        view.state = .active
-        view.isEmphasized = false
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
 
 private struct SidebarScrollViewResolver: NSViewRepresentable {
     let onResolve: (NSScrollView?) -> Void
@@ -12578,6 +12641,26 @@ enum SidebarTrailingAccessoryWidthPolicy {
         }
 
         return canCloseWorkspace ? closeButtonWidth : 0
+    }
+}
+
+/// On macOS 26+, applies a native Liquid Glass effect to the active tab background.
+/// Applied as a modifier on the background shape so it doesn't add properties to TabItemView
+/// and preserves the Equatable optimization.
+private struct TabItemGlassModifier: ViewModifier {
+    let isActive: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *), isActive {
+            content.glassEffect(.regular.interactive(), in: .rect(cornerRadius: 6))
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 
@@ -13195,6 +13278,7 @@ private struct TabItemView: View, Equatable {
                             .offset(x: -1)
                     }
                 }
+                .modifier(TabItemGlassModifier(isActive: isActive))
         )
         .padding(.horizontal, 6)
         .background {
@@ -15594,6 +15678,67 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
     }
 }
 
+/// Fills the background with the terminal's current background color,
+/// staying in sync with theme changes. Used behind NavigationSplitView
+/// so the sidebar's rounded corners blend seamlessly with the window.
+@available(macOS 26.0, *)
+private struct TerminalBackgroundFill: View {
+    @State private var bgColor = Color(nsColor: GhosttyBackgroundTheme.currentColor())
+
+    var body: some View {
+        bgColor
+            .onReceive(NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)) { _ in
+                bgColor = Color(nsColor: GhosttyBackgroundTheme.currentColor())
+            }
+    }
+}
+
+/// Finds NSSplitView(s) inside NavigationSplitView and hides dividers
+/// by installing a custom delegate that draws nothing.
+@available(macOS 26.0, *)
+private struct SplitViewDividerHider: NSViewRepresentable {
+    func makeNSView(context: Context) -> SplitViewDividerHiderView {
+        SplitViewDividerHiderView()
+    }
+
+    func updateNSView(_ nsView: SplitViewDividerHiderView, context: Context) {
+        nsView.scheduleHide()
+    }
+}
+
+@available(macOS 26.0, *)
+final class SplitViewDividerHiderView: NSView {
+    private var installed = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scheduleHide()
+    }
+
+    func scheduleHide() {
+        DispatchQueue.main.async { [weak self] in
+            self?.hideDividers()
+        }
+    }
+
+    private func hideDividers() {
+        guard let window else { return }
+        patchSplitViews(in: window.contentView)
+    }
+
+    private func patchSplitViews(in view: NSView?) {
+        guard let view else { return }
+        if let splitView = view as? NSSplitView {
+            splitView.dividerStyle = .thin
+            // Override the divider color to clear
+            splitView.setValue(NSColor.clear, forKey: "dividerColor")
+        }
+        for subview in view.subviews {
+            patchSplitViews(in: subview)
+        }
+    }
+}
+
 /// 1px trailing border on the sidebar, derived from the terminal chrome background
 /// using the same logic as bonsplit's TabBarColors.nsColorSeparator:
 /// dark bg → lighten RGB by 0.16 at 0.36 alpha; light bg → darken by 0.12 at 0.26 alpha.
@@ -15689,9 +15834,6 @@ private struct SidebarBackdrop: View {
             )
         }
 
-        let materialOption = SidebarMaterialOption(rawValue: sidebarMaterial)
-        let blendingMode = SidebarBlendModeOption(rawValue: sidebarBlendMode)?.mode ?? .behindWindow
-        let state = SidebarStateOption(rawValue: sidebarState)?.state ?? .active
         let resolvedHex: String = {
             if colorScheme == .dark, let dark = sidebarTintHexDark {
                 return dark
@@ -15701,6 +15843,17 @@ private struct SidebarBackdrop: View {
             return sidebarTintHex
         }()
         let tintColor = (NSColor(hex: resolvedHex) ?? NSColor(hex: sidebarTintHex) ?? .black).withAlphaComponent(sidebarTintOpacity)
+
+        // On macOS 26+, NavigationSplitView handles the sidebar glass natively.
+        // Return a clear background so it doesn't fight the system glass.
+        if #available(macOS 26.0, *) {
+            return AnyView(Color.clear)
+        }
+
+        // macOS 13-15: use configurable NSVisualEffectView materials
+        let materialOption = SidebarMaterialOption(rawValue: sidebarMaterial)
+        let blendingMode = SidebarBlendModeOption(rawValue: sidebarBlendMode)?.mode ?? .behindWindow
+        let state = SidebarStateOption(rawValue: sidebarState)?.state ?? .active
         let useLiquidGlass = materialOption?.usesLiquidGlass ?? false
         let useWindowLevelGlass = useLiquidGlass && blendingMode == .behindWindow
 
