@@ -1496,16 +1496,14 @@ final class WindowTerminalPortal: NSObject {
                 hostedView.bounds = expectedBounds
                 geometryChanged = true
             }
-            CATransaction.commit()
-            if geometryChanged {
-                hostedView.reconcileGeometryNow()
-                hostedView.refreshSurfaceNow(reason: "portal.frameChange")
-            }
-
             // On macOS 26, round the terminal's leading corners when a sidebar
             // is visible to its left, matching the NavigationSplitView glass shape.
+            // Applied inside the CATransaction to prevent animation flicker.
             if #available(macOS 26.0, *) {
-                let hasSidebarToLeft = targetFrame.origin.x > 20
+                // Sidebar minimum width is 120pt; any x-offset above this
+                // threshold indicates a sidebar is present to the left.
+                let sidebarDetectionThreshold: CGFloat = 20
+                let hasSidebarToLeft = targetFrame.origin.x > sidebarDetectionThreshold
                 let desiredRadius: CGFloat = hasSidebarToLeft ? 16 : 0
                 if hostedView.layer?.cornerRadius != desiredRadius {
                     hostedView.layer?.cornerRadius = desiredRadius
@@ -1513,6 +1511,11 @@ final class WindowTerminalPortal: NSObject {
                         ? [.layerMinXMinYCorner, .layerMinXMaxYCorner]
                         : []
                 }
+            }
+            CATransaction.commit()
+            if geometryChanged {
+                hostedView.reconcileGeometryNow()
+                hostedView.refreshSurfaceNow(reason: "portal.frameChange")
             }
         }
 

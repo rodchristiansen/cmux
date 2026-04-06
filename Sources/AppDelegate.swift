@@ -2598,11 +2598,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             syncMenuBarExtraVisibility()
             updateController.startUpdaterIfNeeded()
         }
-        if #available(macOS 26.0, *) {
-            // On macOS 26, native SwiftUI .toolbar handles titlebar controls.
-        } else {
-            titlebarAccessoryController.start()
-        }
+        // Start the titlebar accessory controller on all versions so the
+        // notifications popover infrastructure is available. On macOS 26
+        // the visual titlebar items come from SwiftUI .toolbar, but the
+        // popover is still managed by the accessory controller.
+        titlebarAccessoryController.start()
         windowDecorationsController.start()
         installMainWindowKeyObserver()
         refreshGhosttyGotoSplitShortcuts()
@@ -10152,7 +10152,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func attachUpdateAccessory(to window: NSWindow) {
         if #available(macOS 26.0, *) {
             // On macOS 26, toolbar buttons are native SwiftUI .toolbar items
-            // in the NavigationSplitView. Skip the old titlebar accessory controllers.
+            // in the NavigationSplitView. Skip attaching the old titlebar
+            // accessory views, but the controller is already started (for
+            // notifications popover support).
             return
         }
         titlebarAccessoryController.start()
