@@ -193,9 +193,9 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
         if #available(macOS 26.0, *) {
             if itemIdentifier == sidebarToggleIdentifier {
                 let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-                item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle Sidebar")
-                item.label = "Sidebar"
-                item.toolTip = "Toggle Sidebar"
+                item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: String(localized: "toolbar.sidebar.accessibilityDescription", defaultValue: "Toggle Sidebar"))
+                item.label = String(localized: "toolbar.sidebar.label", defaultValue: "Sidebar")
+                item.toolTip = String(localized: "toolbar.sidebar.tooltip", defaultValue: "Toggle Sidebar")
                 item.target = self
                 item.action = #selector(toggleSidebarAction)
                 return item
@@ -203,9 +203,9 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
 
             if itemIdentifier == notificationsIdentifier {
                 let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-                item.image = NSImage(systemSymbolName: "bell", accessibilityDescription: "Notifications")
-                item.label = "Notifications"
-                item.toolTip = "Show Notifications"
+                item.image = NSImage(systemSymbolName: "bell", accessibilityDescription: String(localized: "toolbar.notifications.accessibilityDescription", defaultValue: "Notifications"))
+                item.label = String(localized: "toolbar.notifications.label", defaultValue: "Notifications")
+                item.toolTip = String(localized: "toolbar.notifications.tooltip", defaultValue: "Show Notifications")
                 item.target = self
                 item.action = #selector(toggleNotificationsAction)
                 return item
@@ -213,9 +213,9 @@ final class WindowToolbarController: NSObject, NSToolbarDelegate {
 
             if itemIdentifier == newTabIdentifier {
                 let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-                item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New Workspace")
-                item.label = "New Workspace"
-                item.toolTip = "New Workspace"
+                item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: String(localized: "toolbar.newWorkspace.accessibilityDescription", defaultValue: "New Workspace"))
+                item.label = String(localized: "toolbar.newWorkspace.label", defaultValue: "New Workspace")
+                item.toolTip = String(localized: "toolbar.newWorkspace.tooltip", defaultValue: "New Workspace")
                 item.target = self
                 item.action = #selector(newTabAction)
                 return item

@@ -2891,6 +2891,10 @@ struct ContentView: View {
                     }
                 )) {
                     sidebarView
+                        // NavigationSplitView does not provide an API to observe
+                        // user divider drags, so sidebarWidth is not persisted when
+                        // the user resizes via the system divider. The pre-macOS 26
+                        // custom resizer overlay handles persistence on older versions.
                         .navigationSplitViewColumnWidth(min: 120, ideal: sidebarWidth, max: 400)
                 } detail: {
                     terminalContentWithSidebarDropOverlay
@@ -2907,6 +2911,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.accessoryBarAction)
                         .accessibilityIdentifier("toolbar.notifications")
+                        .accessibilityLabel(String(localized: "toolbar.notifications.label", defaultValue: "Notifications"))
 
                         Button {
                             if let appDelegate = AppDelegate.shared {
@@ -2919,6 +2924,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.accessoryBarAction)
                         .accessibilityIdentifier("toolbar.newTab")
+                        .accessibilityLabel(String(localized: "toolbar.newTab.label", defaultValue: "New Tab"))
                     }
                 }
             )
@@ -15412,23 +15418,8 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
     }
 }
 
-/// Fills the background with the terminal's current background color,
-/// staying in sync with theme changes. Used behind NavigationSplitView
-/// so the sidebar's rounded corners blend seamlessly with the window.
-@available(macOS 26.0, *)
-private struct TerminalBackgroundFill: View {
-    @State private var bgColor = Color(nsColor: GhosttyBackgroundTheme.currentColor())
-
-    var body: some View {
-        bgColor
-            .onReceive(NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)) { _ in
-                bgColor = Color(nsColor: GhosttyBackgroundTheme.currentColor())
-            }
-    }
-}
-
 /// Finds NSSplitView(s) inside NavigationSplitView and hides dividers
-/// by installing a custom delegate that draws nothing.
+/// by tweaking divider style and color properties on the underlying NSSplitView.
 @available(macOS 26.0, *)
 private struct SplitViewDividerHider: NSViewRepresentable {
     func makeNSView(context: Context) -> SplitViewDividerHiderView {
@@ -15442,8 +15433,6 @@ private struct SplitViewDividerHider: NSViewRepresentable {
 
 @available(macOS 26.0, *)
 final class SplitViewDividerHiderView: NSView {
-    private var installed = false
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         scheduleHide()
@@ -15464,8 +15453,11 @@ final class SplitViewDividerHiderView: NSView {
         guard let view else { return }
         if let splitView = view as? NSSplitView {
             splitView.dividerStyle = .thin
-            // Override the divider color to clear
-            splitView.setValue(NSColor.clear, forKey: "dividerColor")
+            // Clear the divider color via ObjC messaging (private API).
+            let selector = NSSelectorFromString("setDividerColor:")
+            if splitView.responds(to: selector) {
+                splitView.perform(selector, with: NSColor.clear)
+            }
         }
         for subview in view.subviews {
             patchSplitViews(in: subview)

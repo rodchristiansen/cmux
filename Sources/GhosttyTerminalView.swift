@@ -9117,6 +9117,8 @@ final class GhosttySurfaceScrollView: NSView {
         _ = setFrameIfNeeded(backgroundView, to: bounds)
         // On macOS 26, inset the scroll view to create internal padding
         // that keeps terminal text within the rounded corner safe zone.
+        // Uniform inset on all sides for consistent spacing; the 6pt keeps
+        // text within the 16pt corner radius safe area at all corners.
         let contentInset: CGFloat
         if #available(macOS 26.0, *) {
             contentInset = 6
