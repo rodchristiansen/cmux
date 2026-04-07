@@ -1823,6 +1823,7 @@ struct ContentView: View {
     @State private var isResizerBandActive = false
     @State private var isSidebarResizerCursorActive = false
     @State private var sidebarResizerCursorStabilizer: DispatchSourceTimer?
+    @State private var isNotificationsPopoverPresented = false
     @State private var isCommandPalettePresented = false
     @State private var commandPaletteQuery: String = ""
     @State private var commandPaletteMode: CommandPaletteMode = .commands
@@ -2891,10 +2892,16 @@ struct ContentView: View {
                     }
                 )) {
                     sidebarView
-                        // NavigationSplitView does not provide an API to observe
-                        // user divider drags, so sidebarWidth is not persisted when
-                        // the user resizes via the system divider. The pre-macOS 26
-                        // custom resizer overlay handles persistence on older versions.
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.onChange(of: geo.size.width) { newWidth in
+                                    if abs(newWidth - sidebarWidth) > 1 {
+                                        sidebarWidth = newWidth
+                                        sidebarState.persistedWidth = newWidth
+                                    }
+                                }
+                            }
+                        )
                         .navigationSplitViewColumnWidth(min: 120, ideal: sidebarWidth, max: 400)
                 } detail: {
                     terminalContentWithSidebarDropOverlay
@@ -2902,16 +2909,64 @@ struct ContentView: View {
                 }
                 .navigationSplitViewStyle(.prominentDetail)
                 .background(SplitViewDividerHider())
+                .toolbar(removing: .sidebarToggle)
                 .toolbar {
                     ToolbarItemGroup(placement: .primaryAction) {
+                        ControlGroup {
+                            Button {
+                                tabManager.newSurface()
+                            } label: {
+                                Image(systemName: "terminal")
+                            }
+                            .accessibilityIdentifier("toolbar.newTerminal")
+                            .accessibilityLabel(String(localized: "toolbar.newTerminal.label", defaultValue: "New Terminal"))
+
+                            Button {
+                                _ = AppDelegate.shared?.openBrowserAndFocusAddressBar()
+                            } label: {
+                                Image(systemName: "globe")
+                            }
+                            .accessibilityIdentifier("toolbar.newBrowser")
+                            .accessibilityLabel(String(localized: "toolbar.newBrowser.label", defaultValue: "New Browser"))
+
+                            Button {
+                                tabManager.createSplit(direction: .right)
+                            } label: {
+                                Image(systemName: "square.split.2x1")
+                            }
+                            .accessibilityIdentifier("toolbar.splitRight")
+                            .accessibilityLabel(String(localized: "toolbar.splitRight.label", defaultValue: "Split Right"))
+
+                            Button {
+                                tabManager.createSplit(direction: .down)
+                            } label: {
+                                Image(systemName: "square.split.1x2")
+                            }
+                            .accessibilityIdentifier("toolbar.splitDown")
+                            .accessibilityLabel(String(localized: "toolbar.splitDown.label", defaultValue: "Split Down"))
+                        }
+
                         Button {
-                            _ = AppDelegate.shared?.toggleNotificationsPopover(animated: true)
+                            if #available(macOS 26.0, *) {
+                                isNotificationsPopoverPresented.toggle()
+                            } else {
+                                _ = AppDelegate.shared?.toggleNotificationsPopover(animated: true)
+                            }
                         } label: {
                             Image(systemName: "bell")
                         }
                         .buttonStyle(.accessoryBarAction)
                         .accessibilityIdentifier("toolbar.notifications")
                         .accessibilityLabel(String(localized: "toolbar.notifications.label", defaultValue: "Notifications"))
+                        .popover(isPresented: $isNotificationsPopoverPresented) {
+                            NotificationsPopoverView(
+                                notificationStore: notificationStore,
+                                onDismiss: { isNotificationsPopoverPresented = false }
+                            )
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.toggleNotificationsPopoverNotification)) { _ in
+                            isNotificationsPopoverPresented.toggle()
+                        }
 
                         Button {
                             if let appDelegate = AppDelegate.shared {
@@ -3497,8 +3552,7 @@ struct ContentView: View {
                 window.titlebarAppearsTransparent = true
             }
             if #available(macOS 26.0, *) {
-                // On macOS 26 without fullSizeContentView, the system titlebar
-                // handles drag natively.
+                // On macOS 26, the system titlebar handles drag natively.
                 window.isMovable = true
                 window.isMovableByWindowBackground = false
             } else {
@@ -10191,7 +10245,7 @@ struct VerticalTabsSidebar: View {
                         .background(TitlebarDoubleClickMonitorView())
                 }
                 .overlay(alignment: .topLeading) {
-                    if isMinimalMode {
+                    if isMinimalMode, #unavailable(macOS 26.0) {
                         HiddenTitlebarSidebarControlsView(notificationStore: notificationStore)
                             .padding(.leading, hiddenTitlebarControlsLeadingInset)
                             .padding(.top, 2)
@@ -15689,7 +15743,7 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
 }
 
 /// Finds NSSplitView(s) inside NavigationSplitView and hides dividers
-/// by tweaking divider style and color properties on the underlying NSSplitView.
+/// by walking the view hierarchy and patching divider style/color properties.
 @available(macOS 26.0, *)
 private struct SplitViewDividerHider: NSViewRepresentable {
     func makeNSView(context: Context) -> SplitViewDividerHiderView {
