@@ -6788,6 +6788,7 @@ final class Workspace: Identifiable, ObservableObject {
         }
         return BonsplitConfiguration.Appearance(
             tabBarHeight: hideTabBar ? 0 : 33,
+            showSplitButtons: !hideTabBar,
             splitButtonTooltips: Self.currentSplitButtonTooltips(),
             enableAnimations: false,
             chromeColors: .init(
