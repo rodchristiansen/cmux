@@ -1355,6 +1355,13 @@ final class UpdateTitlebarAccessoryController {
 
         guard !attachedWindows.contains(window) else { return }
 
+        // On macOS 26, NavigationSplitView's .toolbar provides the controls
+        // (bell, new tab, etc.), so don't attach the legacy accessory.
+        if #available(macOS 26.0, *) {
+            attachedWindows.add(window)
+            return
+        }
+
         if !window.titlebarAccessoryViewControllers.contains(where: { $0.view.identifier == controlsIdentifier }) {
             let controls = TitlebarControlsAccessoryViewController(
                 notificationStore: TerminalNotificationStore.shared
