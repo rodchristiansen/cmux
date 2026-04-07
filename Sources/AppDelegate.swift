@@ -10165,7 +10165,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         windowDecorationsController.apply(to: window)
     }
 
+    /// Notification posted on macOS 26 to toggle the SwiftUI notifications popover.
+    static let toggleNotificationsPopoverNotification = Notification.Name("cmux.toggleNotificationsPopover")
+
     func toggleNotificationsPopover(animated: Bool = true, anchorView: NSView? = nil) {
+        if #available(macOS 26.0, *) {
+            NotificationCenter.default.post(name: Self.toggleNotificationsPopoverNotification, object: nil)
+            return
+        }
         titlebarAccessoryController.toggleNotificationsPopover(animated: animated, anchorView: anchorView)
     }
 

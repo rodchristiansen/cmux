@@ -6781,14 +6781,16 @@ final class Workspace: Identifiable, ObservableObject {
     ) -> BonsplitConfiguration.Appearance {
         let hideTabBar: Bool
         if #available(macOS 26.0, *) {
-            // tabBarHeight: 0 hides the tab bar for single-tab panes.
-            // PaneContainerView (bonsplit) shows it when pane.tabs.count > 1.
+            // Set tabBarHeight to 0 on macOS 26. PaneContainerView (bonsplit)
+            // conditionally shows the tab bar when pane.tabs.count > 1, so
+            // this effectively hides it only for single-tab panes.
             hideTabBar = true
         } else {
             hideTabBar = false
         }
         return BonsplitConfiguration.Appearance(
             tabBarHeight: hideTabBar ? 0 : 33,
+            showSplitButtons: !hideTabBar,
             splitButtonTooltips: Self.currentSplitButtonTooltips(),
             enableAnimations: false,
             chromeColors: .init(
