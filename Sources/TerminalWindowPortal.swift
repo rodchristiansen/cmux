@@ -1500,10 +1500,11 @@ final class WindowTerminalPortal: NSObject {
             // is visible to its left, matching the NavigationSplitView glass shape.
             // Applied inside the CATransaction to prevent animation flicker.
             if #available(macOS 26.0, *) {
-                // Sidebar minimum width is 120pt; any x-offset above this
-                // threshold indicates a sidebar is present to the left.
-                let sidebarDetectionThreshold: CGFloat = 20
-                let hasSidebarToLeft = targetFrame.origin.x > sidebarDetectionThreshold
+                // Detect sidebar presence via x-offset. The sidebar has a minimum
+                // width of 120pt, so any x > 20 reliably indicates a sidebar is
+                // to our left. This AppKit view cannot access SwiftUI SidebarState
+                // directly; the frame-based heuristic is the simplest reliable path.
+                let hasSidebarToLeft = targetFrame.origin.x > 20
                 let desiredRadius: CGFloat = hasSidebarToLeft ? 16 : 0
                 if hostedView.layer?.cornerRadius != desiredRadius {
                     hostedView.layer?.cornerRadius = desiredRadius

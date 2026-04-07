@@ -9115,17 +9115,22 @@ final class GhosttySurfaceScrollView: NSView {
 
         let previousSurfaceSize = surfaceView.frame.size
         _ = setFrameIfNeeded(backgroundView, to: bounds)
-        // On macOS 26, inset the scroll view to create internal padding
-        // that keeps terminal text within the rounded corner safe zone.
-        // Uniform inset on all sides for consistent spacing; the 6pt keeps
-        // text within the 16pt corner radius safe area at all corners.
-        let contentInset: CGFloat
+        // On macOS 26, inset the scroll view on the leading and top edges
+        // to keep terminal text within the rounded corner safe zone.
+        // Only leading corners are rounded (when sidebar is visible), so
+        // right/bottom edges use no inset to maximize terminal real estate.
+        let scrollFrame: CGRect
         if #available(macOS 26.0, *) {
-            contentInset = 6
+            let inset: CGFloat = 6
+            scrollFrame = CGRect(
+                x: bounds.origin.x + inset,
+                y: bounds.origin.y,
+                width: bounds.width - inset,
+                height: bounds.height - inset
+            )
         } else {
-            contentInset = 0
+            scrollFrame = bounds
         }
-        let scrollFrame = contentInset > 0 ? bounds.insetBy(dx: contentInset, dy: contentInset) : bounds
         _ = setFrameIfNeeded(scrollView, to: scrollFrame)
         let targetSize = scrollView.bounds.size
 #if DEBUG

@@ -2892,10 +2892,16 @@ struct ContentView: View {
                     }
                 )) {
                     sidebarView
-                        // NavigationSplitView does not provide an API to observe
-                        // user divider drags, so sidebarWidth is not persisted when
-                        // the user resizes via the system divider. The pre-macOS 26
-                        // custom resizer overlay handles persistence on older versions.
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.onChange(of: geo.size.width) { newWidth in
+                                    if abs(newWidth - sidebarWidth) > 1 {
+                                        sidebarWidth = newWidth
+                                        sidebarState.persistedWidth = newWidth
+                                    }
+                                }
+                            }
+                        )
                         .navigationSplitViewColumnWidth(min: 120, ideal: sidebarWidth, max: 400)
                 } detail: {
                     terminalContentWithSidebarDropOverlay
@@ -3546,8 +3552,7 @@ struct ContentView: View {
                 window.titlebarAppearsTransparent = true
             }
             if #available(macOS 26.0, *) {
-                // On macOS 26 without fullSizeContentView, the system titlebar
-                // handles drag natively.
+                // On macOS 26, the system titlebar handles drag natively.
                 window.isMovable = true
                 window.isMovableByWindowBackground = false
             } else {
@@ -15468,7 +15473,7 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
 }
 
 /// Finds NSSplitView(s) inside NavigationSplitView and hides dividers
-/// by tweaking divider style and color properties on the underlying NSSplitView.
+/// by walking the view hierarchy and patching divider style/color properties.
 @available(macOS 26.0, *)
 private struct SplitViewDividerHider: NSViewRepresentable {
     func makeNSView(context: Context) -> SplitViewDividerHiderView {
