@@ -2591,7 +2591,7 @@ struct ContentView: View {
         }
     }
 
-    private var sidebarView: some View {
+    private var sidebarContent: some View {
         VerticalTabsSidebar(
             updateViewModel: updateViewModel,
             onSendFeedback: presentFeedbackComposer,
@@ -2599,8 +2599,12 @@ struct ContentView: View {
             selectedTabIds: $selectedTabIds,
             lastSidebarSelectionIndex: $lastSidebarSelectionIndex
         )
-        .frame(width: sidebarWidth)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var sidebarView: some View {
+        sidebarContent
+            .frame(width: sidebarWidth)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// Space at top of content area for the titlebar. This must be at least the actual titlebar
@@ -2891,7 +2895,8 @@ struct ContentView: View {
                         }
                     }
                 )) {
-                    sidebarView
+                    sidebarContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .background(
                             GeometryReader { geo in
                                 Color.clear.onChange(of: geo.size.width) { newWidth in
@@ -2953,7 +2958,17 @@ struct ContentView: View {
                                 _ = AppDelegate.shared?.toggleNotificationsPopover(animated: true)
                             }
                         } label: {
-                            Image(systemName: "bell")
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "bell")
+                                if notificationStore.unreadCount > 0 {
+                                    Text("\(min(notificationStore.unreadCount, 99))")
+                                        .font(.system(size: 8, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 14, height: 14)
+                                        .background(Circle().fill(Color.red))
+                                        .offset(x: 5, y: -5)
+                                }
+                            }
                         }
                         .buttonStyle(.accessoryBarAction)
                         .accessibilityIdentifier("toolbar.notifications")
