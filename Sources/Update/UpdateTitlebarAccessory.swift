@@ -1022,7 +1022,7 @@ final class TitlebarControlsAccessoryViewController: NSTitlebarAccessoryViewCont
     }
 }
 
-private struct NotificationsPopoverView: View {
+struct NotificationsPopoverView: View {
     @ObservedObject var notificationStore: TerminalNotificationStore
     @ObservedObject private var keyboardShortcutSettingsObserver = KeyboardShortcutSettingsObserver.shared
     let onDismiss: () -> Void
