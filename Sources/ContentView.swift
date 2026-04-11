@@ -10050,11 +10050,24 @@ struct VerticalTabsSidebar: View {
     @State private var dropIndicator: SidebarDropIndicator?
     @AppStorage(WorkspacePresentationModeSettings.modeKey)
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
+    @AppStorage("sidebar.filter.onlyRunning")
+    private var showOnlyRunningWorkspaces = false
 
     /// Space at top of sidebar for traffic light buttons
     private let trafficLightPadding: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
+
+    private func isWorkspaceRunning(_ workspace: Workspace) -> Bool {
+        workspace.statusEntries.values.contains { entry in
+            entry.value.range(of: "running", options: .caseInsensitive) != nil
+        }
+    }
+
+    private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
+        guard showOnlyRunningWorkspaces else { return workspaces }
+        return workspaces.filter(isWorkspaceRunning)
+    }
 
     private var isMinimalMode: Bool {
         WorkspacePresentationModeSettings.mode(for: workspacePresentationMode) == .minimal
@@ -10142,6 +10155,14 @@ struct VerticalTabsSidebar: View {
         let layout = tabManager.sidebarLayout
         let allOrdered = layout.allWorkspacesInOrder
         let workspaceCount = tabs.count
+        let runningWorkspaceCount = tabs.reduce(0) { $0 + (isWorkspaceRunning($1) ? 1 : 0) }
+        let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
+        let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
+        let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
+            let filtered = workspacesMatchingFilter(group.workspaces)
+            if showOnlyRunningWorkspaces && filtered.isEmpty { return nil }
+            return SidebarLayout.SectionGroup(section: group.section, workspaces: filtered)
+        }
         let canCloseWorkspace = workspaceCount > 1
         let workspaceNumberShortcut = self.workspaceNumberShortcut
         let tabItemSettings = tabItemSettingsStore.snapshot
@@ -10167,11 +10188,19 @@ struct VerticalTabsSidebar: View {
                         Spacer()
                             .frame(height: trafficLightPadding)
 
+                        SidebarRunningFilterToggle(
+                            isActive: $showOnlyRunningWorkspaces,
+                            runningCount: runningWorkspaceCount
+                        )
+                        .padding(.horizontal, 10)
+                        .padding(.top, 12)
+                        .padding(.bottom, 6)
+
                         // Workspaces are bounded, so prefer a non-lazy stack here.
                         // LazyVStack + drag-state invalidations can recurse through layout.
                         VStack(spacing: tabRowSpacing) {
                             // Pinned workspaces always render first
-                            ForEach(layout.pinnedWorkspaces, id: \.id) { tab in
+                            ForEach(filteredPinnedWorkspaces, id: \.id) { tab in
                                 tabItemViewForWorkspace(
                                     tab, index: tabIndexById[tab.id] ?? 0,
                                     workspaceCount: workspaceCount,
@@ -10186,7 +10215,7 @@ struct VerticalTabsSidebar: View {
                             }
 
                             // Ungrouped (not in any section) unpinned workspaces
-                            ForEach(layout.ungroupedWorkspaces, id: \.id) { tab in
+                            ForEach(filteredUngroupedWorkspaces, id: \.id) { tab in
                                 tabItemViewForWorkspace(
                                     tab, index: tabIndexById[tab.id] ?? 0,
                                     workspaceCount: workspaceCount,
@@ -10201,7 +10230,7 @@ struct VerticalTabsSidebar: View {
                             }
 
                             // Collapsible user-defined sections
-                            ForEach(layout.sectionGroups, id: \.section.id) { group in
+                            ForEach(filteredSectionGroups, id: \.section.id) { group in
                                 VStack(spacing: 0) {
                                     SidebarSectionHeaderView(
                                         section: group.section,
@@ -10346,6 +10375,81 @@ struct VerticalTabsSidebar: View {
     private func debugShortSidebarTabId(_ id: UUID?) -> String {
         guard let id else { return "nil" }
         return String(id.uuidString.prefix(5))
+    }
+}
+
+private struct SidebarRunningFilterToggle: View {
+    @Binding var isActive: Bool
+    let runningCount: Int
+    @State private var isHovered = false
+
+    private var label: String {
+        String(localized: "sidebar.filter.running", defaultValue: "Running")
+    }
+
+    private var tooltip: String {
+        isActive
+            ? String(
+                localized: "sidebar.filter.running.showAll",
+                defaultValue: "Show all workspaces"
+            )
+            : String(
+                localized: "sidebar.filter.running.tooltip",
+                defaultValue: "Show only running workspaces"
+            )
+    }
+
+    private var foregroundColor: Color {
+        isActive ? Color.accentColor : Color(nsColor: .secondaryLabelColor)
+    }
+
+    private var backgroundFill: Color {
+        if isActive {
+            return Color.accentColor.opacity(0.18)
+        }
+        if isHovered {
+            return Color.primary.opacity(0.08)
+        }
+        return Color.clear
+    }
+
+    var body: some View {
+        Button {
+            isActive.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                if runningCount > 0 {
+                    Text("\(runningCount)")
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(foregroundColor.opacity(0.75))
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(backgroundFill)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isActive)
+        .safeHelp(tooltip)
+        .accessibilityLabel(tooltip)
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("SidebarRunningFilterToggle")
     }
 }
 
