@@ -2912,10 +2912,25 @@ struct ContentView: View {
                     terminalContentWithSidebarDropOverlay
                         .padding(8)
                 }
-                .navigationSplitViewStyle(.prominentDetail)
+                .navigationSplitViewStyle(.automatic)
                 .background(SplitViewDividerHider())
-                .toolbar(removing: .sidebarToggle)
+                .background(SystemSidebarToggleStripper().frame(width: 0, height: 0))
                 .toolbar {
+                    if !sidebarState.isVisible {
+                        ToolbarItem(placement: .navigation) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    _ = sidebarState.toggle()
+                                }
+                            } label: {
+                                Image(systemName: "sidebar.left")
+                            }
+                            .accessibilityIdentifier("toolbar.toggleSidebar")
+                            .accessibilityLabel(String(localized: "toolbar.sidebar.accessibilityLabel", defaultValue: "Toggle Sidebar"))
+                            .help(String(localized: "toolbar.sidebar.tooltip", defaultValue: "Toggle Sidebar"))
+                        }
+                    }
+
                     ToolbarItemGroup(placement: .primaryAction) {
                         ControlGroup {
                             Button {
@@ -15858,6 +15873,73 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
                 inset = leading
             }
         }
+    }
+}
+
+/// Strips the system-injected sidebar toggle from NavigationSplitView's toolbar.
+/// SwiftUI's `.toolbar(removing: .sidebarToggle)` is broken on macOS 26, so we
+/// remove the item via AppKit after SwiftUI finishes setting up the toolbar.
+@available(macOS 26.0, *)
+private struct SystemSidebarToggleStripper: NSViewRepresentable {
+    func makeNSView(context: Context) -> SystemSidebarToggleStripperView {
+        SystemSidebarToggleStripperView()
+    }
+
+    func updateNSView(_ nsView: SystemSidebarToggleStripperView, context: Context) {
+        nsView.scheduleStrip()
+    }
+}
+
+@available(macOS 26.0, *)
+private final class SystemSidebarToggleStripperView: NSView {
+    private var observer: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scheduleStrip()
+        observeToolbarChanges()
+    }
+
+    func scheduleStrip() {
+        DispatchQueue.main.async { [weak self] in
+            self?.stripNow()
+        }
+    }
+
+    private func stripNow() {
+        guard let toolbar = window?.toolbar else { return }
+        for item in toolbar.items {
+            let itemId = item.itemIdentifier.rawValue
+            // Hide system-injected sidebar toggle and tracking separator.
+            // We can't remove them (SwiftUI re-adds on every render), so
+            // collapse them to zero size instead.
+            if itemId.contains("toggleSidebar")
+                || itemId.contains("splitViewSeparator") {
+                let empty = NSView(frame: .zero)
+                empty.isHidden = true
+                item.view = empty
+                item.minSize = .zero
+                item.maxSize = .zero
+                item.label = ""
+                item.paletteLabel = ""
+            }
+        }
+    }
+
+    private func observeToolbarChanges() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, notification.object as? NSWindow === self.window else { return }
+            self.scheduleStrip()
+        }
+    }
+
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 }
 
