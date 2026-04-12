@@ -15908,20 +15908,11 @@ private final class SystemSidebarToggleStripperView: NSView {
 
     private func stripNow() {
         guard let toolbar = window?.toolbar else { return }
-        for item in toolbar.items {
-            let itemId = item.itemIdentifier.rawValue
-            // Hide system-injected sidebar toggle and tracking separator.
-            // We can't remove them (SwiftUI re-adds on every render), so
-            // collapse them to zero size instead.
+        for i in (0..<toolbar.items.count).reversed() {
+            let itemId = toolbar.items[i].itemIdentifier.rawValue
             if itemId.contains("toggleSidebar")
                 || itemId.contains("splitViewSeparator") {
-                let empty = NSView(frame: .zero)
-                empty.isHidden = true
-                item.view = empty
-                item.minSize = .zero
-                item.maxSize = .zero
-                item.label = ""
-                item.paletteLabel = ""
+                toolbar.removeItem(at: i)
             }
         }
     }
