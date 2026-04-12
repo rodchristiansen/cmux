@@ -2,6 +2,11 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.3] - 2026-04-12
+
+### Fixed
+- Panels drifting out of theme sync (mix of light/dark across workspaces). Per-surface color scheme now reads the system appearance directly instead of the view hierarchy's cached appearance, and every surface is swept to re-apply the theme on system appearance change, Reload Workspace Set, and Rebuild Workspace Layout.
+
 ## [0.64.2] - 2026-04-12
 
 ### Changed
