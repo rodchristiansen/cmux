@@ -5,9 +5,12 @@ import Bonsplit
 
 struct WorkspaceSetFile: Codable {
     /// Optional template applied to every workspace: a list of named panels
-    /// with optional startup commands. Layout: first panel is the main pane;
-    /// remaining panels are added as tabs in a right-side split (75/25).
+    /// with optional startup commands.
     var defaultPanels: [WorkspaceSetPanelTemplate]?
+    /// Optional layout tree referencing panel titles. Mirrors the session
+    /// persistence layout format (split/pane nodes). When omitted, the
+    /// default is a single pane containing all panels as tabs.
+    var defaultLayout: WorkspaceSetLayoutNode?
     var sections: [WorkspaceSetSection]
 }
 
@@ -28,6 +31,55 @@ struct WorkspaceSetEntry: Codable {
 struct WorkspaceSetPanelTemplate: Codable {
     var title: String
     var command: String?
+}
+
+struct WorkspaceSetSplitLayout: Codable {
+    var orientation: String  // "horizontal" or "vertical"
+    var dividerPosition: Double
+    var first: WorkspaceSetLayoutNode
+    var second: WorkspaceSetLayoutNode
+}
+
+struct WorkspaceSetPaneLayout: Codable {
+    var panels: [String]   // panel titles in tab order
+    var selected: String?  // title of selected tab (defaults to first)
+}
+
+indirect enum WorkspaceSetLayoutNode: Codable {
+    case split(WorkspaceSetSplitLayout)
+    case pane(WorkspaceSetPaneLayout)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, split, pane
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try c.decode(String.self, forKey: .type)
+        switch type {
+        case "split":
+            self = .split(try c.decode(WorkspaceSetSplitLayout.self, forKey: .split))
+        case "pane":
+            self = .pane(try c.decode(WorkspaceSetPaneLayout.self, forKey: .pane))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type, in: c,
+                debugDescription: "layout node type must be 'split' or 'pane', got '\(type)'"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .split(let s):
+            try c.encode("split", forKey: .type)
+            try c.encode(s, forKey: .split)
+        case .pane(let p):
+            try c.encode("pane", forKey: .type)
+            try c.encode(p, forKey: .pane)
+        }
+    }
 }
 
 // MARK: - Import Result
@@ -66,7 +118,6 @@ enum WorkspaceSetImporter {
     }
 
     /// Load and merge a workspace-set.json into the given TabManager.
-    /// Returns a summary of what was created and what was skipped.
     static func importFromFile(
         at path: String? = nil,
         into tabManager: TabManager,
@@ -88,8 +139,7 @@ enum WorkspaceSetImporter {
     }
 
     /// Rebuild a single workspace's layout from the template in workspace-set.json.
-    /// Closes all existing panels and recreates them from the `defaultPanels` template.
-    /// Returns the number of panels recreated, or nil if no template is configured.
+    /// Replaces all panels and layout with the template; then runs each panel's command.
     @discardableResult
     static func rebuildWorkspaceFromTemplate(
         _ workspace: Workspace,
@@ -98,15 +148,7 @@ enum WorkspaceSetImporter {
         let resolvedPath = path ?? defaultPath
         guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
         guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
-
-        // Close every panel except the focused one, then apply the template
-        // (which will rename/command the remaining panel and add the rest).
-        let keepId = workspace.focusedPanelId
-        let toClose = workspace.panels.keys.filter { $0 != keepId }
-        for panelId in toClose {
-            _ = workspace.closePanel(panelId, force: true)
-        }
-        applyPanelTemplate(to: workspace, templates: templates, isFresh: false)
+        applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
         return templates.count
     }
 
@@ -133,16 +175,13 @@ enum WorkspaceSetImporter {
     ) -> WorkspaceSetImportResult {
         var existingByDir: [String: Workspace] = [:]
         for ws in tabManager.tabs {
-            let key = normalizedDirectoryKey(ws.currentDirectory)
-            existingByDir[key] = ws
+            existingByDir[normalizedDirectoryKey(ws.currentDirectory)] = ws
         }
 
         var sectionByName: [String: SidebarSection] = [:]
         for section in tabManager.sections {
             let key = section.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if !key.isEmpty {
-                sectionByName[key] = section
-            }
+            if !key.isEmpty { sectionByName[key] = section }
         }
 
         var created: [WorkspaceSetImportResult.Created] = []
@@ -161,9 +200,7 @@ enum WorkspaceSetImporter {
                     targetSection = existing
                 } else if !dryRun {
                     let newSection = tabManager.createSection(name: sectionName, triggerRename: false)
-                    if let collapsed = sectionDef.collapsed {
-                        newSection.setCollapsed(collapsed)
-                    }
+                    if let collapsed = sectionDef.collapsed { newSection.setCollapsed(collapsed) }
                     sectionByName[sectionKey] = newSection
                     targetSection = newSection
                     sectionsCreated.append(sectionName)
@@ -186,42 +223,28 @@ enum WorkspaceSetImporter {
                             panelsAdded += fillMissingPanels(in: existingWs, templates: templates)
                         }
                     }
-                    skipped.append(.init(
-                        name: entry.name,
-                        directory: entry.directory,
-                        reason: "directory_exists"
-                    ))
+                    skipped.append(.init(name: entry.name, directory: entry.directory, reason: "directory_exists"))
                     continue
                 }
 
                 guard FileManager.default.fileExists(atPath: expandedDir) else {
-                    skipped.append(.init(
-                        name: entry.name,
-                        directory: entry.directory,
-                        reason: "directory_missing"
-                    ))
+                    skipped.append(.init(name: entry.name, directory: entry.directory, reason: "directory_missing"))
                     continue
                 }
 
                 if dryRun {
-                    created.append(.init(
-                        name: entry.name,
-                        directory: entry.directory,
-                        section: hasSection ? sectionName : nil
-                    ))
+                    created.append(.init(name: entry.name, directory: entry.directory, section: hasSection ? sectionName : nil))
                     continue
                 }
 
-                // Create workspace. If a template exists, use its first panel's
-                // command as the initial terminal command so the main panel
-                // starts with its tool running.
-                let firstTemplate = workspaceSet.defaultPanels?.first
+                // Create workspace (one bootstrap panel). Name comes from entry.name;
+                // panel template + layout is applied right after via session-snapshot
+                // rebuild so we get correct splits + divider positions.
                 let ws = tabManager.addWorkspace(
-                    title: firstTemplate?.title ?? entry.name,
+                    title: entry.name,
                     workingDirectory: expandedDir,
-                    initialTerminalCommand: firstTemplate?.command,
                     select: false,
-                    eagerLoadTerminal: true,
+                    eagerLoadTerminal: false,
                     autoWelcomeIfNeeded: false
                 )
 
@@ -241,145 +264,178 @@ enum WorkspaceSetImporter {
                 }
 
                 if let templates = workspaceSet.defaultPanels, !templates.isEmpty {
-                    applyPanelTemplate(to: ws, templates: templates, isFresh: true)
+                    applyFullTemplate(to: ws, panels: templates, layout: workspaceSet.defaultLayout)
                     panelsAdded += max(templates.count - 1, 0)
                 }
 
                 existingByDir[normalizedDir] = ws
 
-                created.append(.init(
-                    name: entry.name,
-                    directory: entry.directory,
-                    section: hasSection ? sectionName : nil
-                ))
+                created.append(.init(name: entry.name, directory: entry.directory, section: hasSection ? sectionName : nil))
             }
         }
 
         return WorkspaceSetImportResult(
-            created: created,
-            skipped: skipped,
-            sectionsCreated: sectionsCreated,
-            panelsAdded: panelsAdded
+            created: created, skipped: skipped,
+            sectionsCreated: sectionsCreated, panelsAdded: panelsAdded
         )
     }
 
-    // MARK: - Panel template application
+    // MARK: - Template application (full rebuild via session snapshot)
 
-    /// Apply a panel template to a workspace. The workspace should already have
-    /// one terminal panel (from `addWorkspace`). For `isFresh == true`, the
-    /// first template panel is assumed already applied via `initialTerminalCommand`;
-    /// this method only adds panels 2..n. For `isFresh == false` (rebuild from
-    /// template), the first panel is also renamed and its command is re-sent.
-    private static func applyPanelTemplate(
+    /// Build a SessionWorkspaceSnapshot matching the requested template +
+    /// layout and call `workspace.restoreSessionSnapshot(...)`. This gives us
+    /// exact layout + divider positions out of the box.
+    private static func applyFullTemplate(
         to workspace: Workspace,
-        templates: [WorkspaceSetPanelTemplate],
-        isFresh: Bool
+        panels: [WorkspaceSetPanelTemplate],
+        layout layoutNode: WorkspaceSetLayoutNode?
     ) {
-        guard !templates.isEmpty else { return }
-        guard let firstPanelId = workspace.focusedPanelId else { return }
-
-        // Rename the existing main panel to match the first template entry.
-        workspace.setPanelCustomTitle(panelId: firstPanelId, title: templates[0].title)
-
-        if !isFresh, let cmd = templates[0].command {
-            sendCommand(to: firstPanelId, in: workspace, command: cmd)
+        // Generate stable UUIDs per template title so the layout tree can
+        // reference them.
+        var panelIdByTitle: [String: UUID] = [:]
+        for tpl in panels {
+            panelIdByTitle[tpl.title.lowercased()] = UUID()
         }
 
-        guard templates.count > 1 else { return }
+        let cwd = workspace.currentDirectory
 
-        // Create the right-side split holding the remaining panels as tabs.
-        guard let secondPanelId = workspace.owningTabManager?.newSplit(
-            tabId: workspace.id,
-            surfaceId: firstPanelId,
-            direction: .right,
-            focus: false
-        ) else { return }
-
-        workspace.setPanelCustomTitle(panelId: secondPanelId, title: templates[1].title)
-        if let cmd = templates[1].command {
-            sendCommand(to: secondPanelId, in: workspace, command: cmd)
+        let panelSnapshots: [SessionPanelSnapshot] = panels.map { tpl in
+            let id = panelIdByTitle[tpl.title.lowercased()] ?? UUID()
+            return SessionPanelSnapshot(
+                id: id,
+                type: .terminal,
+                title: tpl.title,
+                customTitle: tpl.title,
+                directory: cwd,
+                isPinned: false,
+                isManuallyUnread: false,
+                gitBranch: nil,
+                listeningPorts: [],
+                ttyName: nil,
+                terminal: SessionTerminalPanelSnapshot(workingDirectory: cwd, scrollback: nil),
+                browser: nil,
+                markdown: nil
+            )
         }
 
-        // Additional panels become tabs in the same pane as panel #2.
-        guard let rightPaneId = workspace.paneId(forPanelId: secondPanelId) else { return }
-
-        for i in 2..<templates.count {
-            let tpl = templates[i]
-            guard let panel = workspace.newTerminalSurface(
-                inPane: rightPaneId,
-                focus: false,
-                workingDirectory: workspace.currentDirectory
-            ) else { continue }
-            workspace.setPanelCustomTitle(panelId: panel.id, title: tpl.title)
-            if let cmd = tpl.command {
-                sendCommand(to: panel.id, in: workspace, command: cmd)
-            }
+        let resolvedLayout: SessionWorkspaceLayoutSnapshot
+        if let layoutNode {
+            resolvedLayout = buildLayoutSnapshot(node: layoutNode, panelIdByTitle: panelIdByTitle,
+                                                 fallbackIds: panels.map { panelIdByTitle[$0.title.lowercased()]! })
+        } else {
+            // Default: all panels as tabs in a single pane.
+            let ids = panels.map { panelIdByTitle[$0.title.lowercased()]! }
+            resolvedLayout = .pane(SessionPaneLayoutSnapshot(panelIds: ids, selectedPanelId: ids.first))
         }
 
-        // Refocus the main terminal so the user lands on it, not the last tab.
-        workspace.focusPanel(firstPanelId)
+        let firstId = panels.first.flatMap { panelIdByTitle[$0.title.lowercased()] }
+
+        let snapshot = SessionWorkspaceSnapshot(
+            id: workspace.id,
+            processTitle: workspace.title,
+            customTitle: workspace.customTitle,
+            customDescription: workspace.customDescription,
+            customColor: workspace.customColor,
+            isPinned: workspace.isPinned,
+            currentDirectory: cwd,
+            focusedPanelId: firstId,
+            layout: resolvedLayout,
+            panels: panelSnapshots,
+            statusEntries: [],
+            logEntries: [],
+            progress: nil,
+            gitBranch: nil
+        )
+
+        workspace.restoreSessionSnapshot(snapshot)
+
+        // Now send each panel's command. Surfaces may not be started yet;
+        // sendText queues input and triggers a background surface start.
+        for tpl in panels {
+            guard let cmd = tpl.command, !cmd.isEmpty else { continue }
+            guard let panelId = panelIdByTitle[tpl.title.lowercased()] else { continue }
+            sendCommand(to: panelId, in: workspace, command: cmd)
+        }
     }
 
-    /// For an existing workspace, add any template panels that are missing by
-    /// title. Existing panels (even bare-shell ones) are left alone to avoid
-    /// disrupting running work. Returns the count of panels added.
+    /// Transform a WorkspaceSetLayoutNode (title-referenced) into a
+    /// SessionWorkspaceLayoutSnapshot (UUID-referenced). Titles not in the
+    /// panel set are silently skipped; panes emptied by this pruning get
+    /// replaced with a fallback to avoid empty panes.
+    private static func buildLayoutSnapshot(
+        node: WorkspaceSetLayoutNode,
+        panelIdByTitle: [String: UUID],
+        fallbackIds: [UUID]
+    ) -> SessionWorkspaceLayoutSnapshot {
+        switch node {
+        case .split(let s):
+            let orientation: SessionSplitOrientation = s.orientation.lowercased() == "vertical" ? .vertical : .horizontal
+            return .split(SessionSplitLayoutSnapshot(
+                orientation: orientation,
+                dividerPosition: s.dividerPosition,
+                first: buildLayoutSnapshot(node: s.first, panelIdByTitle: panelIdByTitle, fallbackIds: fallbackIds),
+                second: buildLayoutSnapshot(node: s.second, panelIdByTitle: panelIdByTitle, fallbackIds: fallbackIds)
+            ))
+        case .pane(let p):
+            let ids = p.panels.compactMap { panelIdByTitle[$0.lowercased()] }
+            let selected = p.selected.flatMap { panelIdByTitle[$0.lowercased()] } ?? ids.first
+            if ids.isEmpty {
+                // Should not happen with a valid layout; fall back to the
+                // first template panel so bonsplit stays consistent.
+                return .pane(SessionPaneLayoutSnapshot(panelIds: Array(fallbackIds.prefix(1)), selectedPanelId: fallbackIds.first))
+            }
+            return .pane(SessionPaneLayoutSnapshot(panelIds: ids, selectedPanelId: selected))
+        }
+    }
+
+    // MARK: - Non-destructive fill of missing panels (Reload Workspace Set)
+
+    /// For an existing workspace, add any template panels whose titles are
+    /// missing. Existing panels are left alone to avoid disrupting running work.
     private static func fillMissingPanels(
         in workspace: Workspace,
         templates: [WorkspaceSetPanelTemplate]
     ) -> Int {
         guard !templates.isEmpty else { return 0 }
 
-        // Set of existing panel custom titles (normalized to lowercase).
         var existingTitles = Set<String>()
         for (_, custom) in workspace.panelCustomTitles {
-            let trimmed = custom.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if !trimmed.isEmpty { existingTitles.insert(trimmed) }
+            let t = custom.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !t.isEmpty { existingTitles.insert(t) }
         }
 
         var missing: [WorkspaceSetPanelTemplate] = []
-        for tpl in templates {
-            if !existingTitles.contains(tpl.title.lowercased()) {
-                missing.append(tpl)
-            }
+        for tpl in templates where !existingTitles.contains(tpl.title.lowercased()) {
+            missing.append(tpl)
         }
-
         guard !missing.isEmpty else { return 0 }
         let totalMissing = missing.count
 
-        // Pick a pane to host missing panels. Prefer a pane that already holds
-        // a non-first template panel so tabs stack together; otherwise split
-        // right from the focused panel.
+        // Find a pane already holding a non-first template panel so we add
+        // tabs alongside it. Otherwise split right from the focused panel.
         let tabManager = workspace.owningTabManager
         var targetPaneId: PaneID?
 
         let nonFirstTitles = Set(templates.dropFirst().map { $0.title.lowercased() })
         for (panelId, custom) in workspace.panelCustomTitles {
-            let title = custom.lowercased()
-            if nonFirstTitles.contains(title), let pane = workspace.paneId(forPanelId: panelId) {
+            if nonFirstTitles.contains(custom.lowercased()),
+               let pane = workspace.paneId(forPanelId: panelId) {
                 targetPaneId = pane
                 break
             }
         }
 
         if targetPaneId == nil {
-            // No right-side pane exists — split right from the main panel
-            // to create one, unless the first template panel itself is missing
-            // (in which case we'll place them adjacent to the focused panel).
             guard let anchor = workspace.focusedPanelId,
                   let newId = tabManager?.newSplit(
-                    tabId: workspace.id,
-                    surfaceId: anchor,
-                    direction: .right,
-                    focus: false
+                    tabId: workspace.id, surfaceId: anchor,
+                    direction: .right, focus: false
                   ) else {
                 return 0
             }
-            // The first missing panel becomes the seed of the new pane.
             let first = missing.removeFirst()
             workspace.setPanelCustomTitle(panelId: newId, title: first.title)
-            if let cmd = first.command {
-                sendCommand(to: newId, in: workspace, command: cmd)
-            }
+            if let cmd = first.command { sendCommand(to: newId, in: workspace, command: cmd) }
             targetPaneId = workspace.paneId(forPanelId: newId)
         }
 
@@ -387,33 +443,24 @@ enum WorkspaceSetImporter {
 
         for tpl in missing {
             guard let panel = workspace.newTerminalSurface(
-                inPane: paneId,
-                focus: false,
-                workingDirectory: workspace.currentDirectory
+                inPane: paneId, focus: false, workingDirectory: workspace.currentDirectory
             ) else { continue }
             workspace.setPanelCustomTitle(panelId: panel.id, title: tpl.title)
-            if let cmd = tpl.command {
-                sendCommand(to: panel.id, in: workspace, command: cmd)
-            }
+            if let cmd = tpl.command { sendCommand(to: panel.id, in: workspace, command: cmd) }
         }
 
         return totalMissing
     }
 
-    /// Send a command + newline to a terminal panel. Works even if the surface
-    /// isn't started yet — the input is queued and flushed on surface start.
     private static func sendCommand(to panelId: UUID, in workspace: Workspace, command: String) {
         guard let terminalPanel = workspace.terminalPanel(for: panelId) else { return }
         terminalPanel.sendText(command + "\n")
     }
 
-    /// Normalize a directory path for dedup comparison.
     private static func normalizedDirectoryKey(_ directory: String) -> String {
         var path = (directory as NSString).expandingTildeInPath
         path = (path as NSString).standardizingPath
-        if path.hasSuffix("/"), path.count > 1 {
-            path = String(path.dropLast())
-        }
+        if path.hasSuffix("/"), path.count > 1 { path = String(path.dropLast()) }
         return path
     }
 }
