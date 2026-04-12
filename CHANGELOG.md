@@ -2,6 +2,11 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.0] - 2026-04-12
+
+### Added
+- Native workspace set import: `~/.config/cmux/workspace-set.json` defines sections and workspaces; auto-imports on fresh launch and refreshes live via a new **Reload Workspace Set** menu item. Replaces the external Python script that had to kill cmux, write the session file, and relaunch.
+
 ## [0.63.2] - 2026-04-06
 
 ### Added
