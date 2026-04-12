@@ -2,6 +2,11 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.2] - 2026-04-12
+
+### Changed
+- Workspace template now honors a `defaultLayout` tree in `workspace-set.json` with nested splits, divider positions, and panels-as-tabs-per-pane. Applied to new workspaces created by import and to **Rebuild Workspace Layout**, with the exact dividers you specified.
+
 ## [0.64.1] - 2026-04-12
 
 ### Added
