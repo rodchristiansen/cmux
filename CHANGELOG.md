@@ -2,6 +2,12 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.1] - 2026-04-12
+
+### Added
+- `defaultPanels` template in `workspace-set.json` — each workspace built or reloaded from the set gets the same named panels (Terminal, Claude, Files, Lazygit, etc.) with their tools auto-launched via optional `command` fields. Fixes the bare-shell panels that appear after session restore.
+- **Rebuild Workspace Layout** menu item — closes every panel in the focused workspace and recreates them from the template, for when a workspace is already stuck with bare-shell panels.
+
 ## [0.64.0] - 2026-04-12
 
 ### Added
