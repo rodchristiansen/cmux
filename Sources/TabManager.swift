@@ -2705,13 +2705,15 @@ class TabManager: ObservableObject {
     }
 
     @discardableResult
-    func createSection(name: String) -> SidebarSection {
+    func createSection(name: String, triggerRename: Bool = true) -> SidebarSection {
         let section = SidebarSection(name: name)
         sections.append(section)
-        // Delay so SwiftUI renders the new SidebarSectionHeaderView
-        // (and subscribes to $pendingRenameSectionId) before we emit.
-        DispatchQueue.main.async { [weak self] in
-            self?.pendingRenameSectionId = section.id
+        if triggerRename {
+            // Delay so SwiftUI renders the new SidebarSectionHeaderView
+            // (and subscribes to $pendingRenameSectionId) before we emit.
+            DispatchQueue.main.async { [weak self] in
+                self?.pendingRenameSectionId = section.id
+            }
         }
         return section
     }
