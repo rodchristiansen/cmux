@@ -3944,20 +3944,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             dlog(
                 "workspaceSet.reload created=\(summary.created.count) " +
                     "skipped=\(summary.skipped.count) " +
-                    "sections=\(summary.sectionsCreated.count)"
+                    "sections=\(summary.sectionsCreated.count) " +
+                    "panelsAdded=\(summary.panelsAdded)"
             )
 #endif
-            if summary.created.isEmpty && summary.sectionsCreated.isEmpty {
-                NSLog("[WorkspaceSetImporter] reload: nothing to import (all workspaces already exist)")
-            } else {
-                NSLog(
-                    "[WorkspaceSetImporter] reload: created %d workspaces, %d sections",
-                    summary.created.count,
-                    summary.sectionsCreated.count
-                )
-            }
+            NSLog(
+                "[WorkspaceSetImporter] reload: +%d workspaces, +%d sections, +%d panels",
+                summary.created.count,
+                summary.sectionsCreated.count,
+                summary.panelsAdded
+            )
         case .failure(let error):
             NSLog("[WorkspaceSetImporter] reload failed: %@", error.localizedDescription)
+        }
+    }
+
+    /// Rebuild the focused workspace's layout from the template in
+    /// workspace-set.json. Closes all existing panels and recreates them.
+    func rebuildCurrentWorkspaceFromTemplate() {
+        guard let tabManager = mainWindowContexts.values.first?.tabManager,
+              let tabId = tabManager.selectedTabId,
+              let workspace = tabManager.tabs.first(where: { $0.id == tabId }) else { return }
+        if let count = WorkspaceSetImporter.rebuildWorkspaceFromTemplate(workspace) {
+            NSLog("[WorkspaceSetImporter] rebuild: recreated %d panels in '%@'",
+                  count, workspace.title)
+        } else {
+            NSLog("[WorkspaceSetImporter] rebuild: no defaultPanels in workspace-set.json")
         }
     }
 

@@ -37109,6 +37109,23 @@
         }
       }
     },
+    "menu.app.rebuildWorkspaceLayout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuild Workspace Layout"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ワークスペースレイアウトを再構築"
+          }
+        }
+      }
+    },
     "menu.app.settings": {
       "extractionState": "manual",
       "localizations": {

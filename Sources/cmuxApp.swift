@@ -369,6 +369,9 @@ struct cmuxApp: App {
                 Button(String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")) {
                     AppDelegate.shared?.reloadWorkspaceSet()
                 }
+                Button(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Rebuild Workspace Layout")) {
+                    AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate()
+                }
             }
 
             CommandGroup(replacing: .appInfo) {
