@@ -3954,6 +3954,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 summary.sectionsCreated.count,
                 summary.panelsAdded
             )
+            // Newly created panels may have initialized with a stale appearance.
+            // Sweep every surface to re-apply the current system color scheme.
+            if summary.panelsAdded > 0 || summary.created.count > 0 {
+                refreshTerminalSurfacesAfterGhosttyConfigReload(source: "reloadWorkspaceSet")
+            }
         case .failure(let error):
             NSLog("[WorkspaceSetImporter] reload failed: %@", error.localizedDescription)
         }
@@ -3968,6 +3973,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if let count = WorkspaceSetImporter.rebuildWorkspaceFromTemplate(workspace) {
             NSLog("[WorkspaceSetImporter] rebuild: recreated %d panels in '%@'",
                   count, workspace.title)
+            // Force every terminal surface (in any workspace) to re-apply the
+            // current system color scheme. New panels created during rebuild
+            // can miss the viewDidChangeEffectiveAppearance signal if they
+            // were mounted before attachment; this sweep recovers them.
+            refreshTerminalSurfacesAfterGhosttyConfigReload(source: "rebuildWorkspace")
         } else {
             NSLog("[WorkspaceSetImporter] rebuild: no defaultPanels in workspace-set.json")
         }

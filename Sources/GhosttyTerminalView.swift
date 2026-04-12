@@ -2436,19 +2436,27 @@ class GhosttyApp {
                 "appearance sync source=\(source) previous=\(previousLabel) current=\(currentLabel) reload=\(shouldReload)"
             )
         }
-        guard shouldReload else { return }
-        lastAppearanceColorScheme = currentColorScheme
-
-        // Update the app's conditional state to match the new appearance so
-        // that ghostty_app_update_config derives correctly and new surfaces
-        // inherit the right scheme. The dedup inside App.colorSchemeEvent
-        // makes this a no-op if the state already matches.
+        // Always update the app's conditional state (cheap, deduped internally).
         if let app {
             let scheme: ghostty_color_scheme_e = currentColorScheme == .dark
                 ? GHOSTTY_COLOR_SCHEME_DARK
                 : GHOSTTY_COLOR_SCHEME_LIGHT
             ghostty_app_set_color_scheme(app, scheme)
         }
+
+        guard shouldReload else {
+            // Even when the tracked scheme matches, sweep all surfaces in case
+            // any drifted (e.g. panels created during a layout rebuild that
+            // missed the viewDidChangeEffectiveAppearance signal). This is
+            // idempotent — each surface call has internal dedup.
+            DispatchQueue.main.async {
+                AppDelegate.shared?.refreshTerminalSurfacesAfterGhosttyConfigReload(
+                    source: "appearanceSync.dedup:\(source)"
+                )
+            }
+            return
+        }
+        lastAppearanceColorScheme = currentColorScheme
 
         reloadConfiguration(
             source: "appearanceSync:\(source)",
@@ -5711,7 +5719,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     fileprivate func applySurfaceColorScheme(force: Bool = false) {
         guard let surface else { return }
-        let bestMatch = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        // Read from NSApp.effectiveAppearance (system-wide) rather than
+        // self.effectiveAppearance so that surfaces can't drift out of sync
+        // when their window/view hierarchy has a stale appearance cached
+        // (e.g. during layout rebuild, workspace detach/reattach, or early
+        // creation before the view is in a window).
+        let systemAppearance = NSApp?.effectiveAppearance ?? effectiveAppearance
+        let bestMatch = systemAppearance.bestMatch(from: [.darkAqua, .aqua])
         let scheme: ghostty_color_scheme_e = bestMatch == .darkAqua
             ? GHOSTTY_COLOR_SCHEME_DARK
             : GHOSTTY_COLOR_SCHEME_LIGHT
