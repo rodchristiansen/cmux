@@ -3861,6 +3861,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             ) {
                 primaryWindow.setFrame(restoredFrame, display: true)
             }
+
+            // No session to restore — attempt workspace set import if the config file exists.
+            if WorkspaceSetImporter.fileExists() {
+                importWorkspaceSetOnFreshLaunch(into: primaryContext.tabManager)
+            }
         }
 
         if let startupSnapshot {
@@ -3895,6 +3900,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         startupSessionSnapshot = nil
         isApplyingStartupSessionRestore = false
         _ = saveSessionSnapshot(includeScrollback: false)
+    }
+
+    // MARK: - Workspace Set Import
+
+    /// Import workspace-set.json into a TabManager on fresh launch (no existing session).
+    /// Removes the default "Terminal 1" workspace if the import creates any workspaces.
+    private func importWorkspaceSetOnFreshLaunch(into tabManager: TabManager) {
+        let defaultTab = tabManager.tabs.count == 1 ? tabManager.tabs.first : nil
+        let result = WorkspaceSetImporter.importFromFile(into: tabManager)
+        switch result {
+        case .success(let summary):
+#if DEBUG
+            dlog(
+                "workspaceSet.freshImport created=\(summary.created.count) " +
+                    "skipped=\(summary.skipped.count) " +
+                    "sections=\(summary.sectionsCreated.count)"
+            )
+#endif
+            // Remove the default empty workspace if the import added real workspaces
+            if !summary.created.isEmpty, let defaultTab,
+               defaultTab.customTitle == nil,
+               tabManager.tabs.count > 1 {
+                tabManager.closeWorkspace(defaultTab)
+                // Select the first imported workspace
+                if let first = tabManager.tabs.first {
+                    tabManager.selectWorkspace(first)
+                }
+            }
+        case .failure(let error):
+            NSLog("[WorkspaceSetImporter] fresh launch import failed: %@", error.localizedDescription)
+        }
+    }
+
+    /// Reload workspace-set.json into the active window's TabManager.
+    /// Called from the menu bar.
+    func reloadWorkspaceSet() {
+        guard let tabManager = mainWindowContexts.values.first?.tabManager else { return }
+        let result = WorkspaceSetImporter.importFromFile(into: tabManager)
+        switch result {
+        case .success(let summary):
+#if DEBUG
+            dlog(
+                "workspaceSet.reload created=\(summary.created.count) " +
+                    "skipped=\(summary.skipped.count) " +
+                    "sections=\(summary.sectionsCreated.count)"
+            )
+#endif
+            if summary.created.isEmpty && summary.sectionsCreated.isEmpty {
+                NSLog("[WorkspaceSetImporter] reload: nothing to import (all workspaces already exist)")
+            } else {
+                NSLog(
+                    "[WorkspaceSetImporter] reload: created %d workspaces, %d sections",
+                    summary.created.count,
+                    summary.sectionsCreated.count
+                )
+            }
+        case .failure(let error):
+            NSLog("[WorkspaceSetImporter] reload failed: %@", error.localizedDescription)
+        }
     }
 
     private func applySessionWindowSnapshot(
