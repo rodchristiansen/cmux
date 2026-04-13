@@ -2,6 +2,14 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.5] - 2026-04-12
+
+### Added
+- Sidebar **Idle** filter alongside **Running**, and a yellow **Clear** button that appears whenever either filter is active.
+
+### Changed
+- A sidebar filter chip is now disabled when its set is empty (no running workspaces disables Running, all running disables Idle), and if an active filter's set drops to zero it auto-clears — so the sidebar never appears mysteriously empty.
+
 ## [0.64.4] - 2026-04-12
 
 ### Fixed
