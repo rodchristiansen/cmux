@@ -10076,6 +10076,14 @@ struct VerticalTabsSidebar: View {
         sidebarFilterModeRaw = mode.rawValue
     }
 
+    private func autoClearSidebarFilterIfEmpty(running: Int, idle: Int) {
+        switch sidebarFilterMode {
+        case .running where running == 0: setSidebarFilter(.none)
+        case .idle where idle == 0: setSidebarFilter(.none)
+        default: break
+        }
+    }
+
     /// Space at top of sidebar for traffic light buttons
     private let trafficLightPadding: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
@@ -10084,14 +10092,23 @@ struct VerticalTabsSidebar: View {
     private func isWorkspaceRunning(_ workspace: Workspace) -> Bool {
         workspace.statusEntries.values.contains { entry in
             entry.value.range(of: "running", options: .caseInsensitive) != nil
+                || entry.value.range(of: "needs input", options: .caseInsensitive) != nil
         }
+    }
+
+    /// A workspace has an "agent session" when it has tracked agent PIDs
+    /// (e.g. claude_code). Workspaces without any agent never count as Idle.
+    private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
+        !workspace.agentPIDs.isEmpty
     }
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
         switch sidebarFilterMode {
         case .none: return workspaces
         case .running: return workspaces.filter(isWorkspaceRunning)
-        case .idle: return workspaces.filter { !isWorkspaceRunning($0) }
+        case .idle:
+            // Only agent sessions that are idle — not all non-running workspaces.
+            return workspaces.filter { workspaceHasAgentSession($0) && !isWorkspaceRunning($0) }
         }
     }
 
@@ -10182,6 +10199,9 @@ struct VerticalTabsSidebar: View {
         let allOrdered = layout.allWorkspacesInOrder
         let workspaceCount = tabs.count
         let runningWorkspaceCount = tabs.reduce(0) { $0 + (isWorkspaceRunning($1) ? 1 : 0) }
+        let idleAgentWorkspaceCount = tabs.reduce(0) {
+            $0 + (workspaceHasAgentSession($1) && !isWorkspaceRunning($1) ? 1 : 0)
+        }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
@@ -10207,32 +10227,52 @@ struct VerticalTabsSidebar: View {
             selectedRemoteContextMenuTargets.allSatisfy { $0.remoteConnectionState == .disconnected }
 
         VStack(spacing: 0) {
+            // Pinned top: traffic light space + always-visible filter bar.
+            VStack(spacing: 0) {
+                // Space for traffic lights / fullscreen controls
+                Spacer()
+                    .frame(height: trafficLightPadding)
+
+                SidebarFilterBar(
+                    mode: sidebarFilterMode,
+                    runningCount: runningWorkspaceCount,
+                    idleCount: idleAgentWorkspaceCount,
+                    setMode: { setSidebarFilter($0) }
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+                .onChange(of: runningWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(
+                        running: runningWorkspaceCount,
+                        idle: idleAgentWorkspaceCount
+                    )
+                }
+                .onChange(of: idleAgentWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(
+                        running: runningWorkspaceCount,
+                        idle: idleAgentWorkspaceCount
+                    )
+                }
+            }
+            .overlay(alignment: .top) {
+                // Match native titlebar behavior in the sidebar top strip:
+                // drag-to-move and double-click action (zoom/minimize).
+                WindowDragHandleView()
+                    .frame(height: trafficLightPadding)
+                    .background(TitlebarDoubleClickMonitorView())
+            }
+            .overlay(alignment: .topLeading) {
+                if isMinimalMode, #unavailable(macOS 26.0) {
+                    HiddenTitlebarSidebarControlsView(notificationStore: notificationStore)
+                        .padding(.leading, hiddenTitlebarControlsLeadingInset)
+                        .padding(.top, 2)
+                }
+            }
+
             GeometryReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Space for traffic lights / fullscreen controls
-                        Spacer()
-                            .frame(height: trafficLightPadding)
-
-                        SidebarFilterBar(
-                            mode: sidebarFilterMode,
-                            runningCount: runningWorkspaceCount,
-                            idleCount: max(workspaceCount - runningWorkspaceCount, 0),
-                            setMode: { setSidebarFilter($0) }
-                        )
-                        .padding(.horizontal, 10)
-                        .padding(.top, 12)
-                        .padding(.bottom, 6)
-                        .onChange(of: runningWorkspaceCount) { newRunning in
-                            // Auto-clear a filter when its target set becomes empty
-                            // so the sidebar never appears mysteriously blank.
-                            if sidebarFilterMode == .running && newRunning == 0 {
-                                setSidebarFilter(.none)
-                            } else if sidebarFilterMode == .idle && newRunning >= workspaceCount {
-                                setSidebarFilter(.none)
-                            }
-                        }
-
                         // Workspaces are bounded, so prefer a non-lazy stack here.
                         // LazyVStack + drag-state invalidations can recurse through layout.
                         VStack(spacing: tabRowSpacing) {
@@ -10318,20 +10358,6 @@ struct VerticalTabsSidebar: View {
                     }
                     .frame(width: 0, height: 0)
                 )
-                .overlay(alignment: .top) {
-                    // Match native titlebar behavior in the sidebar top strip:
-                    // drag-to-move and double-click action (zoom/minimize).
-                    WindowDragHandleView()
-                        .frame(height: trafficLightPadding)
-                        .background(TitlebarDoubleClickMonitorView())
-                }
-                .overlay(alignment: .topLeading) {
-                    if isMinimalMode, #unavailable(macOS 26.0) {
-                        HiddenTitlebarSidebarControlsView(notificationStore: notificationStore)
-                            .padding(.leading, hiddenTitlebarControlsLeadingInset)
-                            .padding(.top, 2)
-                    }
-                }
                 .background(Color.clear)
                 .modifier(ClearScrollBackground())
             }
