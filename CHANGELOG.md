@@ -2,6 +2,11 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.4] - 2026-04-12
+
+### Fixed
+- **Rebuild Workspace Layout** was appending panels instead of replacing them — each click piled on another set of splits. Now closes every existing panel before rebuilding from the template.
+
 ## [0.64.3] - 2026-04-12
 
 ### Fixed
