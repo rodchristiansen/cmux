@@ -10065,8 +10065,16 @@ struct VerticalTabsSidebar: View {
     @State private var dropIndicator: SidebarDropIndicator?
     @AppStorage(WorkspacePresentationModeSettings.modeKey)
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
-    @AppStorage("sidebar.filter.onlyRunning")
-    private var showOnlyRunningWorkspaces = false
+    @AppStorage("sidebar.filter.mode")
+    private var sidebarFilterModeRaw: String = SidebarFilterMode.none.rawValue
+
+    private var sidebarFilterMode: SidebarFilterMode {
+        SidebarFilterMode(rawValue: sidebarFilterModeRaw) ?? .none
+    }
+
+    private func setSidebarFilter(_ mode: SidebarFilterMode) {
+        sidebarFilterModeRaw = mode.rawValue
+    }
 
     /// Space at top of sidebar for traffic light buttons
     private let trafficLightPadding: CGFloat = 28
@@ -10080,8 +10088,11 @@ struct VerticalTabsSidebar: View {
     }
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
-        guard showOnlyRunningWorkspaces else { return workspaces }
-        return workspaces.filter(isWorkspaceRunning)
+        switch sidebarFilterMode {
+        case .none: return workspaces
+        case .running: return workspaces.filter(isWorkspaceRunning)
+        case .idle: return workspaces.filter { !isWorkspaceRunning($0) }
+        }
     }
 
     private var isMinimalMode: Bool {
@@ -10175,7 +10186,7 @@ struct VerticalTabsSidebar: View {
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
             let filtered = workspacesMatchingFilter(group.workspaces)
-            if showOnlyRunningWorkspaces && filtered.isEmpty { return nil }
+            if sidebarFilterMode != .none && filtered.isEmpty { return nil }
             return SidebarLayout.SectionGroup(section: group.section, workspaces: filtered)
         }
         let canCloseWorkspace = workspaceCount > 1
@@ -10203,13 +10214,24 @@ struct VerticalTabsSidebar: View {
                         Spacer()
                             .frame(height: trafficLightPadding)
 
-                        SidebarRunningFilterToggle(
-                            isActive: $showOnlyRunningWorkspaces,
-                            runningCount: runningWorkspaceCount
+                        SidebarFilterBar(
+                            mode: sidebarFilterMode,
+                            runningCount: runningWorkspaceCount,
+                            idleCount: max(workspaceCount - runningWorkspaceCount, 0),
+                            setMode: { setSidebarFilter($0) }
                         )
                         .padding(.horizontal, 10)
                         .padding(.top, 12)
                         .padding(.bottom, 6)
+                        .onChange(of: runningWorkspaceCount) { newRunning in
+                            // Auto-clear a filter when its target set becomes empty
+                            // so the sidebar never appears mysteriously blank.
+                            if sidebarFilterMode == .running && newRunning == 0 {
+                                setSidebarFilter(.none)
+                            } else if sidebarFilterMode == .idle && newRunning >= workspaceCount {
+                                setSidebarFilter(.none)
+                            }
+                        }
 
                         // Workspaces are bounded, so prefer a non-lazy stack here.
                         // LazyVStack + drag-state invalidations can recurse through layout.
@@ -10393,62 +10415,120 @@ struct VerticalTabsSidebar: View {
     }
 }
 
-private struct SidebarRunningFilterToggle: View {
-    @Binding var isActive: Bool
+enum SidebarFilterMode: String, CaseIterable {
+    case none
+    case running
+    case idle
+}
+
+private struct SidebarFilterBar: View {
+    let mode: SidebarFilterMode
     let runningCount: Int
+    let idleCount: Int
+    let setMode: (SidebarFilterMode) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SidebarFilterChip(
+                title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
+                icon: "bolt.fill",
+                count: runningCount,
+                isActive: mode == .running,
+                isDisabled: runningCount == 0,
+                activeColor: .accentColor,
+                tooltipActive: String(localized: "sidebar.filter.running.showAll",
+                                      defaultValue: "Show all workspaces"),
+                tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
+                                        defaultValue: "Show only running workspaces"),
+                accessibilityId: "SidebarRunningFilterToggle",
+                action: { setMode(mode == .running ? .none : .running) }
+            )
+
+            SidebarFilterChip(
+                title: String(localized: "sidebar.filter.idle", defaultValue: "Idle"),
+                icon: "pause.fill",
+                count: idleCount,
+                isActive: mode == .idle,
+                isDisabled: idleCount == 0,
+                activeColor: .accentColor,
+                tooltipActive: String(localized: "sidebar.filter.idle.showAll",
+                                      defaultValue: "Show all workspaces"),
+                tooltipInactive: String(localized: "sidebar.filter.idle.tooltip",
+                                        defaultValue: "Show only idle workspaces"),
+                accessibilityId: "SidebarIdleFilterToggle",
+                action: { setMode(mode == .idle ? .none : .idle) }
+            )
+
+            Spacer(minLength: 0)
+
+            if mode != .none {
+                Button {
+                    setMode(.none)
+                } label: {
+                    Text(String(localized: "sidebar.filter.clear", defaultValue: "Clear"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.yellow)
+                        )
+                }
+                .buttonStyle(.plain)
+                .safeHelp(String(localized: "sidebar.filter.clear.tooltip",
+                                 defaultValue: "Clear filter"))
+                .accessibilityIdentifier("SidebarClearFilter")
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: mode)
+    }
+}
+
+private struct SidebarFilterChip: View {
+    let title: String
+    let icon: String
+    let count: Int
+    let isActive: Bool
+    let isDisabled: Bool
+    let activeColor: Color
+    let tooltipActive: String
+    let tooltipInactive: String
+    let accessibilityId: String
+    let action: () -> Void
+
     @State private var isHovered = false
 
-    private var label: String {
-        String(localized: "sidebar.filter.running", defaultValue: "Running")
-    }
-
-    private var tooltip: String {
-        isActive
-            ? String(
-                localized: "sidebar.filter.running.showAll",
-                defaultValue: "Show all workspaces"
-            )
-            : String(
-                localized: "sidebar.filter.running.tooltip",
-                defaultValue: "Show only running workspaces"
-            )
-    }
-
     private var foregroundColor: Color {
-        isActive ? Color.accentColor : Color(nsColor: .secondaryLabelColor)
+        if isDisabled { return Color(nsColor: .tertiaryLabelColor) }
+        return isActive ? activeColor : Color(nsColor: .secondaryLabelColor)
     }
 
     private var backgroundFill: Color {
-        if isActive {
-            return Color.accentColor.opacity(0.18)
-        }
-        if isHovered {
-            return Color.primary.opacity(0.08)
-        }
+        if isDisabled { return Color.clear }
+        if isActive { return activeColor.opacity(0.18) }
+        if isHovered { return Color.primary.opacity(0.08) }
         return Color.clear
     }
 
     var body: some View {
-        Button {
-            isActive.toggle()
-        } label: {
+        Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
+                Image(systemName: icon)
                     .font(.system(size: 10, weight: .semibold))
-                Text(label)
+                Text(title)
                     .font(.system(size: 11, weight: .semibold))
-                if runningCount > 0 {
-                    Text("\(runningCount)")
+                if count > 0 {
+                    Text("\(count)")
                         .font(.system(size: 10, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(foregroundColor.opacity(0.75))
                 }
-                Spacer(minLength: 0)
             }
             .foregroundStyle(foregroundColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(backgroundFill)
@@ -10456,15 +10536,17 @@ private struct SidebarRunningFilterToggle: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
         .onHover { hovering in
+            guard !isDisabled else { isHovered = false; return }
             isHovered = hovering
         }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .animation(.easeOut(duration: 0.12), value: isActive)
-        .safeHelp(tooltip)
-        .accessibilityLabel(tooltip)
+        .safeHelp(isActive ? tooltipActive : tooltipInactive)
+        .accessibilityLabel(isActive ? tooltipActive : tooltipInactive)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("SidebarRunningFilterToggle")
+        .accessibilityIdentifier(accessibilityId)
     }
 }
 
