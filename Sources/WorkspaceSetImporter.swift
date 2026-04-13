@@ -230,8 +230,25 @@ enum WorkspaceSetImporter {
                            tabManager.sectionForWorkspace(existingWs.id) == nil {
                             tabManager.moveWorkspaceToSection(tabId: existingWs.id, sectionId: section.id)
                         }
-                        if let templates = workspaceSet.defaultPanels {
-                            panelsAdded += fillMissingPanels(in: existingWs, templates: templates)
+                        // Idle workspaces get fully rebuilt from the template so
+                        // their layout + tools match the JSON. Running workspaces
+                        // are preserved — only missing panels get added.
+                        if let templates = workspaceSet.defaultPanels, !templates.isEmpty {
+                            if isWorkspaceIdle(existingWs) {
+                                // Tear down and rebuild from template.
+                                let anchor = existingWs.focusedPanelId
+                                for panelId in Array(existingWs.panels.keys) where panelId != anchor {
+                                    _ = existingWs.closePanel(panelId, force: true)
+                                }
+                                applyFullTemplate(
+                                    to: existingWs,
+                                    panels: templates,
+                                    layout: workspaceSet.defaultLayout
+                                )
+                                panelsAdded += templates.count
+                            } else {
+                                panelsAdded += fillMissingPanels(in: existingWs, templates: templates)
+                            }
                         }
                     }
                     skipped.append(.init(name: entry.name, directory: entry.directory, reason: "directory_exists"))
@@ -360,11 +377,17 @@ enum WorkspaceSetImporter {
 
         workspace.restoreSessionSnapshot(snapshot)
 
-        // Now send each panel's command. Surfaces may not be started yet;
-        // sendText queues input and triggers a background surface start.
+        // Look up panels by their custom title after restore. The snapshot
+        // UUIDs we generated above are remapped to fresh UUIDs by
+        // createPanel; the custom title is preserved, so we match by that.
+        var panelIdByTitleAfterRestore: [String: UUID] = [:]
+        for (panelId, customTitle) in workspace.panelCustomTitles {
+            panelIdByTitleAfterRestore[customTitle.lowercased()] = panelId
+        }
+
         for tpl in panels {
             guard let cmd = tpl.command, !cmd.isEmpty else { continue }
-            guard let panelId = panelIdByTitle[tpl.title.lowercased()] else { continue }
+            guard let panelId = panelIdByTitleAfterRestore[tpl.title.lowercased()] else { continue }
             sendCommand(to: panelId, in: workspace, command: cmd)
         }
     }
@@ -461,6 +484,17 @@ enum WorkspaceSetImporter {
         }
 
         return totalMissing
+    }
+
+    /// A workspace is "idle" when no status entry reports as running. Used to
+    /// decide whether a reload can safely rebuild its layout from the template.
+    private static func isWorkspaceIdle(_ workspace: Workspace) -> Bool {
+        for entry in workspace.statusEntries.values {
+            if entry.value.range(of: "running", options: .caseInsensitive) != nil {
+                return false
+            }
+        }
+        return true
     }
 
     private static func sendCommand(to panelId: UUID, in workspace: Workspace, command: String) {
