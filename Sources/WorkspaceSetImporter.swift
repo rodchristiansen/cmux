@@ -148,6 +148,17 @@ enum WorkspaceSetImporter {
         let resolvedPath = path ?? defaultPath
         guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
         guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
+
+        // Reduce the workspace to a single pane with one anchor panel so
+        // `restoreSessionSnapshot` doesn't layer new splits on top of the
+        // existing layout. Close every non-anchor panel with force=true;
+        // bonsplit collapses a pane when its last tab closes, so after this
+        // the workspace is in the same shape as a newly-minted one.
+        let anchor = workspace.focusedPanelId
+        for panelId in Array(workspace.panels.keys) where panelId != anchor {
+            _ = workspace.closePanel(panelId, force: true)
+        }
+
         applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
         return templates.count
     }
