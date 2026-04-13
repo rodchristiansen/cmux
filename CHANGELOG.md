@@ -2,6 +2,14 @@
 
 All notable changes to cmux are documented here.
 
+## [0.64.6] - 2026-04-12
+
+### Fixed
+- **Rebuild Workspace Layout** now actually runs each panel's command. Panel UUIDs were being remapped during restore and the command dispatch was sending to non-existent IDs, leaving panels as bare shells.
+
+### Changed
+- **Reload Workspace Set** now also rebuilds idle workspaces (no running status) from the template, not just the currently open one. Running workspaces are preserved so you don't lose work mid-flight.
+
 ## [0.64.5] - 2026-04-12
 
 ### Added
