@@ -12445,11 +12445,18 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            // Override only when pre-tool-use stashed a real AskUserQuestion body.
+            // That override means this really is "Needs input"; otherwise a "Waiting"
+            // subtitle indicates Claude's 60s idle reminder, not a pending request.
+            var overrodeWithSavedQuestion = false
             if let mappedSession,
                let savedBody = mappedSession.lastBody, !savedBody.isEmpty,
                summary.body.contains("needs your attention") || summary.body.contains("needs your input") {
                 summary = (subtitle: mappedSession.lastSubtitle ?? summary.subtitle, body: savedBody)
+                overrodeWithSavedQuestion = true
             }
+
+            let isIdleReminder = !overrodeWithSavedQuestion && summary.subtitle == "Waiting"
 
             let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
                 preferred: mappedSession?.surfaceId,
@@ -12474,15 +12481,28 @@ struct CMUXCLI {
                 )
             }
 
-            let response = try client.send(command: "notify_target \(workspaceId) \(surfaceId) \(payload)")
-            _ = try? setClaudeStatus(
-                client: client,
-                workspaceId: workspaceId,
-                value: "Needs input",
-                icon: "bell.fill",
-                color: "#4C8DFF"
-            )
-            print(response)
+            if isIdleReminder {
+                // Claude's 60s idle timer fired, not a real input request.
+                // Don't flip status to "Needs input" and don't raise a notification bubble.
+                try? setClaudeStatus(
+                    client: client,
+                    workspaceId: workspaceId,
+                    value: "Idle",
+                    icon: "pause.circle.fill",
+                    color: "#8E8E93"
+                )
+                print("OK")
+            } else {
+                let response = try client.send(command: "notify_target \(workspaceId) \(surfaceId) \(payload)")
+                _ = try? setClaudeStatus(
+                    client: client,
+                    workspaceId: workspaceId,
+                    value: "Needs input",
+                    icon: "bell.fill",
+                    color: "#4C8DFF"
+                )
+                print(response)
+            }
 
         case "session-end":
             telemetry.breadcrumb("claude-hook.session-end")
