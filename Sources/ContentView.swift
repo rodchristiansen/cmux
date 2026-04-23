@@ -10076,11 +10076,9 @@ struct VerticalTabsSidebar: View {
         sidebarFilterModeRaw = mode.rawValue
     }
 
-    private func autoClearSidebarFilterIfEmpty(running: Int, idle: Int) {
-        switch sidebarFilterMode {
-        case .running where running == 0: setSidebarFilter(.none)
-        case .idle where idle == 0: setSidebarFilter(.none)
-        default: break
+    private func autoClearSidebarFilterIfEmpty(active: Int) {
+        if sidebarFilterMode == .active && active == 0 {
+            setSidebarFilter(.none)
         }
     }
 
@@ -10089,15 +10087,9 @@ struct VerticalTabsSidebar: View {
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
 
-    private func isWorkspaceRunning(_ workspace: Workspace) -> Bool {
-        workspace.statusEntries.values.contains { entry in
-            entry.value.range(of: "running", options: .caseInsensitive) != nil
-                || entry.value.range(of: "needs input", options: .caseInsensitive) != nil
-        }
-    }
-
     /// A workspace has an "agent session" when it has tracked agent PIDs
-    /// (e.g. claude_code). Workspaces without any agent never count as Idle.
+    /// (e.g. claude_code), regardless of whether the agent is running,
+    /// awaiting input, or idle.
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
         !workspace.agentPIDs.isEmpty
     }
@@ -10105,10 +10097,7 @@ struct VerticalTabsSidebar: View {
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
         switch sidebarFilterMode {
         case .none: return workspaces
-        case .running: return workspaces.filter(isWorkspaceRunning)
-        case .idle:
-            // Only agent sessions that are idle — not all non-running workspaces.
-            return workspaces.filter { workspaceHasAgentSession($0) && !isWorkspaceRunning($0) }
+        case .active: return workspaces.filter(workspaceHasAgentSession)
         }
     }
 
@@ -10198,10 +10187,7 @@ struct VerticalTabsSidebar: View {
         let layout = tabManager.sidebarLayout
         let allOrdered = layout.allWorkspacesInOrder
         let workspaceCount = tabs.count
-        let runningWorkspaceCount = tabs.reduce(0) { $0 + (isWorkspaceRunning($1) ? 1 : 0) }
-        let idleAgentWorkspaceCount = tabs.reduce(0) {
-            $0 + (workspaceHasAgentSession($1) && !isWorkspaceRunning($1) ? 1 : 0)
-        }
+        let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
@@ -10235,24 +10221,14 @@ struct VerticalTabsSidebar: View {
 
                 SidebarFilterBar(
                     mode: sidebarFilterMode,
-                    runningCount: runningWorkspaceCount,
-                    idleCount: idleAgentWorkspaceCount,
+                    activeCount: activeWorkspaceCount,
                     setMode: { setSidebarFilter($0) }
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
-                .onChange(of: runningWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(
-                        running: runningWorkspaceCount,
-                        idle: idleAgentWorkspaceCount
-                    )
-                }
-                .onChange(of: idleAgentWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(
-                        running: runningWorkspaceCount,
-                        idle: idleAgentWorkspaceCount
-                    )
+                .onChange(of: activeWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
                 }
             }
             .overlay(alignment: .top) {
@@ -10443,70 +10419,32 @@ struct VerticalTabsSidebar: View {
 
 enum SidebarFilterMode: String, CaseIterable {
     case none
-    case running
-    case idle
+    case active
 }
 
 private struct SidebarFilterBar: View {
     let mode: SidebarFilterMode
-    let runningCount: Int
-    let idleCount: Int
+    let activeCount: Int
     let setMode: (SidebarFilterMode) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
             SidebarFilterChip(
-                title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
+                title: String(localized: "sidebar.filter.active", defaultValue: "Active"),
                 icon: "bolt.fill",
-                count: runningCount,
-                isActive: mode == .running,
-                isDisabled: runningCount == 0,
+                count: activeCount,
+                isActive: mode == .active,
+                isDisabled: activeCount == 0,
                 activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.running.showAll",
+                tooltipActive: String(localized: "sidebar.filter.active.showAll",
                                       defaultValue: "Show all workspaces"),
-                tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
-                                        defaultValue: "Show only running workspaces"),
-                accessibilityId: "SidebarRunningFilterToggle",
-                action: { setMode(mode == .running ? .none : .running) }
-            )
-
-            SidebarFilterChip(
-                title: String(localized: "sidebar.filter.idle", defaultValue: "Idle"),
-                icon: "pause.fill",
-                count: idleCount,
-                isActive: mode == .idle,
-                isDisabled: idleCount == 0,
-                activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.idle.showAll",
-                                      defaultValue: "Show all workspaces"),
-                tooltipInactive: String(localized: "sidebar.filter.idle.tooltip",
-                                        defaultValue: "Show only idle workspaces"),
-                accessibilityId: "SidebarIdleFilterToggle",
-                action: { setMode(mode == .idle ? .none : .idle) }
+                tooltipInactive: String(localized: "sidebar.filter.active.tooltip",
+                                        defaultValue: "Show only workspaces with an agent session"),
+                accessibilityId: "SidebarActiveFilterToggle",
+                action: { setMode(mode == .active ? .none : .active) }
             )
 
             Spacer(minLength: 0)
-
-            if mode != .none {
-                Button {
-                    setMode(.none)
-                } label: {
-                    Text(String(localized: "sidebar.filter.clear", defaultValue: "Clear"))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.yellow)
-                        )
-                }
-                .buttonStyle(.plain)
-                .safeHelp(String(localized: "sidebar.filter.clear.tooltip",
-                                 defaultValue: "Clear filter"))
-                .accessibilityIdentifier("SidebarClearFilter")
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            }
         }
         .animation(.easeOut(duration: 0.15), value: mode)
     }
