@@ -48,3 +48,11 @@ tests/visual_report.html
 # Local scratch (screenshots, etc.)
 tmp/
 tmp-*/
+
+# Local agent / editor / tooling artifacts
+.agents/
+.claude/skills/
+.vscode/
+skills-lock.json
+cmux.json
+cmux-notary.zip
