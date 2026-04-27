@@ -2393,6 +2393,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var didPrepareStartupSessionSnapshot = false
     private var didAttemptStartupSessionRestore = false
     private var isApplyingStartupSessionRestore = false
+    /// Workspaces that have already been reconciled against workspace-set.json
+    /// during this app run. Reconcile fires once per workspace per launch the
+    /// first time the user navigates into it, so an in-progress workspace
+    /// isn't blown away by a later return visit.
+    private var workspaceSetReconciledIds: Set<UUID> = []
+    private var workspaceSetSelectionCancellable: AnyCancellable?
     private var sessionAutosaveTimer: DispatchSourceTimer?
     private var sessionAutosaveTickInFlight = false
     private var sessionAutosaveDeferredRetryPending = false
@@ -3900,6 +3906,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         startupSessionSnapshot = nil
         isApplyingStartupSessionRestore = false
         _ = saveSessionSnapshot(includeScrollback: false)
+        installWorkspaceSelectionReconcileObserver()
     }
 
     // MARK: - Workspace Set Import
@@ -3980,6 +3987,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             refreshTerminalSurfacesAfterGhosttyConfigReload(source: "rebuildWorkspace")
         } else {
             NSLog("[WorkspaceSetImporter] rebuild: no defaultPanels in workspace-set.json")
+        }
+        workspaceSetReconciledIds.insert(workspace.id)
+    }
+
+    /// After session restore finishes, watch the active window's selected
+    /// workspace. The first time the user navigates into any workspace this
+    /// launch — including re-clicking the one that was restored as selected —
+    /// reconcile its layout against workspace-set.json (idle: full rebuild
+    /// from template; running: only fill in missing panels).
+    private func installWorkspaceSelectionReconcileObserver() {
+        guard WorkspaceSetImporter.fileExists() else { return }
+        guard let tabManager = mainWindowContexts.values.first?.tabManager else { return }
+        workspaceSetSelectionCancellable = tabManager.$selectedTabId
+            .compactMap { $0 }
+            .sink { [weak self, weak tabManager] tabId in
+                guard let self, let tabManager else { return }
+                self.reconcileWorkspaceFromTemplateIfNeeded(tabId: tabId, in: tabManager)
+            }
+    }
+
+    private func reconcileWorkspaceFromTemplateIfNeeded(tabId: UUID, in tabManager: TabManager) {
+        guard !workspaceSetReconciledIds.contains(tabId) else { return }
+        guard let workspace = tabManager.tabs.first(where: { $0.id == tabId }) else { return }
+        workspaceSetReconciledIds.insert(tabId)
+        guard let summary = WorkspaceSetImporter.reconcileWorkspace(workspace) else { return }
+        NSLog(
+            "[WorkspaceSetImporter] reconcile-on-select: %@ in '%@' (%d panels)",
+            summary.action, workspace.title, summary.panelCount
+        )
+        if summary.panelCount > 0 {
+            refreshTerminalSurfacesAfterGhosttyConfigReload(source: "reconcileWorkspaceOnSelect")
         }
     }
 
