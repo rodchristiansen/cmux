@@ -138,6 +138,42 @@ enum WorkspaceSetImporter {
         return .success(result)
     }
 
+    /// Outcome of a single-workspace reconcile against the template.
+    struct WorkspaceReconcileSummary {
+        /// "rebuild" when the layout was torn down and recreated from the
+        /// template (idle workspace), "fill" when only missing panels were
+        /// added (running workspace), or "noop" when nothing needed to change.
+        let action: String
+        /// Number of panels touched: full template count for rebuild, missing
+        /// panel count for fill, 0 for noop.
+        let panelCount: Int
+    }
+
+    /// Reconcile a workspace against workspace-set.json without forcing a
+    /// destructive rebuild. Idle workspaces are torn down and rebuilt from the
+    /// template; running ones only get missing panels added so in-progress
+    /// work isn't disrupted. Mirrors the per-workspace logic in `mergeInto`.
+    static func reconcileWorkspace(
+        _ workspace: Workspace,
+        at path: String? = nil
+    ) -> WorkspaceReconcileSummary? {
+        let resolvedPath = path ?? defaultPath
+        guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
+        guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
+
+        if isWorkspaceIdle(workspace) {
+            let anchor = workspace.focusedPanelId
+            for panelId in Array(workspace.panels.keys) where panelId != anchor {
+                _ = workspace.closePanel(panelId, force: true)
+            }
+            applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
+            return WorkspaceReconcileSummary(action: "rebuild", panelCount: templates.count)
+        } else {
+            let added = fillMissingPanels(in: workspace, templates: templates)
+            return WorkspaceReconcileSummary(action: added > 0 ? "fill" : "noop", panelCount: added)
+        }
+    }
+
     /// Rebuild a single workspace's layout from the template in workspace-set.json.
     /// Replaces all panels and layout with the template; then runs each panel's command.
     @discardableResult
