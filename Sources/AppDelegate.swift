@@ -2485,6 +2485,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+#if DEBUG
+        dlog("application.openURLs count=\(urls.count) urls=\(urls.map(\.absoluteString).joined(separator: ","))")
+#endif
+        NSLog("[cmux.diag] application.openURLs count=%d urls=%@", urls.count, urls.map(\.absoluteString).joined(separator: ",") as NSString)
         let directories = externalOpenDirectories(from: urls)
         guard !directories.isEmpty else { return }
 
@@ -2495,6 +2499,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 debugSource: "application.openURLs"
             )
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+#if DEBUG
+        dlog("applicationShouldHandleReopen hasVisibleWindows=\(flag) mainWindowCount=\(mainWindowContexts.count)")
+#endif
+        NSLog("[cmux.diag] applicationShouldHandleReopen hasVisibleWindows=%@ mainWindowCount=%d", (flag ? "1" : "0") as NSString, mainWindowContexts.count)
+        // If we already have at least one main window registered, surface it instead of letting
+        // SwiftUI's WindowGroup auto-spawn a new one when the system thinks the app has no
+        // visible windows (e.g. notification activation, dock click while minimized).
+        if !mainWindowContexts.isEmpty {
+            if let window = NSApp.windows.first(where: { isMainTerminalWindow($0) }) {
+                bringToFront(window)
+            }
+            return false
+        }
+        return true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -5032,6 +5053,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @discardableResult
     func moveWorkspaceToNewWindow(workspaceId: UUID, focus: Bool = true) -> UUID? {
+#if DEBUG
+        let stack = Thread.callStackSymbols.dropFirst().prefix(12).joined(separator: " | ")
+        dlog("moveWorkspaceToNewWindow.enter ws=\(workspaceId.uuidString.prefix(8)) focus=\(focus) stack={\(stack)}")
+#endif
+        NSLog("[cmux.diag] moveWorkspaceToNewWindow ws=%@ focus=%@", workspaceId.uuidString as NSString, (focus ? "1" : "0") as NSString)
         let windowId = createMainWindow()
         guard let destinationManager = tabManagerFor(windowId: windowId) else { return nil }
         let bootstrapWorkspaceId = destinationManager.tabs.first?.id
@@ -7126,6 +7152,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sessionWindowSnapshot: SessionWindowSnapshot? = nil
     ) -> UUID {
         let windowId = UUID()
+#if DEBUG
+        let stack = Thread.callStackSymbols.dropFirst().prefix(12).joined(separator: " | ")
+        dlog("createMainWindow.enter id=\(windowId.uuidString.prefix(8)) cwd=\(initialWorkingDirectory ?? "nil") snapshot=\(sessionWindowSnapshot != nil) stack={\(stack)}")
+#endif
+        NSLog("[cmux.diag] createMainWindow id=%@ cwd=%@ snapshot=%@", windowId.uuidString as NSString, (initialWorkingDirectory ?? "nil") as NSString, (sessionWindowSnapshot != nil ? "1" : "0") as NSString)
         let tabManager = TabManager(initialWorkingDirectory: initialWorkingDirectory)
         if let tabManagerSnapshot = sessionWindowSnapshot?.tabManager {
             tabManager.restoreSessionSnapshot(tabManagerSnapshot)
