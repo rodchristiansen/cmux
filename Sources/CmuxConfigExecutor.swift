@@ -88,6 +88,38 @@ struct CmuxConfigExecutor {
         baseCwd: String
     ) {
         let workspaceName = wsDef.name ?? command.name
+        let resolvedCwd = CmuxConfigStore.resolveCwd(wsDef.cwd, relativeTo: baseCwd)
+
+        // "target": "current" — apply the layout to the selected workspace in-place.
+        // If no workspace is selected, skip silently rather than falling through
+        // to the name-based create/recreate path.
+        if wsDef.target == .current {
+            guard let current = tabManager.selectedWorkspace else { return }
+            // Only rename the workspace if the command explicitly supplied a
+            // name. Otherwise autoApply would silently overwrite a
+            // user-customized title with `command.name` each session.
+            if let explicitName = wsDef.name {
+                current.setCustomTitle(explicitName)
+            }
+            if let color = wsDef.color {
+                current.setCustomColor(color)
+            }
+            if let layout = wsDef.layout {
+                // Close all panels except the focused one so applyCustomLayout
+                // starts from a single pane and doesn't stack on existing splits.
+                // Snapshot the keys before iterating because `closePanel` mutates
+                // `current.panels`. If no panel is focused, keep the first one as
+                // the base pane instead of tearing the workspace down entirely.
+                let keep = current.focusedPanelId ?? current.panels.keys.first
+                let panelIdsToClose = Array(current.panels.keys).filter { $0 != keep }
+                for panelId in panelIdsToClose {
+                    _ = current.closePanel(panelId, force: true)
+                }
+                current.applyCustomLayout(layout, baseCwd: resolvedCwd)
+            }
+            return
+        }
+
         let restart = command.restart ?? .ignore
 
         if let existing = tabManager.tabs.first(where: { $0.customTitle == workspaceName }) {
@@ -118,7 +150,6 @@ struct CmuxConfigExecutor {
             }
         }
 
-        let resolvedCwd = CmuxConfigStore.resolveCwd(wsDef.cwd, relativeTo: baseCwd)
         let newWorkspace = tabManager.addWorkspace(workingDirectory: resolvedCwd)
         newWorkspace.setCustomTitle(workspaceName)
         if let color = wsDef.color {
