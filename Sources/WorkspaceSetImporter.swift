@@ -1,5 +1,6 @@
 import Foundation
 import Bonsplit
+import Yams
 
 // MARK: - Codable Types
 
@@ -108,10 +109,30 @@ struct WorkspaceSetImportResult {
 @MainActor
 enum WorkspaceSetImporter {
 
-    static let defaultPath: String = {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return (home as NSString).appendingPathComponent(".config/cmux/workspace-set.json")
-    }()
+    /// Filenames probed inside `~/.config/cmux/`, in priority order.
+    /// The first existing file wins; YAML is preferred over JSON so that a
+    /// user who drops a `.yaml` next to an existing `.json` switches formats
+    /// without having to delete the legacy file.
+    private static let candidateFilenames: [String] = [
+        "workspace-set.yaml",
+        "workspace-set.yml",
+        "workspace-set.json",
+    ]
+
+    /// Resolved path of the workspace-set file. Probes `~/.config/cmux/` for
+    /// each candidate filename and returns the first one that exists on disk.
+    /// When none exist, returns the `.json` fallback so error messages still
+    /// reference a sensible path.
+    static var defaultPath: String {
+        let baseDir = (FileManager.default.homeDirectoryForCurrentUser.path
+                       as NSString).appendingPathComponent(".config/cmux")
+        let fm = FileManager.default
+        for filename in candidateFilenames {
+            let candidate = (baseDir as NSString).appendingPathComponent(filename)
+            if fm.fileExists(atPath: candidate) { return candidate }
+        }
+        return (baseDir as NSString).appendingPathComponent("workspace-set.json")
+    }
 
     static func fileExists(at path: String? = nil) -> Bool {
         FileManager.default.fileExists(atPath: path ?? defaultPath)
@@ -208,8 +229,14 @@ enum WorkspaceSetImporter {
         guard let data = FileManager.default.contents(atPath: path), !data.isEmpty else {
             throw WorkspaceSetImportError.readError(path: path, underlying: "File is empty")
         }
+        let ext = (path as NSString).pathExtension.lowercased()
         do {
-            return try JSONDecoder().decode(WorkspaceSetFile.self, from: data)
+            switch ext {
+            case "yaml", "yml":
+                return try YAMLDecoder().decode(WorkspaceSetFile.self, from: data)
+            default:
+                return try JSONDecoder().decode(WorkspaceSetFile.self, from: data)
+            }
         } catch {
             throw WorkspaceSetImportError.parseError(path: path, underlying: error.localizedDescription)
         }
