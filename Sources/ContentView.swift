@@ -10065,6 +10065,7 @@ struct VerticalTabsSidebar: View {
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
     @AppStorage("sidebar.filter.mode")
     private var sidebarFilterModeRaw: String = SidebarFilterMode.none.rawValue
+    @State private var sidebarSearchText: String = ""
 
     private var sidebarFilterMode: SidebarFilterMode {
         SidebarFilterMode(rawValue: sidebarFilterModeRaw) ?? .none
@@ -10088,15 +10089,35 @@ struct VerticalTabsSidebar: View {
     /// A workspace has an "agent session" when it has tracked agent PIDs
     /// (e.g. claude_code), regardless of whether the agent is running,
     /// awaiting input, or idle.
+    ///
+    /// Also matches remote agent panels — e.g. a `claude-pane` wrapper that
+    /// SSHes into a tmux'd Claude on another host. The agent's PID lives on
+    /// the remote machine and isn't tracked locally, so we fall back to the
+    /// configured command captured when the workspace's defaultPanels were
+    /// dispatched.
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
-        !workspace.agentPIDs.isEmpty
+        if !workspace.agentPIDs.isEmpty { return true }
+        return workspace.panels.values.contains { panel in
+            guard let terminalPanel = panel as? TerminalPanel,
+                  let command = terminalPanel.configuredCommand else { return false }
+            return command.range(of: #"\bclaude\b"#, options: .regularExpression) != nil
+        }
+    }
+
+    private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
+        if query.isEmpty { return true }
+        return workspace.title.range(of: query, options: .caseInsensitive) != nil
     }
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
+        let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modeFiltered: [Workspace]
         switch sidebarFilterMode {
-        case .none: return workspaces
-        case .active: return workspaces.filter(workspaceHasAgentSession)
+        case .none: modeFiltered = workspaces
+        case .active: modeFiltered = workspaces.filter(workspaceHasAgentSession)
         }
+        guard !trimmedSearch.isEmpty else { return modeFiltered }
+        return modeFiltered.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
     }
 
     private var isMinimalMode: Bool {
@@ -10220,7 +10241,8 @@ struct VerticalTabsSidebar: View {
                 SidebarFilterBar(
                     mode: sidebarFilterMode,
                     activeCount: activeWorkspaceCount,
-                    setMode: { setSidebarFilter($0) }
+                    setMode: { setSidebarFilter($0) },
+                    searchText: $sidebarSearchText
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 12)
@@ -10424,6 +10446,7 @@ private struct SidebarFilterBar: View {
     let mode: SidebarFilterMode
     let activeCount: Int
     let setMode: (SidebarFilterMode) -> Void
+    @Binding var searchText: String
 
     var body: some View {
         HStack(spacing: 6) {
@@ -10442,9 +10465,61 @@ private struct SidebarFilterBar: View {
                 action: { setMode(mode == .active ? .none : .active) }
             )
 
-            Spacer(minLength: 0)
+            SidebarSearchField(text: $searchText)
         }
         .animation(.easeOut(duration: 0.15), value: mode)
+    }
+}
+
+private struct SidebarSearchField: View {
+    @Binding var text: String
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private var placeholder: String {
+        String(localized: "sidebar.search.placeholder", defaultValue: "Search")
+    }
+
+    private var backgroundFill: Color {
+        if isFocused { return Color.primary.opacity(0.10) }
+        if isHovered { return Color.primary.opacity(0.06) }
+        return Color.primary.opacity(0.04)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .focused($isFocused)
+                .accessibilityIdentifier("SidebarSearchField")
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "sidebar.search.clear",
+                                           defaultValue: "Clear search"))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(backgroundFill)
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }
 
