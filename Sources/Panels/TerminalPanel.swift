@@ -16,6 +16,13 @@ final class TerminalPanel: Panel, ObservableObject {
     /// The workspace ID this panel belongs to
     private(set) var workspaceId: UUID
 
+    /// The command this panel was configured to run, captured when the
+    /// workspace-set's `defaultPanels[].command` is dispatched. Used by the
+    /// sidebar's "Active" filter to detect remote agent panels (e.g. a
+    /// `claude-pane` wrapper SSHing to a remote tmux'd Claude) where the
+    /// agent's PID lives on another machine and isn't tracked locally.
+    @Published var configuredCommand: String?
+
     /// Published title from the terminal process
     @Published private(set) var title: String = "Terminal"
 
