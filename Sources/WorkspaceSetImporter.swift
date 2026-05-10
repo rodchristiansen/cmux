@@ -396,10 +396,34 @@ enum WorkspaceSetImporter {
             }
         }
 
+        // Enforce YAML section order. Sections named in the YAML are moved
+        // to the top in YAML order; sections not in YAML keep their relative
+        // order below. This makes the YAML the source of truth for sidebar
+        // layout instead of "wherever createSection happened to append."
+        if !dryRun {
+            applyYAMLSectionOrder(tabManager: tabManager, workspaceSet: workspaceSet)
+        }
+
         return WorkspaceSetImportResult(
             created: created, skipped: skipped,
             sectionsCreated: sectionsCreated, panelsAdded: panelsAdded
         )
+    }
+
+    private static func applyYAMLSectionOrder(
+        tabManager: TabManager,
+        workspaceSet: WorkspaceSetFile
+    ) {
+        var targetIndex = 0
+        for sectionDef in workspaceSet.sections {
+            let key = sectionDef.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !key.isEmpty else { continue }
+            guard let match = tabManager.sections.first(where: {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key
+            }) else { continue }
+            tabManager.reorderSection(sectionId: match.id, toIndex: targetIndex)
+            targetIndex += 1
+        }
     }
 
     // MARK: - Template application (full rebuild via session snapshot)
