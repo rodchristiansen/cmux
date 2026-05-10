@@ -10065,6 +10065,7 @@ struct VerticalTabsSidebar: View {
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
     @AppStorage("sidebar.filter.mode")
     private var sidebarFilterModeRaw: String = SidebarFilterMode.none.rawValue
+    @State private var sidebarSearchText: String = ""
 
     private var sidebarFilterMode: SidebarFilterMode {
         SidebarFilterMode(rawValue: sidebarFilterModeRaw) ?? .none
@@ -10088,15 +10089,35 @@ struct VerticalTabsSidebar: View {
     /// A workspace has an "agent session" when it has tracked agent PIDs
     /// (e.g. claude_code), regardless of whether the agent is running,
     /// awaiting input, or idle.
+    ///
+    /// Also matches remote agent panels — e.g. a `claude-pane` wrapper that
+    /// SSHes into a tmux'd Claude on another host. The agent's PID lives on
+    /// the remote machine and isn't tracked locally, so we fall back to the
+    /// configured command captured when the workspace's defaultPanels were
+    /// dispatched.
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
-        !workspace.agentPIDs.isEmpty
+        if !workspace.agentPIDs.isEmpty { return true }
+        return workspace.panels.values.contains { panel in
+            guard let terminalPanel = panel as? TerminalPanel,
+                  let command = terminalPanel.configuredCommand else { return false }
+            return command.range(of: #"\bclaude\b"#, options: .regularExpression) != nil
+        }
+    }
+
+    private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
+        if query.isEmpty { return true }
+        return workspace.title.range(of: query, options: .caseInsensitive) != nil
     }
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
+        let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modeFiltered: [Workspace]
         switch sidebarFilterMode {
-        case .none: return workspaces
-        case .active: return workspaces.filter(workspaceHasAgentSession)
+        case .none: modeFiltered = workspaces
+        case .active: modeFiltered = workspaces.filter(workspaceHasAgentSession)
         }
+        guard !trimmedSearch.isEmpty else { return modeFiltered }
+        return modeFiltered.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
     }
 
     private var isMinimalMode: Bool {
@@ -10220,7 +10241,8 @@ struct VerticalTabsSidebar: View {
                 SidebarFilterBar(
                     mode: sidebarFilterMode,
                     activeCount: activeWorkspaceCount,
-                    setMode: { setSidebarFilter($0) }
+                    setMode: { setSidebarFilter($0) },
+                    searchText: $sidebarSearchText
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 12)
@@ -10424,6 +10446,7 @@ private struct SidebarFilterBar: View {
     let mode: SidebarFilterMode
     let activeCount: Int
     let setMode: (SidebarFilterMode) -> Void
+    @Binding var searchText: String
 
     var body: some View {
         HStack(spacing: 6) {
@@ -10442,10 +10465,84 @@ private struct SidebarFilterBar: View {
                 action: { setMode(mode == .active ? .none : .active) }
             )
 
-            Spacer(minLength: 0)
+            SidebarSearchField(text: $searchText)
         }
         .animation(.easeOut(duration: 0.15), value: mode)
     }
+}
+
+private struct SidebarSearchField: View {
+    @Binding var text: String
+
+    var body: some View {
+        SidebarNativeSearchField(text: $text)
+            .frame(height: 22)
+            .accessibilityIdentifier("SidebarSearchField")
+    }
+}
+
+/// Native NSSearchField wrapped for SwiftUI. Avoids the SwiftUI focus race
+/// against the terminal's `TerminalWindowPortal`: NSSearchField is a standard
+/// AppKit control with first-class click-to-focus and built-in icon, clear
+/// button, and placeholder.
+private struct SidebarNativeSearchField: NSViewRepresentable {
+    @Binding var text: String
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: SidebarNativeSearchField
+        var isProgrammaticMutation = false
+
+        init(parent: SidebarNativeSearchField) { self.parent = parent }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard !isProgrammaticMutation,
+                  let field = obj.object as? NSSearchField else { return }
+            parent.text = field.stringValue
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeNSView(context: Context) -> SidebarSearchTextField {
+        let field = SidebarSearchTextField(frame: .zero)
+        field.delegate = context.coordinator
+        field.placeholderString = String(localized: "sidebar.search.placeholder",
+                                         defaultValue: "Search")
+        field.font = .systemFont(ofSize: 11)
+        field.controlSize = .small
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .none
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.stringValue = text
+        return field
+    }
+
+    func updateNSView(_ nsView: SidebarSearchTextField, context: Context) {
+        context.coordinator.parent = self
+        if nsView.stringValue != text {
+            context.coordinator.isProgrammaticMutation = true
+            nsView.stringValue = text
+            context.coordinator.isProgrammaticMutation = false
+        }
+    }
+
+    static func dismantleNSView(_ nsView: SidebarSearchTextField, coordinator: Coordinator) {
+        nsView.delegate = nil
+    }
+}
+
+/// Marker NSSearchField subclass. Two roles:
+///
+/// 1. The terminal panel's first-responder reclaim (`isSearchOverlayOrDescendant`
+///    in `GhosttyTerminalView.swift`) walks up from the current responder and
+///    yields focus when it finds this class instead of pulling focus back to
+///    the focused terminal surface.
+/// 2. `AppDelegate.isSidebarSearchResponder` recognizes this class (and its
+///    field editor) so the keyDown-triggered terminal-keyboard-routing
+///    "repair" path leaves the user's typing alone.
+final class SidebarSearchTextField: NSSearchField {
+    override var acceptsFirstResponder: Bool { true }
 }
 
 private struct SidebarFilterChip: View {
