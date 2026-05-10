@@ -80,6 +80,7 @@
 		A5001654 /* CmuxDirectoryTrust.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001655 /* CmuxDirectoryTrust.swift */; };
 		A5001100 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A5001101 /* Assets.xcassets */; };
 		A5001230 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A5001231 /* Sparkle */; };
+		A5009100 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = A5009101 /* Yams */; };
 		B9000002A1B2C3D4E5F60719 /* cmux.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000001A1B2C3D4E5F60719 /* cmux.swift */; };
 		B9000027A1B2C3D4E5F60719 /* RemoteRelayZshBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001641 /* RemoteRelayZshBootstrap.swift */; };
 		B900000BA1B2C3D4E5F60719 /* cmux in Copy CLI */ = {isa = PBXBuildFile; fileRef = B9000004A1B2C3D4E5F60719 /* cmux */; };
@@ -349,6 +350,7 @@
 					A5001250 /* Sentry in Frameworks */,
 					A5001270 /* PostHog in Frameworks */,
 					A5001290 /* MarkdownUI in Frameworks */,
+					A5009100 /* Yams in Frameworks */,
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
@@ -651,6 +653,7 @@
 					A5001271 /* PostHog */,
 					A5001261 /* Bonsplit */,
 					A5001291 /* MarkdownUI */,
+					A5009101 /* Yams */,
 				);
 			name = GhosttyTabs;
 			productName = GhosttyTabs;
@@ -771,6 +774,7 @@
 					A5001272 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 					A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 					A5001260 /* XCLocalSwiftPackageReference "bonsplit" */,
+					A5009102 /* XCRemoteSwiftPackageReference "Yams" */,
 				);
 			productRefGroup = A5001042 /* Products */;
 			projectDirPath = "";
@@ -1298,6 +1302,14 @@
 				isa = XCLocalSwiftPackageReference;
 				relativePath = vendor/bonsplit;
 			};
+			A5009102 /* XCRemoteSwiftPackageReference "Yams" */ = {
+				isa = XCRemoteSwiftPackageReference;
+				repositoryURL = "https://github.com/jpsim/Yams.git";
+				requirement = {
+					kind = upToNextMajorVersion;
+					minimumVersion = 5.0.6;
+				};
+			};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1325,6 +1337,11 @@
 				isa = XCSwiftPackageProductDependency;
 				package = A5001292 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 				productName = MarkdownUI;
+			};
+			A5009101 /* Yams */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = A5009102 /* XCRemoteSwiftPackageReference "Yams" */;
+				productName = Yams;
 			};
 /* End XCSwiftPackageProductDependency section */
 
