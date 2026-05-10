@@ -26,6 +26,14 @@ struct WorkspaceSetEntry: Codable {
     var color: String?
     var description: String?
     var pinned: Bool?
+    /// Per-workspace override of `defaultPanels`. When present, this entry's
+    /// workspace gets exactly these panels instead of the file-wide defaults.
+    /// Useful for a "fast" home workspace that opens a single Terminal pane
+    /// without the SSH-spawning Claude/Files/Lazygit panels.
+    var panels: [WorkspaceSetPanelTemplate]?
+    /// Per-workspace override of `defaultLayout`. Required when `panels`
+    /// references titles that don't exist in `defaultPanels`.
+    var layout: WorkspaceSetLayoutNode?
 }
 
 struct WorkspaceSetPanelTemplate: Codable {
@@ -159,14 +167,24 @@ enum WorkspaceSetImporter {
     ) -> WorkspaceReconcileSummary? {
         let resolvedPath = path ?? defaultPath
         guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
-        guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
+        let matchingEntry = findEntry(for: workspace, in: workspaceSet)
+        let templates: [WorkspaceSetPanelTemplate]?
+        let layout: WorkspaceSetLayoutNode?
+        if let entry = matchingEntry {
+            templates = effectivePanels(for: entry, file: workspaceSet)
+            layout = effectiveLayout(for: entry, file: workspaceSet)
+        } else {
+            templates = workspaceSet.defaultPanels
+            layout = workspaceSet.defaultLayout
+        }
+        guard let templates, !templates.isEmpty else { return nil }
 
         if isWorkspaceIdle(workspace) {
             let anchor = workspace.focusedPanelId
             for panelId in Array(workspace.panels.keys) where panelId != anchor {
                 _ = workspace.closePanel(panelId, force: true)
             }
-            applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
+            applyFullTemplate(to: workspace, panels: templates, layout: layout)
             return WorkspaceReconcileSummary(action: "rebuild", panelCount: templates.count)
         } else {
             let added = fillMissingPanels(in: workspace, templates: templates)
@@ -183,7 +201,17 @@ enum WorkspaceSetImporter {
     ) -> Int? {
         let resolvedPath = path ?? defaultPath
         guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
-        guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
+        let matchingEntry = findEntry(for: workspace, in: workspaceSet)
+        let templates: [WorkspaceSetPanelTemplate]?
+        let layout: WorkspaceSetLayoutNode?
+        if let entry = matchingEntry {
+            templates = effectivePanels(for: entry, file: workspaceSet)
+            layout = effectiveLayout(for: entry, file: workspaceSet)
+        } else {
+            templates = workspaceSet.defaultPanels
+            layout = workspaceSet.defaultLayout
+        }
+        guard let templates, !templates.isEmpty else { return nil }
 
         // Reduce the workspace to a single pane with one anchor panel so
         // `restoreSessionSnapshot` doesn't layer new splits on top of the
@@ -195,7 +223,7 @@ enum WorkspaceSetImporter {
             _ = workspace.closePanel(panelId, force: true)
         }
 
-        applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
+        applyFullTemplate(to: workspace, panels: templates, layout: layout)
         return templates.count
     }
 
@@ -260,6 +288,9 @@ enum WorkspaceSetImporter {
                 let expandedDir = (entry.directory as NSString).expandingTildeInPath
                 let normalizedDir = normalizedDirectoryKey(expandedDir)
 
+                let entryPanels = effectivePanels(for: entry, file: workspaceSet)
+                let entryLayout = effectiveLayout(for: entry, file: workspaceSet)
+
                 if let existingWs = existingByDir[normalizedDir] {
                     if !dryRun {
                         if let section = targetSection,
@@ -269,7 +300,7 @@ enum WorkspaceSetImporter {
                         // Idle workspaces get fully rebuilt from the template so
                         // their layout + tools match the JSON. Running workspaces
                         // are preserved — only missing panels get added.
-                        if let templates = workspaceSet.defaultPanels, !templates.isEmpty {
+                        if let templates = entryPanels, !templates.isEmpty {
                             if isWorkspaceIdle(existingWs) {
                                 // Tear down and rebuild from template.
                                 let anchor = existingWs.focusedPanelId
@@ -279,7 +310,7 @@ enum WorkspaceSetImporter {
                                 applyFullTemplate(
                                     to: existingWs,
                                     panels: templates,
-                                    layout: workspaceSet.defaultLayout
+                                    layout: entryLayout
                                 )
                                 panelsAdded += templates.count
                             } else {
@@ -327,8 +358,8 @@ enum WorkspaceSetImporter {
                     tabManager.moveWorkspaceToSection(tabId: ws.id, sectionId: section.id)
                 }
 
-                if let templates = workspaceSet.defaultPanels, !templates.isEmpty {
-                    applyFullTemplate(to: ws, panels: templates, layout: workspaceSet.defaultLayout)
+                if let templates = entryPanels, !templates.isEmpty {
+                    applyFullTemplate(to: ws, panels: templates, layout: entryLayout)
                     panelsAdded += max(templates.count - 1, 0)
                 }
 
@@ -536,6 +567,49 @@ enum WorkspaceSetImporter {
     private static func sendCommand(to panelId: UUID, in workspace: Workspace, command: String) {
         guard let terminalPanel = workspace.terminalPanel(for: panelId) else { return }
         terminalPanel.sendText(command + "\n")
+    }
+
+    /// Resolve which panel templates apply to a given entry: the entry's
+    /// own override if present, otherwise the file-wide `defaultPanels`.
+    private static func effectivePanels(
+        for entry: WorkspaceSetEntry,
+        file: WorkspaceSetFile
+    ) -> [WorkspaceSetPanelTemplate]? {
+        entry.panels ?? file.defaultPanels
+    }
+
+    /// Resolve which layout applies. Per-entry layout wins; otherwise we
+    /// only fall back to the file-wide default if it references panels that
+    /// actually exist in the entry's effective panel set.
+    private static func effectiveLayout(
+        for entry: WorkspaceSetEntry,
+        file: WorkspaceSetFile
+    ) -> WorkspaceSetLayoutNode? {
+        if let layout = entry.layout { return layout }
+        // If the entry overrides panels, the file-wide layout likely refers
+        // to titles that aren't in the override (Claude/Lazygit/Files etc.),
+        // so let `applyFullTemplate` build a default single-pane layout.
+        if entry.panels != nil { return nil }
+        return file.defaultLayout
+    }
+
+    /// Locate the workspace-set entry matching a live workspace by directory.
+    /// Used by `reconcileWorkspace` and `rebuildWorkspaceFromTemplate` to
+    /// honor per-entry panel overrides without re-running the full merge.
+    private static func findEntry(
+        for workspace: Workspace,
+        in file: WorkspaceSetFile
+    ) -> WorkspaceSetEntry? {
+        let key = normalizedDirectoryKey(workspace.currentDirectory)
+        for section in file.sections {
+            for entry in section.workspaces {
+                let expanded = (entry.directory as NSString).expandingTildeInPath
+                if normalizedDirectoryKey(expanded) == key {
+                    return entry
+                }
+            }
+        }
+        return nil
     }
 
     private static func normalizedDirectoryKey(_ directory: String) -> String {
