@@ -10490,147 +10490,76 @@ private struct SidebarFilterBar: View {
 
 private struct SidebarSearchField: View {
     @Binding var text: String
-    @State private var isHovered = false
-    @State private var isFieldFocused = false
-
-    private var backgroundFill: Color {
-        if isFieldFocused { return Color.primary.opacity(0.10) }
-        if isHovered { return Color.primary.opacity(0.06) }
-        return Color.primary.opacity(0.04)
-    }
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
-            SidebarSearchNativeTextField(
-                text: $text,
-                isFocused: $isFieldFocused
-            )
-            .frame(height: 16)
+        SidebarNativeSearchField(text: $text)
+            .frame(height: 22)
             .accessibilityIdentifier("SidebarSearchField")
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "sidebar.search.clear",
-                                           defaultValue: "Clear search"))
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(backgroundFill)
-        )
-        .onHover { hovering in
-            isHovered = hovering
-        }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
-        .animation(.easeOut(duration: 0.12), value: isFieldFocused)
     }
 }
 
-/// AppKit-backed text field for the sidebar search bar.
-///
-/// SwiftUI's `TextField` + `@FocusState` does not reliably capture first
-/// responder in cmux: the terminal's hosted view is rendered through a
-/// `TerminalWindowPortal` in a separate AppKit window above the main content,
-/// and it actively reclaims first responder via `ensureFocus`. Wrapping
-/// `NSTextField` directly lets AppKit's normal click-to-focus path win and
-/// keeps typed characters in the field instead of routing them to the focused
-/// terminal pane.
-private struct SidebarSearchNativeTextField: NSViewRepresentable {
+/// Native NSSearchField wrapped for SwiftUI. Avoids the SwiftUI focus race
+/// against the terminal's `TerminalWindowPortal`: NSSearchField is a standard
+/// AppKit control with first-class click-to-focus and built-in icon, clear
+/// button, and placeholder.
+private struct SidebarNativeSearchField: NSViewRepresentable {
     @Binding var text: String
-    @Binding var isFocused: Bool
 
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: SidebarSearchNativeTextField
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: SidebarNativeSearchField
         var isProgrammaticMutation = false
 
-        init(parent: SidebarSearchNativeTextField) {
-            self.parent = parent
-        }
+        init(parent: SidebarNativeSearchField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
             guard !isProgrammaticMutation,
-                  let field = obj.object as? NSTextField else { return }
+                  let field = obj.object as? NSSearchField else { return }
             parent.text = field.stringValue
         }
-
-        func controlTextDidBeginEditing(_ obj: Notification) {
-            if !parent.isFocused {
-                DispatchQueue.main.async { self.parent.isFocused = true }
-            }
-        }
-
-        func controlTextDidEndEditing(_ obj: Notification) {
-            if parent.isFocused {
-                DispatchQueue.main.async { self.parent.isFocused = false }
-            }
-        }
-
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            switch commandSelector {
-            case #selector(NSResponder.cancelOperation(_:)):
-                if textView.hasMarkedText() { return false }
-                if !parent.text.isEmpty {
-                    parent.text = ""
-                    return true
-                }
-                control.window?.makeFirstResponder(nil)
-                return true
-            default:
-                return false
-            }
-        }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(frame: .zero)
-        field.isBordered = false
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.usesSingleLineMode = true
-        field.font = .systemFont(ofSize: 11)
+    func makeNSView(context: Context) -> SidebarSearchTextField {
+        let field = SidebarSearchTextField(frame: .zero)
+        field.delegate = context.coordinator
         field.placeholderString = String(localized: "sidebar.search.placeholder",
                                          defaultValue: "Search")
-        field.delegate = context.coordinator
+        field.font = .systemFont(ofSize: 11)
+        field.controlSize = .small
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .none
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
         field.stringValue = text
-        field.cell?.wraps = false
-        field.cell?.isScrollable = true
         return field
     }
 
-    func updateNSView(_ nsView: NSTextField, context: Context) {
+    func updateNSView(_ nsView: SidebarSearchTextField, context: Context) {
         context.coordinator.parent = self
-
-        if let editor = nsView.currentEditor() as? NSTextView {
-            if editor.string != text, !editor.hasMarkedText() {
-                context.coordinator.isProgrammaticMutation = true
-                editor.string = text
-                nsView.stringValue = text
-                context.coordinator.isProgrammaticMutation = false
-            }
-        } else if nsView.stringValue != text {
+        if nsView.stringValue != text {
+            context.coordinator.isProgrammaticMutation = true
             nsView.stringValue = text
+            context.coordinator.isProgrammaticMutation = false
         }
     }
 
-    static func dismantleNSView(_ nsView: NSTextField, coordinator: Coordinator) {
+    static func dismantleNSView(_ nsView: SidebarSearchTextField, coordinator: Coordinator) {
         nsView.delegate = nil
     }
+}
+
+/// Marker NSSearchField subclass. Two roles:
+///
+/// 1. The terminal panel's first-responder reclaim (`isSearchOverlayOrDescendant`
+///    in `GhosttyTerminalView.swift`) walks up from the current responder and
+///    yields focus when it finds this class instead of pulling focus back to
+///    the focused terminal surface.
+/// 2. `AppDelegate.isSidebarSearchResponder` recognizes this class (and its
+///    field editor) so the keyDown-triggered terminal-keyboard-routing
+///    "repair" path leaves the user's typing alone.
+final class SidebarSearchTextField: NSSearchField {
+    override var acceptsFirstResponder: Bool { true }
 }
 
 private struct SidebarFilterChip: View {
