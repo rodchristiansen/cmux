@@ -10090,18 +10090,14 @@ struct VerticalTabsSidebar: View {
     /// (e.g. claude_code), regardless of whether the agent is running,
     /// awaiting input, or idle.
     ///
-    /// Also matches remote agent panels — e.g. a `claude-pane` wrapper that
-    /// SSHes into a tmux'd Claude on another host. The agent's PID lives on
-    /// the remote machine and isn't tracked locally, so we fall back to the
-    /// configured command captured when the workspace's defaultPanels were
-    /// dispatched.
+    /// The earlier `configuredCommand` fallback (intended to catch remote
+    /// SSH-tmux Claude sessions whose PID lives off-host) matched the
+    /// template-configured command on every panel, so any workspace whose
+    /// `defaultPanels` declared a Claude pane registered as Active — even
+    /// idle ones that had never connected. We rely on local PIDs only until
+    /// the panel grows a real liveness signal for remote sessions.
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
-        if !workspace.agentPIDs.isEmpty { return true }
-        return workspace.panels.values.contains { panel in
-            guard let terminalPanel = panel as? TerminalPanel,
-                  let command = terminalPanel.configuredCommand else { return false }
-            return command.range(of: #"\bclaude\b"#, options: .regularExpression) != nil
-        }
+        !workspace.agentPIDs.isEmpty
     }
 
     private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
