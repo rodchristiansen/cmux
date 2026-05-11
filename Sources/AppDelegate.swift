@@ -2190,6 +2190,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let sidebarState: SidebarState
         let sidebarSelectionState: SidebarSelectionState
         weak var window: NSWindow?
+        /// When this window was created from a workspace-set `windows` entry,
+        /// the entry's name. Used by `Reload Window Set` to identify which
+        /// declared windows already exist (case-insensitive) so reload is
+        /// additive — never duplicating or auto-closing existing windows.
+        var windowSetName: String?
 
         init(
             windowId: UUID,
@@ -3892,6 +3897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // No session to restore — attempt workspace set import if the config file exists.
             if WorkspaceSetImporter.fileExists() {
                 importWorkspaceSetOnFreshLaunch(into: primaryContext.tabManager)
+                applyWindowSet(initial: true, primaryWindow: primaryWindow)
             }
         }
 
@@ -3990,6 +3996,114 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         case .failure(let error):
             NSLog("[WorkspaceSetImporter] reload failed: %@", error.localizedDescription)
         }
+    }
+
+    /// Apply the workspace-set `windows` declarations.
+    ///
+    /// On fresh launch (`initial: true`) every declared entry produces a new
+    /// window pre-populated by moving the named workspaces out of the primary
+    /// window. On reload (`initial: false`) only declared entries whose names
+    /// don't already match an existing `windowSetName` are created — reload is
+    /// additive and never auto-closes or yanks workspaces from user-arranged
+    /// secondary windows; the source pool is the primary (unnamed) window.
+    private func applyWindowSet(initial: Bool, primaryWindow: NSWindow? = nil) {
+        guard let declarations = WorkspaceSetImporter.windowDeclarations(),
+              !declarations.isEmpty else { return }
+
+        // Source workspaces from the unnamed window. On fresh launch this is
+        // the only window in existence; on reload it's whichever window the
+        // import populated.
+        guard let primaryContext = mainWindowContexts.values.first(where: { $0.windowSetName == nil }) else {
+            return
+        }
+        let primaryManager = primaryContext.tabManager
+
+        var existingByName: [String: MainWindowContext] = [:]
+        for ctx in mainWindowContexts.values {
+            let normalized = (ctx.windowSetName ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if !normalized.isEmpty { existingByName[normalized] = ctx }
+        }
+
+        var createdAny = false
+        for windowDecl in declarations {
+            let trimmedName = windowDecl.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else { continue }
+            if existingByName[trimmedName.lowercased()] != nil { continue }
+
+            let targets: [Workspace] = windowDecl.workspaces.compactMap { rawName in
+                let needle = rawName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                guard !needle.isEmpty else { return nil }
+                return primaryManager.tabs.first(where: { workspace in
+                    if let custom = workspace.customTitle?.lowercased(), custom == needle { return true }
+                    return workspace.title.lowercased() == needle
+                })
+            }
+            if targets.isEmpty {
+                NSLog(
+                    "[WorkspaceSet.windows] '%@': no matching workspaces in primary window; skipping",
+                    trimmedName
+                )
+                continue
+            }
+
+            let newWindowId = createMainWindow()
+            guard let destContext = mainWindowContexts.values.first(where: { $0.windowId == newWindowId }) else { continue }
+            destContext.windowSetName = trimmedName
+            destContext.window?.title = trimmedName
+            existingByName[trimmedName.lowercased()] = destContext
+
+            let bootstrapId = destContext.tabManager.tabs.first?.id
+            var movedCount = 0
+            for workspace in targets
+                where moveWorkspaceToWindow(workspaceId: workspace.id, windowId: newWindowId, focus: false)
+            {
+                movedCount += 1
+            }
+            if movedCount > 0, let bootstrapId,
+               let bootstrap = destContext.tabManager.tabs.first(where: { $0.id == bootstrapId }),
+               destContext.tabManager.tabs.count > 1 {
+                destContext.tabManager.closeWorkspace(bootstrap)
+            }
+            createdAny = createdAny || movedCount > 0
+
+#if DEBUG
+            dlog(
+                "windowSet.\(initial ? "fresh" : "reload") name='\(trimmedName)' " +
+                    "requested=\(windowDecl.workspaces.count) moved=\(movedCount)"
+            )
+#endif
+            NSLog(
+                "[WorkspaceSet.windows] '%@': moved %d of %d workspaces (%@)",
+                trimmedName, movedCount, windowDecl.workspaces.count,
+                initial ? "fresh launch" : "reload"
+            )
+        }
+
+        // Re-anchor primary selection: a workspace that just got moved out
+        // can leave the primary window with a stale selectedTabId.
+        if createdAny {
+            if primaryManager.selectedTabId == nil || primaryManager.tabs.first(where: { $0.id == primaryManager.selectedTabId }) == nil {
+                if let first = primaryManager.tabs.first {
+                    primaryManager.selectWorkspace(first)
+                }
+            }
+            if let primaryWindow {
+                primaryWindow.makeKeyAndOrderFront(nil)
+                setActiveMainWindow(primaryWindow)
+            }
+        }
+    }
+
+    /// Reload the workspace-set `windows` declarations. Additive only: creates
+    /// any declared window that doesn't already exist (matched case-insensitively
+    /// by `windowSetName`). Never auto-closes a window if its declaration is
+    /// removed — avoids surprise data loss.
+    func reloadWindowSet() {
+        applyWindowSet(initial: false)
     }
 
     /// Rebuild the focused workspace's layout from the template in

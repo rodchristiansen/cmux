@@ -37109,6 +37109,23 @@
         }
       }
     },
+    "menu.app.reloadWindowSet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload Window Set"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ウィンドウセットを再読み込み"
+          }
+        }
+      }
+    },
     "menu.app.rebuildWorkspaceLayout": {
       "extractionState": "manual",
       "localizations": {
