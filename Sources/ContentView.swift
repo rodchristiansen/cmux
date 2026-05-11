@@ -2916,19 +2916,17 @@ struct ContentView: View {
                 .background(SplitViewDividerHider())
                 .background(SystemSidebarToggleStripper().frame(width: 0, height: 0))
                 .toolbar {
-                    if !sidebarState.isVisible {
-                        ToolbarItem(placement: .navigation) {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    _ = sidebarState.toggle()
-                                }
-                            } label: {
-                                Image(systemName: "sidebar.left")
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                _ = sidebarState.toggle()
                             }
-                            .accessibilityIdentifier("toolbar.toggleSidebar")
-                            .accessibilityLabel(String(localized: "toolbar.sidebar.accessibilityLabel", defaultValue: "Toggle Sidebar"))
-                            .help(String(localized: "toolbar.sidebar.tooltip", defaultValue: "Toggle Sidebar"))
+                        } label: {
+                            Image(systemName: "sidebar.left")
                         }
+                        .accessibilityIdentifier("toolbar.toggleSidebar")
+                        .accessibilityLabel(String(localized: "toolbar.sidebar.accessibilityLabel", defaultValue: "Toggle Sidebar"))
+                        .help(String(localized: "toolbar.sidebar.tooltip", defaultValue: "Toggle Sidebar"))
                     }
 
                     ToolbarItemGroup(placement: .primaryAction) {
@@ -10067,6 +10065,7 @@ struct VerticalTabsSidebar: View {
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
     @AppStorage("sidebar.filter.mode")
     private var sidebarFilterModeRaw: String = SidebarFilterMode.none.rawValue
+    @State private var sidebarSearchText: String = ""
 
     private var sidebarFilterMode: SidebarFilterMode {
         SidebarFilterMode(rawValue: sidebarFilterModeRaw) ?? .none
@@ -10076,23 +10075,57 @@ struct VerticalTabsSidebar: View {
         sidebarFilterModeRaw = mode.rawValue
     }
 
+    private func autoClearSidebarFilterIfEmpty(active: Int) {
+        if sidebarFilterMode == .active && active == 0 {
+            setSidebarFilter(.none)
+        }
+    }
+
     /// Space at top of sidebar for traffic light buttons
     private let trafficLightPadding: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
 
-    private func isWorkspaceRunning(_ workspace: Workspace) -> Bool {
-        workspace.statusEntries.values.contains { entry in
-            entry.value.range(of: "running", options: .caseInsensitive) != nil
+    /// A workspace has an "agent session" when it either has tracked agent
+    /// PIDs (set explicitly by a local agent via the cmux socket) OR it has
+    /// been opened — at least one of its terminal panels has a registered
+    /// TTY — and one of its panels is configured to run an agent command.
+    ///
+    /// The TTY requirement is what distinguishes this from the earlier
+    /// `configuredCommand`-only fallback that matched every workspace in
+    /// the YAML, even ones that had never been opened: a TTY is only
+    /// registered when the panel's terminal actually starts. Workspaces
+    /// declared in the workspace-set but never opened still have a Claude
+    /// pane configured, but no TTY — so they don't count.
+    private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
+        if !workspace.agentPIDs.isEmpty { return true }
+        for (panelId, _) in workspace.surfaceTTYNames {
+            guard let terminalPanel = workspace.panels[panelId] as? TerminalPanel,
+                  let command = terminalPanel.configuredCommand else { continue }
+            if command.range(
+                of: #"\b(claude|codex|aider|gemini|cline|cursor-agent)\b"#,
+                options: .regularExpression
+            ) != nil {
+                return true
+            }
         }
+        return false
+    }
+
+    private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
+        if query.isEmpty { return true }
+        return workspace.title.range(of: query, options: .caseInsensitive) != nil
     }
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
+        let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modeFiltered: [Workspace]
         switch sidebarFilterMode {
-        case .none: return workspaces
-        case .running: return workspaces.filter(isWorkspaceRunning)
-        case .idle: return workspaces.filter { !isWorkspaceRunning($0) }
+        case .none: modeFiltered = workspaces
+        case .active: modeFiltered = workspaces.filter(workspaceHasAgentSession)
         }
+        guard !trimmedSearch.isEmpty else { return modeFiltered }
+        return modeFiltered.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
     }
 
     private var isMinimalMode: Bool {
@@ -10181,7 +10214,7 @@ struct VerticalTabsSidebar: View {
         let layout = tabManager.sidebarLayout
         let allOrdered = layout.allWorkspacesInOrder
         let workspaceCount = tabs.count
-        let runningWorkspaceCount = tabs.reduce(0) { $0 + (isWorkspaceRunning($1) ? 1 : 0) }
+        let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
@@ -10207,32 +10240,52 @@ struct VerticalTabsSidebar: View {
             selectedRemoteContextMenuTargets.allSatisfy { $0.remoteConnectionState == .disconnected }
 
         VStack(spacing: 0) {
+            // Pinned top: traffic light space + always-visible filter bar.
+            VStack(spacing: 0) {
+                // Space for traffic lights / fullscreen controls
+                Spacer()
+                    .frame(height: trafficLightPadding)
+
+                SidebarFilterBar(
+                    mode: sidebarFilterMode,
+                    activeCount: activeWorkspaceCount,
+                    setMode: { setSidebarFilter($0) },
+                    searchText: $sidebarSearchText
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+                .onAppear {
+                    // The Active chip becomes disabled when activeCount == 0,
+                    // so a persisted `.active` filter from a prior session can
+                    // strand the sidebar with no way for the user to escape
+                    // (and no live PIDs yet, so no workspaces visible). Reset
+                    // on appear so the user always sees their workspaces on
+                    // first paint. `.onChange` below handles later transitions.
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
+                }
+                .onChange(of: activeWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
+                }
+            }
+            .overlay(alignment: .top) {
+                // Match native titlebar behavior in the sidebar top strip:
+                // drag-to-move and double-click action (zoom/minimize).
+                WindowDragHandleView()
+                    .frame(height: trafficLightPadding)
+                    .background(TitlebarDoubleClickMonitorView())
+            }
+            .overlay(alignment: .topLeading) {
+                if isMinimalMode, #unavailable(macOS 26.0) {
+                    HiddenTitlebarSidebarControlsView(notificationStore: notificationStore)
+                        .padding(.leading, hiddenTitlebarControlsLeadingInset)
+                        .padding(.top, 2)
+                }
+            }
+
             GeometryReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Space for traffic lights / fullscreen controls
-                        Spacer()
-                            .frame(height: trafficLightPadding)
-
-                        SidebarFilterBar(
-                            mode: sidebarFilterMode,
-                            runningCount: runningWorkspaceCount,
-                            idleCount: max(workspaceCount - runningWorkspaceCount, 0),
-                            setMode: { setSidebarFilter($0) }
-                        )
-                        .padding(.horizontal, 10)
-                        .padding(.top, 12)
-                        .padding(.bottom, 6)
-                        .onChange(of: runningWorkspaceCount) { newRunning in
-                            // Auto-clear a filter when its target set becomes empty
-                            // so the sidebar never appears mysteriously blank.
-                            if sidebarFilterMode == .running && newRunning == 0 {
-                                setSidebarFilter(.none)
-                            } else if sidebarFilterMode == .idle && newRunning >= workspaceCount {
-                                setSidebarFilter(.none)
-                            }
-                        }
-
                         // Workspaces are bounded, so prefer a non-lazy stack here.
                         // LazyVStack + drag-state invalidations can recurse through layout.
                         VStack(spacing: tabRowSpacing) {
@@ -10318,20 +10371,6 @@ struct VerticalTabsSidebar: View {
                     }
                     .frame(width: 0, height: 0)
                 )
-                .overlay(alignment: .top) {
-                    // Match native titlebar behavior in the sidebar top strip:
-                    // drag-to-move and double-click action (zoom/minimize).
-                    WindowDragHandleView()
-                        .frame(height: trafficLightPadding)
-                        .background(TitlebarDoubleClickMonitorView())
-                }
-                .overlay(alignment: .topLeading) {
-                    if isMinimalMode, #unavailable(macOS 26.0) {
-                        HiddenTitlebarSidebarControlsView(notificationStore: notificationStore)
-                            .padding(.leading, hiddenTitlebarControlsLeadingInset)
-                            .padding(.top, 2)
-                    }
-                }
                 .background(Color.clear)
                 .modifier(ClearScrollBackground())
             }
@@ -10417,72 +10456,87 @@ struct VerticalTabsSidebar: View {
 
 enum SidebarFilterMode: String, CaseIterable {
     case none
-    case running
-    case idle
+    case active
 }
 
 private struct SidebarFilterBar: View {
     let mode: SidebarFilterMode
-    let runningCount: Int
-    let idleCount: Int
+    let activeCount: Int
     let setMode: (SidebarFilterMode) -> Void
+    @Binding var searchText: String
 
     var body: some View {
         HStack(spacing: 6) {
             SidebarFilterChip(
-                title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
+                title: String(localized: "sidebar.filter.active", defaultValue: "Active"),
                 icon: "bolt.fill",
-                count: runningCount,
-                isActive: mode == .running,
-                isDisabled: runningCount == 0,
+                count: activeCount,
+                isActive: mode == .active,
+                isDisabled: activeCount == 0,
                 activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.running.showAll",
+                tooltipActive: String(localized: "sidebar.filter.active.showAll",
                                       defaultValue: "Show all workspaces"),
-                tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
-                                        defaultValue: "Show only running workspaces"),
-                accessibilityId: "SidebarRunningFilterToggle",
-                action: { setMode(mode == .running ? .none : .running) }
+                tooltipInactive: String(localized: "sidebar.filter.active.tooltip",
+                                        defaultValue: "Show only workspaces with an agent session"),
+                accessibilityId: "SidebarActiveFilterToggle",
+                action: { setMode(mode == .active ? .none : .active) }
             )
 
-            SidebarFilterChip(
-                title: String(localized: "sidebar.filter.idle", defaultValue: "Idle"),
-                icon: "pause.fill",
-                count: idleCount,
-                isActive: mode == .idle,
-                isDisabled: idleCount == 0,
-                activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.idle.showAll",
-                                      defaultValue: "Show all workspaces"),
-                tooltipInactive: String(localized: "sidebar.filter.idle.tooltip",
-                                        defaultValue: "Show only idle workspaces"),
-                accessibilityId: "SidebarIdleFilterToggle",
-                action: { setMode(mode == .idle ? .none : .idle) }
-            )
-
-            Spacer(minLength: 0)
-
-            if mode != .none {
-                Button {
-                    setMode(.none)
-                } label: {
-                    Text(String(localized: "sidebar.filter.clear", defaultValue: "Clear"))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.yellow)
-                        )
-                }
-                .buttonStyle(.plain)
-                .safeHelp(String(localized: "sidebar.filter.clear.tooltip",
-                                 defaultValue: "Clear filter"))
-                .accessibilityIdentifier("SidebarClearFilter")
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            }
+            SidebarSearchField(text: $searchText)
         }
         .animation(.easeOut(duration: 0.15), value: mode)
+    }
+}
+
+private struct SidebarSearchField: View {
+    @Binding var text: String
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private var placeholder: String {
+        String(localized: "sidebar.search.placeholder", defaultValue: "Search")
+    }
+
+    private var backgroundFill: Color {
+        if isFocused { return Color.primary.opacity(0.10) }
+        if isHovered { return Color.primary.opacity(0.06) }
+        return Color.primary.opacity(0.04)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .focused($isFocused)
+                .accessibilityIdentifier("SidebarSearchField")
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "sidebar.search.clear",
+                                           defaultValue: "Clear search"))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(backgroundFill)
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }
 
@@ -15974,7 +16028,7 @@ private struct SystemSidebarToggleStripper: NSViewRepresentable {
 
 @available(macOS 26.0, *)
 private final class SystemSidebarToggleStripperView: NSView {
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -15991,28 +16045,64 @@ private final class SystemSidebarToggleStripperView: NSView {
     private func stripNow() {
         guard let toolbar = window?.toolbar else { return }
         for i in (0..<toolbar.items.count).reversed() {
-            let itemId = toolbar.items[i].itemIdentifier.rawValue
-            if itemId.contains("toggleSidebar")
-                || itemId.contains("splitViewSeparator") {
+            if Self.shouldStrip(toolbar.items[i]) {
                 toolbar.removeItem(at: i)
             }
         }
     }
 
+    private static func shouldStrip(_ item: NSToolbarItem) -> Bool {
+        let itemId = item.itemIdentifier.rawValue
+        if itemId.contains("toggleSidebar") || itemId.contains("splitViewSeparator") {
+            return true
+        }
+        // NavigationSplitView re-injects the toggle into the overflow popover
+        // with an opaque identifier, so also match the user-facing label.
+        let label = item.label
+        if label == "Hide Sidebar" || label == "Show Sidebar" {
+            return true
+        }
+        return false
+    }
+
     private func observeToolbarChanges() {
-        guard observer == nil else { return }
-        observer = NotificationCenter.default.addObserver(
+        guard observers.isEmpty else { return }
+        let center = NotificationCenter.default
+
+        observers.append(center.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
             guard let self, notification.object as? NSWindow === self.window else { return }
             self.scheduleStrip()
-        }
+        })
+
+        // Re-strip whenever SwiftUI/NavigationSplitView re-injects an item
+        // (e.g. after a resize that pushes the toggle into the overflow popover).
+        observers.append(center.addObserver(
+            forName: NSToolbar.willAddItemNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let toolbar = self.window?.toolbar,
+                  notification.object as? NSToolbar === toolbar else { return }
+            self.scheduleStrip()
+        })
+
+        observers.append(center.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, notification.object as? NSWindow === self.window else { return }
+            self.scheduleStrip()
+        })
     }
 
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observers.forEach(NotificationCenter.default.removeObserver)
     }
 }
 

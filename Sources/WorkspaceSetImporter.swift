@@ -641,6 +641,7 @@ enum WorkspaceSetImporter {
 
     private static func sendCommand(to panelId: UUID, in workspace: Workspace, command: String) {
         guard let terminalPanel = workspace.terminalPanel(for: panelId) else { return }
+        terminalPanel.configuredCommand = command
         terminalPanel.sendText(command + "\n")
     }
 
