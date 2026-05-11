@@ -10111,13 +10111,17 @@ struct VerticalTabsSidebar: View {
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
         let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let modeFiltered: [Workspace]
-        switch sidebarFilterMode {
-        case .none: modeFiltered = workspaces
-        case .active: modeFiltered = workspaces.filter(workspaceHasAgentSession)
+        // A non-empty search query overrides the Active mode filter: typing
+        // into the search field always spans every workspace so the user can
+        // jump to anything by name without first toggling Active off. When
+        // the query is empty, the Active toggle resumes its usual role.
+        if !trimmedSearch.isEmpty {
+            return workspaces.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
         }
-        guard !trimmedSearch.isEmpty else { return modeFiltered }
-        return modeFiltered.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
+        switch sidebarFilterMode {
+        case .none: return workspaces
+        case .active: return workspaces.filter(workspaceHasAgentSession)
+        }
     }
 
     private var isMinimalMode: Bool {
@@ -10241,7 +10245,14 @@ struct VerticalTabsSidebar: View {
                 SidebarFilterBar(
                     mode: sidebarFilterMode,
                     activeCount: activeWorkspaceCount,
-                    setMode: { setSidebarFilter($0) },
+                    setMode: { newMode in
+                        // Clicking the Active chip clears the search field so the
+                        // toggle's intent isn't masked by a stale query. The search
+                        // override in `workspacesMatchingFilter` would otherwise
+                        // make the click look like a no-op while a query is set.
+                        sidebarSearchText = ""
+                        setSidebarFilter(newMode)
+                    },
                     searchText: $sidebarSearchText
                 )
                 .padding(.horizontal, 10)
