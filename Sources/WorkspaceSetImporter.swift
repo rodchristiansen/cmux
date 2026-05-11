@@ -13,6 +13,22 @@ struct WorkspaceSetFile: Codable {
     /// default is a single pane containing all panels as tabs.
     var defaultLayout: WorkspaceSetLayoutNode?
     var sections: [WorkspaceSetSection]
+    /// Optional declarations of named secondary windows pre-populated with
+    /// subsets of the global workspace list. Absent or empty = single-window
+    /// mode (today's behavior). Resolved by workspace name (case-insensitive)
+    /// against entries declared under `sections`.
+    var windows: [WorkspaceSetWindow]?
+}
+
+struct WorkspaceSetWindow: Codable {
+    /// Display name for the window. Used as the NSWindow title (hidden in the
+    /// UI but addressable) and as the case-insensitive identity key for
+    /// `Reload Window Set` so existing windows aren't duplicated.
+    var name: String
+    /// Workspace names that should live in this window. Each name should
+    /// match a `WorkspaceSetEntry.name` declared under `sections`. Missing
+    /// names are logged and skipped — not fatal.
+    var workspaces: [String]
 }
 
 struct WorkspaceSetSection: Codable {
@@ -144,6 +160,14 @@ enum WorkspaceSetImporter {
 
     static func fileExists(at path: String? = nil) -> Bool {
         FileManager.default.fileExists(atPath: path ?? defaultPath)
+    }
+
+    /// Parse the workspace-set file and return its `windows` declarations.
+    /// Returns nil when no file exists or parsing fails; callers should treat
+    /// nil and `[]` identically (single-window mode).
+    static func windowDeclarations(at path: String? = nil) -> [WorkspaceSetWindow]? {
+        guard let file = try? parseFile(at: path ?? defaultPath) else { return nil }
+        return file.windows
     }
 
     /// Load and merge a workspace-set.json into the given TabManager.
