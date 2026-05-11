@@ -5973,6 +5973,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     ) -> Bool {
         guard let responder else { return true }
         if responder is NSWindow { return true }
+        // Sidebar search field (and its field editor) are legitimate
+        // non-terminal text inputs; pressing a key while editing there must
+        // NOT trigger a keyboard-routing "repair" that snaps focus back to
+        // the terminal surface.
+        if isSidebarSearchResponder(responder) { return false }
         guard responderHasViableKeyRoutingOwner(responder, in: window) else {
             return true
         }
@@ -5980,6 +5985,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return false
         }
         return true
+    }
+
+    /// True if the responder is the sidebar search field or its active field editor.
+    private func isSidebarSearchResponder(_ responder: NSResponder) -> Bool {
+        if let editor = responder as? NSTextView, editor.isFieldEditor {
+            var current: NSResponder? = editor.nextResponder
+            while let next = current {
+                if next is SidebarSearchTextField { return true }
+                current = next.nextResponder
+            }
+            return false
+        }
+        if let view = responder as? NSView {
+            var current: NSView? = view
+            while let v = current {
+                if v is SidebarSearchTextField { return true }
+                current = v.superview
+            }
+        }
+        return false
     }
 
     func repairFocusedTerminalKeyboardRoutingIfNeeded(
