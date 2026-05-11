@@ -10243,6 +10243,15 @@ struct VerticalTabsSidebar: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
+                .onAppear {
+                    // The Active chip becomes disabled when activeCount == 0,
+                    // so a persisted `.active` filter from a prior session can
+                    // strand the sidebar with no way for the user to escape
+                    // (and no live PIDs yet, so no workspaces visible). Reset
+                    // on appear so the user always sees their workspaces on
+                    // first paint. `.onChange` below handles later transitions.
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
+                }
                 .onChange(of: activeWorkspaceCount) { _ in
                     autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
                 }
