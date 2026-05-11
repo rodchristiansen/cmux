@@ -10086,18 +10086,30 @@ struct VerticalTabsSidebar: View {
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
 
-    /// A workspace has an "agent session" when it has tracked agent PIDs
-    /// (e.g. claude_code), regardless of whether the agent is running,
-    /// awaiting input, or idle.
+    /// A workspace has an "agent session" when it either has tracked agent
+    /// PIDs (set explicitly by a local agent via the cmux socket) OR it has
+    /// been opened — at least one of its terminal panels has a registered
+    /// TTY — and one of its panels is configured to run an agent command.
     ///
-    /// The earlier `configuredCommand` fallback (intended to catch remote
-    /// SSH-tmux Claude sessions whose PID lives off-host) matched the
-    /// template-configured command on every panel, so any workspace whose
-    /// `defaultPanels` declared a Claude pane registered as Active — even
-    /// idle ones that had never connected. We rely on local PIDs only until
-    /// the panel grows a real liveness signal for remote sessions.
+    /// The TTY requirement is what distinguishes this from the earlier
+    /// `configuredCommand`-only fallback that matched every workspace in
+    /// the YAML, even ones that had never been opened: a TTY is only
+    /// registered when the panel's terminal actually starts. Workspaces
+    /// declared in the workspace-set but never opened still have a Claude
+    /// pane configured, but no TTY — so they don't count.
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
-        !workspace.agentPIDs.isEmpty
+        if !workspace.agentPIDs.isEmpty { return true }
+        for (panelId, _) in workspace.surfaceTTYNames {
+            guard let terminalPanel = workspace.panels[panelId] as? TerminalPanel,
+                  let command = terminalPanel.configuredCommand else { continue }
+            if command.range(
+                of: #"\b(claude|codex|aider|gemini|cline|cursor-agent)\b"#,
+                options: .regularExpression
+            ) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
