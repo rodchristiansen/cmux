@@ -1,5 +1,6 @@
 import Foundation
 import Bonsplit
+import Yams
 
 // MARK: - Codable Types
 
@@ -12,6 +13,22 @@ struct WorkspaceSetFile: Codable {
     /// default is a single pane containing all panels as tabs.
     var defaultLayout: WorkspaceSetLayoutNode?
     var sections: [WorkspaceSetSection]
+    /// Optional declarations of named secondary windows pre-populated with
+    /// subsets of the global workspace list. Absent or empty = single-window
+    /// mode (today's behavior). Resolved by workspace name (case-insensitive)
+    /// against entries declared under `sections`.
+    var windows: [WorkspaceSetWindow]?
+}
+
+struct WorkspaceSetWindow: Codable {
+    /// Display name for the window. Used as the NSWindow title (hidden in the
+    /// UI but addressable) and as the case-insensitive identity key for
+    /// `Reload Window Set` so existing windows aren't duplicated.
+    var name: String
+    /// Workspace names that should live in this window. Each name should
+    /// match a `WorkspaceSetEntry.name` declared under `sections`. Missing
+    /// names are logged and skipped — not fatal.
+    var workspaces: [String]
 }
 
 struct WorkspaceSetSection: Codable {
@@ -26,6 +43,14 @@ struct WorkspaceSetEntry: Codable {
     var color: String?
     var description: String?
     var pinned: Bool?
+    /// Per-workspace override of `defaultPanels`. When present, this entry's
+    /// workspace gets exactly these panels instead of the file-wide defaults.
+    /// Useful for a "fast" home workspace that opens a single Terminal pane
+    /// without the SSH-spawning Claude/Files/Lazygit panels.
+    var panels: [WorkspaceSetPanelTemplate]?
+    /// Per-workspace override of `defaultLayout`. Required when `panels`
+    /// references titles that don't exist in `defaultPanels`.
+    var layout: WorkspaceSetLayoutNode?
 }
 
 struct WorkspaceSetPanelTemplate: Codable {
@@ -108,13 +133,41 @@ struct WorkspaceSetImportResult {
 @MainActor
 enum WorkspaceSetImporter {
 
-    static let defaultPath: String = {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return (home as NSString).appendingPathComponent(".config/cmux/workspace-set.json")
-    }()
+    /// Filenames probed inside `~/.config/cmux/`, in priority order.
+    /// The first existing file wins; YAML is preferred over JSON so that a
+    /// user who drops a `.yaml` next to an existing `.json` switches formats
+    /// without having to delete the legacy file.
+    private static let candidateFilenames: [String] = [
+        "workspace-set.yaml",
+        "workspace-set.yml",
+        "workspace-set.json",
+    ]
+
+    /// Resolved path of the workspace-set file. Probes `~/.config/cmux/` for
+    /// each candidate filename and returns the first one that exists on disk.
+    /// When none exist, returns the `.json` fallback so error messages still
+    /// reference a sensible path.
+    static var defaultPath: String {
+        let baseDir = (FileManager.default.homeDirectoryForCurrentUser.path
+                       as NSString).appendingPathComponent(".config/cmux")
+        let fm = FileManager.default
+        for filename in candidateFilenames {
+            let candidate = (baseDir as NSString).appendingPathComponent(filename)
+            if fm.fileExists(atPath: candidate) { return candidate }
+        }
+        return (baseDir as NSString).appendingPathComponent("workspace-set.json")
+    }
 
     static func fileExists(at path: String? = nil) -> Bool {
         FileManager.default.fileExists(atPath: path ?? defaultPath)
+    }
+
+    /// Parse the workspace-set file and return its `windows` declarations.
+    /// Returns nil when no file exists or parsing fails; callers should treat
+    /// nil and `[]` identically (single-window mode).
+    static func windowDeclarations(at path: String? = nil) -> [WorkspaceSetWindow]? {
+        guard let file = try? parseFile(at: path ?? defaultPath) else { return nil }
+        return file.windows
     }
 
     /// Load and merge a workspace-set.json into the given TabManager.
@@ -159,14 +212,24 @@ enum WorkspaceSetImporter {
     ) -> WorkspaceReconcileSummary? {
         let resolvedPath = path ?? defaultPath
         guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
-        guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
+        let matchingEntry = findEntry(for: workspace, in: workspaceSet)
+        let templates: [WorkspaceSetPanelTemplate]?
+        let layout: WorkspaceSetLayoutNode?
+        if let entry = matchingEntry {
+            templates = effectivePanels(for: entry, file: workspaceSet)
+            layout = effectiveLayout(for: entry, file: workspaceSet)
+        } else {
+            templates = workspaceSet.defaultPanels
+            layout = workspaceSet.defaultLayout
+        }
+        guard let templates, !templates.isEmpty else { return nil }
 
         if isWorkspaceIdle(workspace) {
             let anchor = workspace.focusedPanelId
             for panelId in Array(workspace.panels.keys) where panelId != anchor {
                 _ = workspace.closePanel(panelId, force: true)
             }
-            applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
+            applyFullTemplate(to: workspace, panels: templates, layout: layout)
             return WorkspaceReconcileSummary(action: "rebuild", panelCount: templates.count)
         } else {
             let added = fillMissingPanels(in: workspace, templates: templates)
@@ -183,7 +246,17 @@ enum WorkspaceSetImporter {
     ) -> Int? {
         let resolvedPath = path ?? defaultPath
         guard let workspaceSet = try? parseFile(at: resolvedPath) else { return nil }
-        guard let templates = workspaceSet.defaultPanels, !templates.isEmpty else { return nil }
+        let matchingEntry = findEntry(for: workspace, in: workspaceSet)
+        let templates: [WorkspaceSetPanelTemplate]?
+        let layout: WorkspaceSetLayoutNode?
+        if let entry = matchingEntry {
+            templates = effectivePanels(for: entry, file: workspaceSet)
+            layout = effectiveLayout(for: entry, file: workspaceSet)
+        } else {
+            templates = workspaceSet.defaultPanels
+            layout = workspaceSet.defaultLayout
+        }
+        guard let templates, !templates.isEmpty else { return nil }
 
         // Reduce the workspace to a single pane with one anchor panel so
         // `restoreSessionSnapshot` doesn't layer new splits on top of the
@@ -195,7 +268,7 @@ enum WorkspaceSetImporter {
             _ = workspace.closePanel(panelId, force: true)
         }
 
-        applyFullTemplate(to: workspace, panels: templates, layout: workspaceSet.defaultLayout)
+        applyFullTemplate(to: workspace, panels: templates, layout: layout)
         return templates.count
     }
 
@@ -208,8 +281,14 @@ enum WorkspaceSetImporter {
         guard let data = FileManager.default.contents(atPath: path), !data.isEmpty else {
             throw WorkspaceSetImportError.readError(path: path, underlying: "File is empty")
         }
+        let ext = (path as NSString).pathExtension.lowercased()
         do {
-            return try JSONDecoder().decode(WorkspaceSetFile.self, from: data)
+            switch ext {
+            case "yaml", "yml":
+                return try YAMLDecoder().decode(WorkspaceSetFile.self, from: data)
+            default:
+                return try JSONDecoder().decode(WorkspaceSetFile.self, from: data)
+            }
         } catch {
             throw WorkspaceSetImportError.parseError(path: path, underlying: error.localizedDescription)
         }
@@ -260,6 +339,9 @@ enum WorkspaceSetImporter {
                 let expandedDir = (entry.directory as NSString).expandingTildeInPath
                 let normalizedDir = normalizedDirectoryKey(expandedDir)
 
+                let entryPanels = effectivePanels(for: entry, file: workspaceSet)
+                let entryLayout = effectiveLayout(for: entry, file: workspaceSet)
+
                 if let existingWs = existingByDir[normalizedDir] {
                     if !dryRun {
                         if let section = targetSection,
@@ -269,7 +351,7 @@ enum WorkspaceSetImporter {
                         // Idle workspaces get fully rebuilt from the template so
                         // their layout + tools match the JSON. Running workspaces
                         // are preserved — only missing panels get added.
-                        if let templates = workspaceSet.defaultPanels, !templates.isEmpty {
+                        if let templates = entryPanels, !templates.isEmpty {
                             if isWorkspaceIdle(existingWs) {
                                 // Tear down and rebuild from template.
                                 let anchor = existingWs.focusedPanelId
@@ -279,7 +361,7 @@ enum WorkspaceSetImporter {
                                 applyFullTemplate(
                                     to: existingWs,
                                     panels: templates,
-                                    layout: workspaceSet.defaultLayout
+                                    layout: entryLayout
                                 )
                                 panelsAdded += templates.count
                             } else {
@@ -327,8 +409,8 @@ enum WorkspaceSetImporter {
                     tabManager.moveWorkspaceToSection(tabId: ws.id, sectionId: section.id)
                 }
 
-                if let templates = workspaceSet.defaultPanels, !templates.isEmpty {
-                    applyFullTemplate(to: ws, panels: templates, layout: workspaceSet.defaultLayout)
+                if let templates = entryPanels, !templates.isEmpty {
+                    applyFullTemplate(to: ws, panels: templates, layout: entryLayout)
                     panelsAdded += max(templates.count - 1, 0)
                 }
 
@@ -338,10 +420,34 @@ enum WorkspaceSetImporter {
             }
         }
 
+        // Enforce YAML section order. Sections named in the YAML are moved
+        // to the top in YAML order; sections not in YAML keep their relative
+        // order below. This makes the YAML the source of truth for sidebar
+        // layout instead of "wherever createSection happened to append."
+        if !dryRun {
+            applyYAMLSectionOrder(tabManager: tabManager, workspaceSet: workspaceSet)
+        }
+
         return WorkspaceSetImportResult(
             created: created, skipped: skipped,
             sectionsCreated: sectionsCreated, panelsAdded: panelsAdded
         )
+    }
+
+    private static func applyYAMLSectionOrder(
+        tabManager: TabManager,
+        workspaceSet: WorkspaceSetFile
+    ) {
+        var targetIndex = 0
+        for sectionDef in workspaceSet.sections {
+            let key = sectionDef.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !key.isEmpty else { continue }
+            guard let match = tabManager.sections.first(where: {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key
+            }) else { continue }
+            tabManager.reorderSection(sectionId: match.id, toIndex: targetIndex)
+            targetIndex += 1
+        }
     }
 
     // MARK: - Template application (full rebuild via session snapshot)
@@ -536,6 +642,49 @@ enum WorkspaceSetImporter {
     private static func sendCommand(to panelId: UUID, in workspace: Workspace, command: String) {
         guard let terminalPanel = workspace.terminalPanel(for: panelId) else { return }
         terminalPanel.sendText(command + "\n")
+    }
+
+    /// Resolve which panel templates apply to a given entry: the entry's
+    /// own override if present, otherwise the file-wide `defaultPanels`.
+    private static func effectivePanels(
+        for entry: WorkspaceSetEntry,
+        file: WorkspaceSetFile
+    ) -> [WorkspaceSetPanelTemplate]? {
+        entry.panels ?? file.defaultPanels
+    }
+
+    /// Resolve which layout applies. Per-entry layout wins; otherwise we
+    /// only fall back to the file-wide default if it references panels that
+    /// actually exist in the entry's effective panel set.
+    private static func effectiveLayout(
+        for entry: WorkspaceSetEntry,
+        file: WorkspaceSetFile
+    ) -> WorkspaceSetLayoutNode? {
+        if let layout = entry.layout { return layout }
+        // If the entry overrides panels, the file-wide layout likely refers
+        // to titles that aren't in the override (Claude/Lazygit/Files etc.),
+        // so let `applyFullTemplate` build a default single-pane layout.
+        if entry.panels != nil { return nil }
+        return file.defaultLayout
+    }
+
+    /// Locate the workspace-set entry matching a live workspace by directory.
+    /// Used by `reconcileWorkspace` and `rebuildWorkspaceFromTemplate` to
+    /// honor per-entry panel overrides without re-running the full merge.
+    private static func findEntry(
+        for workspace: Workspace,
+        in file: WorkspaceSetFile
+    ) -> WorkspaceSetEntry? {
+        let key = normalizedDirectoryKey(workspace.currentDirectory)
+        for section in file.sections {
+            for entry in section.workspaces {
+                let expanded = (entry.directory as NSString).expandingTildeInPath
+                if normalizedDirectoryKey(expanded) == key {
+                    return entry
+                }
+            }
+        }
+        return nil
     }
 
     private static func normalizedDirectoryKey(_ directory: String) -> String {
