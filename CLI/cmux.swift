@@ -2582,6 +2582,24 @@ struct CMUXCLI {
             )
             print(response)
 
+        case "set-agent-pid":
+            let response = try forwardSidebarMetadataCommand(
+                "set_agent_pid",
+                commandArgs: commandArgs,
+                client: client,
+                windowOverride: windowId
+            )
+            print(response)
+
+        case "clear-agent-pid":
+            let response = try forwardSidebarMetadataCommand(
+                "clear_agent_pid",
+                commandArgs: commandArgs,
+                client: client,
+                windowOverride: windowId
+            )
+            print(response)
+
         case "set-progress":
             let response = try forwardSidebarMetadataCommand(
                 "set_progress",
@@ -7748,6 +7766,35 @@ struct CMUXCLI {
             Example:
               cmux list-status
               cmux list-status --workspace workspace:2
+            """
+        case "set-agent-pid":
+            return """
+            Usage: cmux set-agent-pid <key> <pid> [flags]
+
+            Register a PID as the active agent process for a workspace. The
+            sidebar's Active filter counts a workspace as active while any
+            tracked PID is still alive. Use this from wrappers (claude-pane,
+            codex wrappers, etc.) so cmux can reflect whether the agent is
+            currently running. Pair with `clear-agent-pid <key>` on exit;
+            dead PIDs are also reaped automatically by the predicate.
+
+            Flags:
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+
+            Example:
+              cmux set-agent-pid claude "$$"
+            """
+        case "clear-agent-pid":
+            return """
+            Usage: cmux clear-agent-pid <key> [flags]
+
+            Unregister a previously tracked agent PID for a workspace.
+
+            Flags:
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+
+            Example:
+              cmux clear-agent-pid claude
             """
         case "set-progress":
             return """
