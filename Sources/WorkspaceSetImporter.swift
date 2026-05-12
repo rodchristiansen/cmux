@@ -224,17 +224,15 @@ enum WorkspaceSetImporter {
         }
         guard let templates, !templates.isEmpty else { return nil }
 
-        if isWorkspaceIdle(workspace) {
-            let anchor = workspace.focusedPanelId
-            for panelId in Array(workspace.panels.keys) where panelId != anchor {
-                _ = workspace.closePanel(panelId, force: true)
-            }
-            applyFullTemplate(to: workspace, panels: templates, layout: layout)
-            return WorkspaceReconcileSummary(action: "rebuild", panelCount: templates.count)
-        } else {
-            let added = fillMissingPanels(in: workspace, templates: templates)
-            return WorkspaceReconcileSummary(action: added > 0 ? "fill" : "noop", panelCount: added)
-        }
+        // Auto-reconcile on selection is additive only. The old idle-rebuild
+        // path tore down panels and spawned every template command on the
+        // main thread the first time a workspace was selected after launch —
+        // with a large YAML and remote panes that meant a multi-second hang
+        // per workspace and a cascade of SSH spawns. Use the explicit
+        // `rebuildWorkspaceFromTemplate` (menu / socket command) when a
+        // destructive rebuild is actually desired.
+        let added = fillMissingPanels(in: workspace, templates: templates)
+        return WorkspaceReconcileSummary(action: added > 0 ? "fill" : "noop", panelCount: added)
     }
 
     /// Rebuild a single workspace's layout from the template in workspace-set.json.
@@ -348,25 +346,15 @@ enum WorkspaceSetImporter {
                            tabManager.sectionForWorkspace(existingWs.id) == nil {
                             tabManager.moveWorkspaceToSection(tabId: existingWs.id, sectionId: section.id)
                         }
-                        // Idle workspaces get fully rebuilt from the template so
-                        // their layout + tools match the JSON. Running workspaces
-                        // are preserved — only missing panels get added.
+                        // Reload is additive only: fill missing panels so YAML
+                        // additions show up, but never tear down and rebuild an
+                        // existing workspace. With a large YAML, the old
+                        // destructive idle-rebuild path spawned hundreds of
+                        // panels (and their commands) on the main thread,
+                        // freezing the app. Explicit per-workspace rebuilds are
+                        // still available via `rebuildWorkspaceFromTemplate`.
                         if let templates = entryPanels, !templates.isEmpty {
-                            if isWorkspaceIdle(existingWs) {
-                                // Tear down and rebuild from template.
-                                let anchor = existingWs.focusedPanelId
-                                for panelId in Array(existingWs.panels.keys) where panelId != anchor {
-                                    _ = existingWs.closePanel(panelId, force: true)
-                                }
-                                applyFullTemplate(
-                                    to: existingWs,
-                                    panels: templates,
-                                    layout: entryLayout
-                                )
-                                panelsAdded += templates.count
-                            } else {
-                                panelsAdded += fillMissingPanels(in: existingWs, templates: templates)
-                            }
+                            panelsAdded += fillMissingPanels(in: existingWs, templates: templates)
                         }
                     }
                     skipped.append(.init(name: entry.name, directory: entry.directory, reason: "directory_exists"))
@@ -626,17 +614,6 @@ enum WorkspaceSetImporter {
         }
 
         return totalMissing
-    }
-
-    /// A workspace is "idle" when no status entry reports as running. Used to
-    /// decide whether a reload can safely rebuild its layout from the template.
-    private static func isWorkspaceIdle(_ workspace: Workspace) -> Bool {
-        for entry in workspace.statusEntries.values {
-            if entry.value.range(of: "running", options: .caseInsensitive) != nil {
-                return false
-            }
-        }
-        return true
     }
 
     private static func sendCommand(to panelId: UUID, in workspace: Workspace, command: String) {
