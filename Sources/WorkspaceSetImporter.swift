@@ -224,15 +224,37 @@ enum WorkspaceSetImporter {
         }
         guard let templates, !templates.isEmpty else { return nil }
 
-        // Auto-reconcile on selection is additive only. The old idle-rebuild
-        // path tore down panels and spawned every template command on the
-        // main thread the first time a workspace was selected after launch —
-        // with a large YAML and remote panes that meant a multi-second hang
-        // per workspace and a cascade of SSH spawns. Use the explicit
-        // `rebuildWorkspaceFromTemplate` (menu / socket command) when a
-        // destructive rebuild is actually desired.
+        // Bootstrap-state workspaces (one untitled panel that has never been
+        // opened) get the full template applied so the user sees the
+        // declared layout — Terminal/Claude/Files/Lazygit in the right
+        // splits — the first time they click in. Already-materialized
+        // workspaces stay additive: just fill any missing template panels
+        // without tearing down what's there. This is the per-workspace
+        // counterpart to the reload-time additive policy; here it's safe to
+        // rebuild because it happens once per workspace on user action, not
+        // 73x in a synchronous loop the way Reload Workspace Set did.
+        if isWorkspaceBootstrapState(workspace) {
+            let anchor = workspace.focusedPanelId
+            for panelId in Array(workspace.panels.keys) where panelId != anchor {
+                _ = workspace.closePanel(panelId, force: true)
+            }
+            applyFullTemplate(to: workspace, panels: templates, layout: layout)
+            return WorkspaceReconcileSummary(action: "rebuild", panelCount: templates.count)
+        }
+
         let added = fillMissingPanels(in: workspace, templates: templates)
         return WorkspaceReconcileSummary(action: added > 0 ? "fill" : "noop", panelCount: added)
+    }
+
+    /// True when a workspace has never been materialized from a template:
+    /// at most one panel, no custom panel titles set, and no TTYs ever
+    /// registered. Distinguishes "freshly created bootstrap" from "user
+    /// opened it, ran the agent, agent exited" — the latter must be left
+    /// alone so we don't trample on the user's actual work.
+    private static func isWorkspaceBootstrapState(_ workspace: Workspace) -> Bool {
+        workspace.panels.count <= 1
+            && workspace.panelCustomTitles.isEmpty
+            && workspace.surfaceTTYNames.isEmpty
     }
 
     /// Rebuild a single workspace's layout from the template in workspace-set.json.
@@ -342,8 +364,13 @@ enum WorkspaceSetImporter {
 
                 if let existingWs = existingByDir[normalizedDir] {
                     if !dryRun {
+                        // YAML is the source of truth for section grouping:
+                        // if the entry declares a section, move the workspace
+                        // there whether it was sectionless or in some other
+                        // section. Lets users reorganize sidebar grouping via
+                        // workspace-set.yaml + Reload Workspace Set.
                         if let section = targetSection,
-                           tabManager.sectionForWorkspace(existingWs.id) == nil {
+                           tabManager.sectionForWorkspace(existingWs.id)?.id != section.id {
                             tabManager.moveWorkspaceToSection(tabId: existingWs.id, sectionId: section.id)
                         }
                         // Reload is additive only: fill missing panels so YAML
