@@ -10086,28 +10086,16 @@ struct VerticalTabsSidebar: View {
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
 
-    /// A workspace has an "agent session" when it either has tracked agent
-    /// PIDs (set explicitly by a local agent via the cmux socket) OR it has
-    /// been opened — at least one of its terminal panels has a registered
-    /// TTY — and one of its panels is configured to run an agent command.
-    ///
-    /// The TTY requirement is what distinguishes this from the earlier
-    /// `configuredCommand`-only fallback that matched every workspace in
-    /// the YAML, even ones that had never been opened: a TTY is only
-    /// registered when the panel's terminal actually starts. Workspaces
-    /// declared in the workspace-set but never opened still have a Claude
-    /// pane configured, but no TTY — so they don't count.
+    /// A workspace has an "agent session" when at least one tracked agent
+    /// PID is still alive. PIDs are registered by agent wrappers via
+    /// `cmux set-agent-pid` (claude-pane, internal Claude/Codex hooks, etc.)
+    /// and cleared with `cmux clear-agent-pid` — or implicitly reaped here
+    /// when the process is gone. The aliveness check stops stale PIDs from
+    /// keeping a workspace flagged Active after the agent has exited
+    /// without a clean clear (SIGKILL, crash, ssh hard-disconnect).
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
-        if !workspace.agentPIDs.isEmpty { return true }
-        for (panelId, _) in workspace.surfaceTTYNames {
-            guard let terminalPanel = workspace.panels[panelId] as? TerminalPanel,
-                  let command = terminalPanel.configuredCommand else { continue }
-            if command.range(
-                of: #"\b(claude|codex|aider|gemini|cline|cursor-agent)\b"#,
-                options: .regularExpression
-            ) != nil {
-                return true
-            }
+        for pid in workspace.agentPIDs.values where pid > 0 {
+            if kill(pid, 0) == 0 { return true }
         }
         return false
     }
