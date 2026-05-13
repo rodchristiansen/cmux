@@ -360,7 +360,6 @@ enum WorkspaceSetImporter {
                 let normalizedDir = normalizedDirectoryKey(expandedDir)
 
                 let entryPanels = effectivePanels(for: entry, file: workspaceSet)
-                let entryLayout = effectiveLayout(for: entry, file: workspaceSet)
 
                 if let existingWs = existingByDir[normalizedDir] {
                     if !dryRun {
@@ -373,14 +372,14 @@ enum WorkspaceSetImporter {
                            tabManager.sectionForWorkspace(existingWs.id)?.id != section.id {
                             tabManager.moveWorkspaceToSection(tabId: existingWs.id, sectionId: section.id)
                         }
-                        // Reload is additive only: fill missing panels so YAML
-                        // additions show up, but never tear down and rebuild an
-                        // existing workspace. With a large YAML, the old
-                        // destructive idle-rebuild path spawned hundreds of
-                        // panels (and their commands) on the main thread,
-                        // freezing the app. Explicit per-workspace rebuilds are
-                        // still available via `rebuildWorkspaceFromTemplate`.
-                        if let templates = entryPanels, !templates.isEmpty {
+                        // Only fill panels into workspaces the user has
+                        // actually opened. Bootstrap workspaces (created by a
+                        // prior reload but never clicked) stay untouched so
+                        // reload never spawns claude-pane/SSH/tmux for them —
+                        // first-select reconcile applies the full template +
+                        // commands when the user opens the workspace.
+                        if let templates = entryPanels, !templates.isEmpty,
+                           !isWorkspaceBootstrapState(existingWs) {
                             panelsAdded += fillMissingPanels(in: existingWs, templates: templates)
                         }
                     }
@@ -424,10 +423,11 @@ enum WorkspaceSetImporter {
                     tabManager.moveWorkspaceToSection(tabId: ws.id, sectionId: section.id)
                 }
 
-                if let templates = entryPanels, !templates.isEmpty {
-                    applyFullTemplate(to: ws, panels: templates, layout: entryLayout)
-                    panelsAdded += max(templates.count - 1, 0)
-                }
+                // Leave the new workspace in bootstrap state. Template +
+                // commands (claude-pane, remote-pane lf, etc.) are deferred
+                // to first-select reconcile. Eagerly applying templates here
+                // meant Reload Workspace Set spawned tmux/SSH for every YAML
+                // entry the user had never opened.
 
                 existingByDir[normalizedDir] = ws
 
