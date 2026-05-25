@@ -2597,7 +2597,8 @@ struct ContentView: View {
             onSendFeedback: presentFeedbackComposer,
             selection: $sidebarSelectionState.selection,
             selectedTabIds: $selectedTabIds,
-            lastSidebarSelectionIndex: $lastSidebarSelectionIndex
+            lastSidebarSelectionIndex: $lastSidebarSelectionIndex,
+            isFullScreen: isFullScreen
         )
     }
 
@@ -10054,6 +10055,7 @@ struct VerticalTabsSidebar: View {
     @Binding var selection: SidebarSelection
     @Binding var selectedTabIds: Set<UUID>
     @Binding var lastSidebarSelectionIndex: Int?
+    var isFullScreen: Bool = false
     @StateObject private var modifierKeyMonitor = SidebarShortcutHintModifierMonitor()
     @StateObject private var dragAutoScrollController = SidebarDragAutoScrollController()
     @StateObject private var dragFailsafeMonitor = SidebarDragFailsafeMonitor()
@@ -10081,8 +10083,13 @@ struct VerticalTabsSidebar: View {
         }
     }
 
-    /// Space at top of sidebar for traffic light buttons
-    private let trafficLightPadding: CGFloat = 28
+    /// Space at top of sidebar for traffic light buttons. In fullscreen the
+    /// system menu bar + window controls slide down as an overlay when the
+    /// cursor reaches the top; reserve enough room here so the filter/search
+    /// row below isn't hidden by that overlay.
+    private var trafficLightPadding: CGFloat {
+        isFullScreen ? 52 : 28
+    }
     private let tabRowSpacing: CGFloat = 2
     private let hiddenTitlebarControlsLeadingInset: CGFloat = 72
 
