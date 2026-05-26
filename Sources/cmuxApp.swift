@@ -4937,6 +4937,31 @@ struct SettingsView: View {
                         SettingsCardDivider()
 
                         SettingsCardRow(
+                            String(
+                                localized: "settings.notifications.tmux.title",
+                                defaultValue: "Running inside tmux?"
+                            ),
+                            subtitle: String(
+                                localized: "settings.notifications.tmux.subtitle",
+                                defaultValue: "Tmux blocks OSC notification escapes by default. Add `set -g allow-passthrough on` to your ~/.tmux.conf to forward them to cmux."
+                            )
+                        ) {
+                            Button(
+                                String(
+                                    localized: "settings.notifications.tmux.copy",
+                                    defaultValue: "Copy snippet"
+                                )
+                            ) {
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.setString("set -g allow-passthrough on", forType: .string)
+                            }
+                            .controlSize(.small)
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
                             String(localized: "settings.app.telemetry", defaultValue: "Send anonymous telemetry"),
                             subtitle: sendAnonymousTelemetry != telemetryValueAtLaunch
                                 ? String(localized: "settings.app.telemetry.subtitleChanged", defaultValue: "Change takes effect on next launch.")
