@@ -231,22 +231,26 @@ git commit -m "Update ghostty submodule"
 ## Release
 
 Use the `/release` command to prepare a new release. This will:
-1. Determine the new version (bumps minor by default)
+1. Stamp the current date+time as the version
 2. Gather commits since the last tag and update the changelog
 3. Update `CHANGELOG.md` (the docs changelog page at `web/app/docs/changelog/page.tsx` reads from it)
-4. Run `./scripts/bump-version.sh` to update both versions
+4. Run `./scripts/bump-version.sh` to stamp both versions
 5. Commit, tag, and push
 
-Version bumping:
+This fork uses date-based versioning (America/Vancouver):
+
+- `MARKETING_VERSION` = `YYYY.MM.DD`
+- `CURRENT_PROJECT_VERSION` = `YYYYMMDDHHMM` (12-digit integer; Sparkle compares this)
+
+Stamp now or pass an explicit `YYYY.MM.DD.HHMM`:
 
 ```bash
-./scripts/bump-version.sh          # bump minor (0.15.0 → 0.16.0)
-./scripts/bump-version.sh patch    # bump patch (0.15.0 → 0.15.1)
-./scripts/bump-version.sh major    # bump major (0.15.0 → 1.0.0)
-./scripts/bump-version.sh 1.0.0    # set specific version
+./scripts/bump-version.sh
 ```
 
-This updates both `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` (build number). The build number is auto-incremented and is required for Sparkle auto-update to work.
+```bash
+./scripts/bump-version.sh 2026.05.25.1959
+```
 
 Manual release steps (if not using the command):
 
@@ -261,5 +265,5 @@ Notes:
   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
 - The release asset is `cmux-macos.dmg` attached to the tag.
 - README download button points to `releases/latest/download/cmux-macos.dmg`.
-- Versioning: bump the minor version for updates unless explicitly asked otherwise.
+- Versioning: date-stamped on the fork; `bump-version.sh` re-stamps from the current Vancouver clock.
 - Changelog: update `CHANGELOG.md`; docs changelog is rendered from it.
