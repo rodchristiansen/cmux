@@ -383,6 +383,87 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertTrue(manager.tabs.contains(where: { $0.id == pinnedWorkspace.id }))
     }
 
+    func testSectionLifecycleViaSocket() async throws {
+        let socketPath = makeSocketPath("sections")
+        let manager = TabManager()
+        let workspace = manager.addWorkspace(select: false)
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        // Capabilities advertise the new section methods.
+        let caps = try await okSectionResult("system.capabilities", [:], to: socketPath)
+        let methods = caps["methods"] as? [String] ?? []
+        for method in [
+            "section.list", "section.create", "section.rename", "section.reorder",
+            "section.set_collapsed", "section.delete", "section.move_workspace"
+        ] {
+            XCTAssertTrue(methods.contains(method), "capabilities missing \(method)")
+        }
+
+        // Create two sections; the second starts collapsed.
+        let alpha = try await okSectionResult("section.create", ["name": "Alpha"], to: socketPath)
+        let alphaId = try XCTUnwrap(alpha["section_id"] as? String)
+        let beta = try await okSectionResult("section.create", ["name": "Beta", "collapsed": true], to: socketPath)
+        let betaId = try XCTUnwrap(beta["section_id"] as? String)
+
+        // Listed in creation order.
+        let namesAfterCreate = try await listSectionNames(socketPath: socketPath)
+        XCTAssertEqual(namesAfterCreate, ["Alpha", "Beta"])
+
+        // Rename + collapse.
+        _ = try await okSectionResult("section.rename", ["section_id": alphaId, "name": "Alpha2"], to: socketPath)
+        let collapsed = try await okSectionResult("section.set_collapsed", ["section_id": alphaId, "collapsed": true], to: socketPath)
+        XCTAssertEqual(collapsed["is_collapsed"] as? Bool, true)
+
+        // Reorder Beta to the top.
+        _ = try await okSectionResult("section.reorder", ["section_id": betaId, "index": 0], to: socketPath)
+        let namesAfterReorder = try await listSectionNames(socketPath: socketPath)
+        XCTAssertEqual(namesAfterReorder, ["Beta", "Alpha2"])
+
+        // Move the real workspace into Alpha2.
+        _ = try await okSectionResult(
+            "section.move_workspace",
+            ["section_id": alphaId, "workspace_id": workspace.id.uuidString],
+            to: socketPath
+        )
+        let listed = try await okSectionResult("section.list", [:], to: socketPath)
+        let alphaSection = try XCTUnwrap(
+            (listed["sections"] as? [[String: Any]])?.first { ($0["name"] as? String) == "Alpha2" }
+        )
+        XCTAssertEqual((alphaSection["workspace_ids"] as? [String])?.contains(workspace.id.uuidString), true)
+
+        // Moving an unknown workspace fails cleanly.
+        let badMove = try await sendV2RequestAsync(
+            method: "section.move_workspace",
+            params: ["section_id": alphaId, "workspace_id": UUID().uuidString],
+            to: socketPath
+        )
+        XCTAssertEqual(badMove["ok"] as? Bool, false)
+        XCTAssertEqual((badMove["error"] as? [String: Any])?["code"] as? String, "not_found")
+
+        // Delete Beta.
+        _ = try await okSectionResult("section.delete", ["section_id": betaId], to: socketPath)
+        let namesAfterDelete = try await listSectionNames(socketPath: socketPath)
+        XCTAssertEqual(namesAfterDelete, ["Alpha2"])
+    }
+
+    private func okSectionResult(_ method: String, _ params: [String: Any], to socketPath: String) async throws -> [String: Any] {
+        let resp = try await sendV2RequestAsync(method: method, params: params, to: socketPath)
+        XCTAssertEqual(resp["ok"] as? Bool, true, "\(method) should succeed: \(resp)")
+        return (resp["result"] as? [String: Any]) ?? [:]
+    }
+
+    private func listSectionNames(socketPath: String) async throws -> [String] {
+        let listed = try await okSectionResult("section.list", [:], to: socketPath)
+        let sections = listed["sections"] as? [[String: Any]] ?? []
+        return sections.compactMap { $0["name"] as? String }
+    }
+
     private func waitForSocket(at path: String, timeout: TimeInterval = 5.0) throws {
         let expectation = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in

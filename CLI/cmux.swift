@@ -1991,6 +1991,21 @@ struct CMUXCLI {
         case "reorder-workspace":
             try runReorderWorkspace(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat)
 
+        case "list-sections":
+            try runListSections(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+        case "new-section":
+            try runNewSection(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+        case "rename-section":
+            try runRenameSection(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+        case "reorder-section":
+            try runReorderSection(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+        case "set-section-collapsed":
+            try runSetSectionCollapsed(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+        case "delete-section":
+            try runDeleteSection(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+        case "move-workspace-to-section":
+            try runMoveWorkspaceToSection(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
+
         case "workspace-action":
             try runWorkspaceAction(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput, idFormat: idFormat, windowOverride: windowId)
 
@@ -3228,7 +3243,7 @@ struct CMUXCLI {
         let pieces = value.split(separator: ":", omittingEmptySubsequences: false)
         guard pieces.count == 2 else { return false }
         let kind = String(pieces[0]).lowercased()
-        guard ["window", "workspace", "pane", "surface"].contains(kind) else { return false }
+        guard ["window", "workspace", "pane", "surface", "section"].contains(kind) else { return false }
         return Int(String(pieces[1])) != nil
     }
 
@@ -3287,6 +3302,33 @@ struct CMUXCLI {
             return (item["ref"] as? String) ?? (item["id"] as? String)
         }
         throw CLIError(message: "Workspace index not found")
+    }
+
+    private func normalizeSectionHandle(
+        _ raw: String?,
+        client: SocketClient,
+        windowHandle: String? = nil
+    ) throws -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        if isUUID(trimmed) || isHandleRef(trimmed) {
+            return trimmed
+        }
+        guard let wantedIndex = Int(trimmed) else {
+            throw CLIError(message: "Invalid section handle: \(trimmed) (expected UUID, ref like section:1, or index)")
+        }
+
+        var params: [String: Any] = [:]
+        if let windowHandle {
+            params["window_id"] = windowHandle
+        }
+        let listed = try client.sendV2(method: "section.list", params: params)
+        let items = listed["sections"] as? [[String: Any]] ?? []
+        for item in items where intFromAny(item["index"]) == wantedIndex {
+            return (item["ref"] as? String) ?? (item["id"] as? String)
+        }
+        throw CLIError(message: "Section index not found")
     }
 
     private func normalizePaneHandle(
@@ -3744,6 +3786,203 @@ struct CMUXCLI {
         let payload = try client.sendV2(method: "workspace.reorder", params: params)
         let summary = "OK workspace=\(formatHandle(payload, kind: "workspace", idFormat: idFormat) ?? "unknown") window=\(formatHandle(payload, kind: "window", idFormat: idFormat) ?? "unknown") index=\(payload["index"] ?? "?")"
         printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: summary)
+    }
+
+    // MARK: - Section commands
+
+    private func parseBoolArg(_ raw: String, flag: String) throws -> Bool {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on": return true
+        case "0", "false", "no", "off": return false
+        default: throw CLIError(message: "\(flag) must be a boolean (true/false)")
+        }
+    }
+
+    private func runListSections(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        var params: [String: Any] = [:]
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.list", params: params)
+        if jsonOutput {
+            print(jsonString(formatIDs(payload, mode: idFormat)))
+        } else {
+            let sections = payload["sections"] as? [[String: Any]] ?? []
+            if sections.isEmpty {
+                print("No sections")
+            } else {
+                for section in sections {
+                    let handle = textHandle(section, idFormat: idFormat)
+                    let name = (section["name"] as? String) ?? ""
+                    let count = intFromAny(section["workspace_count"]) ?? 0
+                    let collapsedTag = (section["is_collapsed"] as? Bool) == true ? "  [collapsed]" : ""
+                    let namePart = name.isEmpty ? "" : "  \(name)"
+                    print("  \(handle)\(namePart)  (\(count))\(collapsedTag)")
+                }
+            }
+        }
+    }
+
+    private func runNewSection(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        let (nameOpt, rem0) = parseOption(commandArgs, name: "--name")
+        let (collapsedOpt, rem1) = parseOption(rem0, name: "--collapsed")
+        let positional = rem1.dropFirst(rem1.first == "--" ? 1 : 0).filter { !$0.hasPrefix("--") }
+        let name = (nameOpt ?? positional.joined(separator: " ")).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw CLIError(message: "new-section requires a name (--name <title> or positional)")
+        }
+        var params: [String: Any] = ["name": name]
+        if let collapsedOpt { params["collapsed"] = try parseBoolArg(collapsedOpt, flag: "--collapsed") }
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.create", params: params)
+        printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["section", "window"]))
+    }
+
+    private func runRenameSection(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        let (sectionOpt, rem0) = parseOption(commandArgs, name: "--section")
+        guard let sectionRaw = sectionOpt else {
+            throw CLIError(message: "rename-section requires --section <id|ref|index>")
+        }
+        let (nameOpt, rem1) = parseOption(rem0, name: "--name")
+        let positional = rem1.dropFirst(rem1.first == "--" ? 1 : 0)
+        let name = (nameOpt ?? positional.joined(separator: " ")).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw CLIError(message: "rename-section requires a new name (--name <title> or positional)")
+        }
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
+        var params: [String: Any] = ["name": name]
+        if let sectionHandle { params["section_id"] = sectionHandle }
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.rename", params: params)
+        printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["section", "window"]))
+    }
+
+    private func runReorderSection(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        let sectionRaw = optionValue(commandArgs, name: "--section") ?? commandArgs.first
+        guard let sectionRaw else {
+            throw CLIError(message: "reorder-section requires --section <id|ref|index>")
+        }
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
+        let beforeHandle = try normalizeSectionHandle(optionValue(commandArgs, name: "--before") ?? optionValue(commandArgs, name: "--before-section"), client: client, windowHandle: windowHandle)
+        let afterHandle = try normalizeSectionHandle(optionValue(commandArgs, name: "--after") ?? optionValue(commandArgs, name: "--after-section"), client: client, windowHandle: windowHandle)
+
+        var params: [String: Any] = [:]
+        if let sectionHandle { params["section_id"] = sectionHandle }
+        if let beforeHandle { params["before_section_id"] = beforeHandle }
+        if let afterHandle { params["after_section_id"] = afterHandle }
+        if let indexRaw = optionValue(commandArgs, name: "--index") {
+            guard let index = Int(indexRaw) else {
+                throw CLIError(message: "--index must be an integer")
+            }
+            params["index"] = index
+        }
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.reorder", params: params)
+        let summary = "OK section=\(formatHandle(payload, kind: "section", idFormat: idFormat) ?? "unknown") index=\(payload["index"] ?? "?")"
+        printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: summary)
+    }
+
+    private func runSetSectionCollapsed(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        guard let sectionRaw = optionValue(commandArgs, name: "--section") else {
+            throw CLIError(message: "set-section-collapsed requires --section <id|ref|index>")
+        }
+        guard let collapsedRaw = optionValue(commandArgs, name: "--collapsed") else {
+            throw CLIError(message: "set-section-collapsed requires --collapsed <true|false>")
+        }
+        let collapsed = try parseBoolArg(collapsedRaw, flag: "--collapsed")
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
+        var params: [String: Any] = ["collapsed": collapsed]
+        if let sectionHandle { params["section_id"] = sectionHandle }
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.set_collapsed", params: params)
+        printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["section", "window"]))
+    }
+
+    private func runDeleteSection(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        guard let sectionRaw = optionValue(commandArgs, name: "--section") ?? commandArgs.first else {
+            throw CLIError(message: "delete-section requires --section <id|ref|index>")
+        }
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
+        var params: [String: Any] = [:]
+        if let sectionHandle { params["section_id"] = sectionHandle }
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.delete", params: params)
+        printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["section", "window"]))
+    }
+
+    private func runMoveWorkspaceToSection(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        idFormat: CLIIDFormat,
+        windowOverride: String?
+    ) throws {
+        guard let workspaceRaw = optionValue(commandArgs, name: "--workspace") else {
+            throw CLIError(message: "move-workspace-to-section requires --workspace <id|ref|index>")
+        }
+        guard let sectionRaw = optionValue(commandArgs, name: "--section") else {
+            throw CLIError(message: "move-workspace-to-section requires --section <id|ref|index>")
+        }
+        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let workspaceHandle = try normalizeWorkspaceHandle(workspaceRaw, client: client, windowHandle: windowHandle)
+        let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
+        let beforeHandle = try normalizeWorkspaceHandle(optionValue(commandArgs, name: "--before") ?? optionValue(commandArgs, name: "--before-workspace"), client: client, windowHandle: windowHandle)
+        let afterHandle = try normalizeWorkspaceHandle(optionValue(commandArgs, name: "--after") ?? optionValue(commandArgs, name: "--after-workspace"), client: client, windowHandle: windowHandle)
+
+        var params: [String: Any] = [:]
+        if let workspaceHandle { params["workspace_id"] = workspaceHandle }
+        if let sectionHandle { params["section_id"] = sectionHandle }
+        if let beforeHandle { params["before_workspace_id"] = beforeHandle }
+        if let afterHandle { params["after_workspace_id"] = afterHandle }
+        if let indexRaw = optionValue(commandArgs, name: "--index") {
+            guard let index = Int(indexRaw) else {
+                throw CLIError(message: "--index must be an integer")
+            }
+            params["index"] = index
+        }
+        if let windowHandle { params["window_id"] = windowHandle }
+        let payload = try client.sendV2(method: "section.move_workspace", params: params)
+        printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["section", "workspace", "window"]))
     }
 
     private func runWorkspaceAction(
@@ -7025,6 +7264,86 @@ struct CMUXCLI {
             Example:
               cmux reorder-workspace --workspace workspace:2 --index 0
               cmux reorder-workspace --workspace workspace:3 --after workspace:1
+            """
+        case "list-sections":
+            return """
+            Usage: cmux list-sections [--window <id|ref>]
+
+            List sidebar sections in order, with workspace counts and collapsed state.
+            """
+        case "new-section":
+            return """
+            Usage: cmux new-section --name <title> [flags]
+
+            Create a new sidebar section.
+
+            Flags:
+              --name <title>      Section name (required; may also be passed positionally)
+              --collapsed <bool>  Start collapsed (default false)
+              --window <id|ref>   Window context
+
+            Example:
+              cmux new-section --name "Infra"
+            """
+        case "rename-section":
+            return """
+            Usage: cmux rename-section --section <id|ref|index> --name <title> [--window <id|ref>]
+
+            Rename a section.
+
+            Example:
+              cmux rename-section --section section:2 --name "Platform"
+            """
+        case "reorder-section":
+            return """
+            Usage: cmux reorder-section --section <id|ref|index> (--index <n> | --before <id|ref|index> | --after <id|ref|index>) [--window <id|ref>]
+
+            Move a section to a new position in the sidebar.
+
+            Flags:
+              --section <id|ref|index>   Section to move (required; may also be passed positionally)
+              --index <n>                Place at this index (0 = first)
+              --before <id|ref|index>    Place before this section (alias: --before-section)
+              --after <id|ref|index>     Place after this section (alias: --after-section)
+              --window <id|ref>          Window context
+
+            Example:
+              cmux reorder-section --section section:3 --index 0
+            """
+        case "set-section-collapsed":
+            return """
+            Usage: cmux set-section-collapsed --section <id|ref|index> --collapsed <true|false> [--window <id|ref>]
+
+            Collapse or expand a section.
+
+            Example:
+              cmux set-section-collapsed --section section:1 --collapsed true
+            """
+        case "delete-section":
+            return """
+            Usage: cmux delete-section --section <id|ref|index> [--window <id|ref>]
+
+            Delete a section. Its workspaces are not closed; they become ungrouped.
+
+            Example:
+              cmux delete-section --section section:2
+            """
+        case "move-workspace-to-section":
+            return """
+            Usage: cmux move-workspace-to-section --workspace <id|ref|index> --section <id|ref|index> [position] [--window <id|ref>]
+
+            Move a workspace into a section (removing it from any current section).
+
+            Flags:
+              --workspace <id|ref|index>   Workspace to move (required)
+              --section <id|ref|index>     Destination section (required)
+              --index <n>                  Position within the section
+              --before <id|ref|index>      Place before this workspace (alias: --before-workspace)
+              --after <id|ref|index>       Place after this workspace (alias: --after-workspace)
+              --window <id|ref>            Window context
+
+            Example:
+              cmux move-workspace-to-section --workspace workspace:5 --section section:1 --index 0
             """
         case "workspace-action":
             return """
@@ -14410,6 +14729,13 @@ struct CMUXCLI {
           workspace-action --action <name> [--workspace <id|ref|index>] [--title <text>] [--color <name|#hex>] [--description <text>]
           list-workspaces
           new-workspace [--name <title>] [--description <text>] [--cwd <path>] [--command <text>]
+          list-sections [--window <id|ref>]
+          new-section --name <title> [--collapsed <bool>] [--window <id|ref>]
+          rename-section --section <id|ref|index> --name <title> [--window <id|ref>]
+          reorder-section --section <id|ref|index> (--index <n> | --before <id|ref|index> | --after <id|ref|index>) [--window <id|ref|index>]
+          set-section-collapsed --section <id|ref|index> --collapsed <bool> [--window <id|ref>]
+          delete-section --section <id|ref|index> [--window <id|ref>]
+          move-workspace-to-section --workspace <id|ref|index> --section <id|ref|index> [--index <n> | --before <id|ref|index> | --after <id|ref|index>] [--window <id|ref>]
           ssh <destination> [--name <title>] [--port <n>] [--identity <path>] [--ssh-option <opt>] [--no-focus] [-- <remote-command-args>]
           remote-daemon-status [--os <darwin|linux>] [--arch <arm64|amd64>]
           new-split <left|right|up|down> [--workspace <id|ref>] [--surface <id|ref>] [--panel <id|ref>]
