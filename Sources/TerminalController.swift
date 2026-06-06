@@ -3920,6 +3920,14 @@ class TerminalController {
         let index = v2Int(params, "index")
         let beforeId = v2UUID(params, "before_workspace_id")
         let afterId = v2UUID(params, "after_workspace_id")
+        let targetCount = (index != nil ? 1 : 0) + (beforeId != nil ? 1 : 0) + (afterId != nil ? 1 : 0)
+        if targetCount > 1 {
+            return .err(
+                code: "invalid_params",
+                message: "Specify at most one position target: index, before_workspace_id, or after_workspace_id",
+                data: nil
+            )
+        }
         let windowId = v2ResolveWindowId(tabManager: tabManager)
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to move workspace", data: nil)
@@ -3938,10 +3946,29 @@ class TerminalController {
                 ])
                 return
             }
+            // Compute the insertion index against the destination order *excluding*
+            // the workspace being moved — moveWorkspaceToSection removes it from all
+            // sections before inserting, so a reference index taken from the current
+            // list would be off by one when reordering within the same section.
+            let destOrder = section.workspaceIds.filter { $0 != workspaceId }
             var atIndex = index
-            if atIndex == nil, let beforeId, let bi = section.workspaceIds.firstIndex(of: beforeId) {
+            if let beforeId {
+                guard let bi = destOrder.firstIndex(of: beforeId) else {
+                    result = .err(code: "not_found", message: "before_workspace_id is not in the destination section", data: [
+                        "workspace_id": beforeId.uuidString,
+                        "workspace_ref": v2Ref(kind: .workspace, uuid: beforeId)
+                    ])
+                    return
+                }
                 atIndex = bi
-            } else if atIndex == nil, let afterId, let ai = section.workspaceIds.firstIndex(of: afterId) {
+            } else if let afterId {
+                guard let ai = destOrder.firstIndex(of: afterId) else {
+                    result = .err(code: "not_found", message: "after_workspace_id is not in the destination section", data: [
+                        "workspace_id": afterId.uuidString,
+                        "workspace_ref": v2Ref(kind: .workspace, uuid: afterId)
+                    ])
+                    return
+                }
                 atIndex = ai + 1
             }
             tabManager.moveWorkspaceToSection(tabId: workspaceId, sectionId: sectionId, atIndex: atIndex)

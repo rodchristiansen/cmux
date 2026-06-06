@@ -387,6 +387,8 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         let socketPath = makeSocketPath("sections")
         let manager = TabManager()
         let workspace = manager.addWorkspace(select: false)
+        let workspace2 = manager.addWorkspace(select: false)
+        let workspace3 = manager.addWorkspace(select: false)
 
         TerminalController.shared.start(
             tabManager: manager,
@@ -425,17 +427,57 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         let namesAfterReorder = try await listSectionNames(socketPath: socketPath)
         XCTAssertEqual(namesAfterReorder, ["Beta", "Alpha2"])
 
-        // Move the real workspace into Alpha2.
+        // Move three workspaces into Alpha2; index-less moves append in order.
+        for ws in [workspace, workspace2, workspace3] {
+            _ = try await okSectionResult(
+                "section.move_workspace",
+                ["section_id": alphaId, "workspace_id": ws.id.uuidString],
+                to: socketPath
+            )
+        }
+        let appended = try await sectionWorkspaceIds(named: "Alpha2", socketPath: socketPath)
+        XCTAssertEqual(appended, [workspace.id.uuidString, workspace2.id.uuidString, workspace3.id.uuidString])
+
+        // Reorder within the same section by reference: workspace3 before workspace.
         _ = try await okSectionResult(
             "section.move_workspace",
-            ["section_id": alphaId, "workspace_id": workspace.id.uuidString],
+            ["section_id": alphaId, "workspace_id": workspace3.id.uuidString, "before_workspace_id": workspace.id.uuidString],
             to: socketPath
         )
-        let listed = try await okSectionResult("section.list", [:], to: socketPath)
-        let alphaSection = try XCTUnwrap(
-            (listed["sections"] as? [[String: Any]])?.first { ($0["name"] as? String) == "Alpha2" }
+        let afterBefore = try await sectionWorkspaceIds(named: "Alpha2", socketPath: socketPath)
+        XCTAssertEqual(afterBefore, [workspace3.id.uuidString, workspace.id.uuidString, workspace2.id.uuidString])
+
+        // ...and after: workspace3 directly after workspace2.
+        _ = try await okSectionResult(
+            "section.move_workspace",
+            ["section_id": alphaId, "workspace_id": workspace3.id.uuidString, "after_workspace_id": workspace2.id.uuidString],
+            to: socketPath
         )
-        XCTAssertEqual((alphaSection["workspace_ids"] as? [String])?.contains(workspace.id.uuidString), true)
+        let afterAfter = try await sectionWorkspaceIds(named: "Alpha2", socketPath: socketPath)
+        XCTAssertEqual(afterAfter, [workspace.id.uuidString, workspace2.id.uuidString, workspace3.id.uuidString])
+
+        // A position reference that isn't in the section is rejected, not silently appended.
+        let badRef = try await sendV2RequestAsync(
+            method: "section.move_workspace",
+            params: ["section_id": alphaId, "workspace_id": workspace.id.uuidString, "before_workspace_id": UUID().uuidString],
+            to: socketPath
+        )
+        XCTAssertEqual(badRef["ok"] as? Bool, false)
+        XCTAssertEqual((badRef["error"] as? [String: Any])?["code"] as? String, "not_found")
+
+        // Specifying two position targets at once is rejected.
+        let twoTargets = try await sendV2RequestAsync(
+            method: "section.move_workspace",
+            params: [
+                "section_id": alphaId,
+                "workspace_id": workspace.id.uuidString,
+                "index": 0,
+                "after_workspace_id": workspace2.id.uuidString
+            ],
+            to: socketPath
+        )
+        XCTAssertEqual(twoTargets["ok"] as? Bool, false)
+        XCTAssertEqual((twoTargets["error"] as? [String: Any])?["code"] as? String, "invalid_params")
 
         // Moving an unknown workspace fails cleanly.
         let badMove = try await sendV2RequestAsync(
@@ -462,6 +504,12 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         let listed = try await okSectionResult("section.list", [:], to: socketPath)
         let sections = listed["sections"] as? [[String: Any]] ?? []
         return sections.compactMap { $0["name"] as? String }
+    }
+
+    private func sectionWorkspaceIds(named name: String, socketPath: String) async throws -> [String] {
+        let listed = try await okSectionResult("section.list", [:], to: socketPath)
+        let section = (listed["sections"] as? [[String: Any]])?.first { ($0["name"] as? String) == name }
+        return (section?["workspace_ids"] as? [String]) ?? []
     }
 
     private func waitForSocket(at path: String, timeout: TimeInterval = 5.0) throws {

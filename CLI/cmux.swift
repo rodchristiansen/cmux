@@ -3837,14 +3837,18 @@ struct CMUXCLI {
     ) throws {
         let (nameOpt, rem0) = parseOption(commandArgs, name: "--name")
         let (collapsedOpt, rem1) = parseOption(rem0, name: "--collapsed")
-        let positional = rem1.dropFirst(rem1.first == "--" ? 1 : 0).filter { !$0.hasPrefix("--") }
+        let (windowOpt, rem2) = parseOption(rem1, name: "--window")
+        if let unknown = rem2.first(where: { $0.hasPrefix("--") && $0 != "--" }) {
+            throw CLIError(message: "new-section: unknown flag '\(unknown)'. Known flags: --name <title>, --collapsed <bool>, --window <id|ref>")
+        }
+        let positional = rem2.dropFirst(rem2.first == "--" ? 1 : 0)
         let name = (nameOpt ?? positional.joined(separator: " ")).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             throw CLIError(message: "new-section requires a name (--name <title> or positional)")
         }
         var params: [String: Any] = ["name": name]
         if let collapsedOpt { params["collapsed"] = try parseBoolArg(collapsedOpt, flag: "--collapsed") }
-        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let windowHandle = try normalizeWindowHandle(windowOpt ?? windowOverride, client: client)
         if let windowHandle { params["window_id"] = windowHandle }
         let payload = try client.sendV2(method: "section.create", params: params)
         printV2Payload(payload, jsonOutput: jsonOutput, idFormat: idFormat, fallbackText: v2OKSummary(payload, idFormat: idFormat, kinds: ["section", "window"]))
@@ -3862,12 +3866,16 @@ struct CMUXCLI {
             throw CLIError(message: "rename-section requires --section <id|ref|index>")
         }
         let (nameOpt, rem1) = parseOption(rem0, name: "--name")
-        let positional = rem1.dropFirst(rem1.first == "--" ? 1 : 0)
+        let (windowOpt, rem2) = parseOption(rem1, name: "--window")
+        if let unknown = rem2.first(where: { $0.hasPrefix("--") && $0 != "--" }) {
+            throw CLIError(message: "rename-section: unknown flag '\(unknown)'. Known flags: --section <id|ref|index>, --name <title>, --window <id|ref>")
+        }
+        let positional = rem2.dropFirst(rem2.first == "--" ? 1 : 0)
         let name = (nameOpt ?? positional.joined(separator: " ")).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             throw CLIError(message: "rename-section requires a new name (--name <title> or positional)")
         }
-        let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
+        let windowHandle = try normalizeWindowHandle(windowOpt ?? windowOverride, client: client)
         let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
         var params: [String: Any] = ["name": name]
         if let sectionHandle { params["section_id"] = sectionHandle }
