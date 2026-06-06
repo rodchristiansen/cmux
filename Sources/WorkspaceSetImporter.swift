@@ -523,6 +523,14 @@ enum WorkspaceSetImporter {
             customColor: workspace.customColor,
             isPinned: workspace.isPinned,
             currentDirectory: cwd,
+            // Preserve the workspace's instance index across the template
+            // rebuild. `restoreSessionSnapshot` resets it to
+            // `snapshot.instanceIndex ?? 1`, so omitting this would wipe the
+            // duplicate's index back to the primary (1) — its panes would then
+            // never export CMUX_WORKSPACE_INSTANCE, and claude-remote would
+            // re-attach the source workspace's tmux session instead of opening
+            // an independent "-<n>" one.
+            instanceIndex: workspace.instanceIndex,
             focusedPanelId: firstId,
             layout: resolvedLayout,
             panels: panelSnapshots,

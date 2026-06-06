@@ -13826,6 +13826,12 @@ private struct TabItemView: View, Equatable {
         }
 
         if !isMulti {
+            Button(String(localized: "contextMenu.duplicateWorkspace", defaultValue: "Duplicate Workspace")) {
+                AppDelegate.shared?.duplicateWorkspace(tabId: tab.id, in: tabManager)
+            }
+        }
+
+        if !isMulti {
             if let key = editWorkspaceDescriptionShortcut.keyEquivalent {
                 Button(String(localized: "contextMenu.editWorkspaceDescription", defaultValue: "Edit Workspace Description…")) {
                     beginWorkspaceDescriptionEditFromContextMenu()
