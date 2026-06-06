@@ -420,7 +420,7 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         // Rename + collapse.
         _ = try await okSectionResult("section.rename", ["section_id": alphaId, "name": "Alpha2"], to: socketPath)
         let collapsed = try await okSectionResult("section.set_collapsed", ["section_id": alphaId, "collapsed": true], to: socketPath)
-        XCTAssertEqual(collapsed["is_collapsed"] as? Bool, true)
+        XCTAssertEqual(collapsed["collapsed"] as? Bool, true)
 
         // Reorder Beta to the top.
         _ = try await okSectionResult("section.reorder", ["section_id": betaId, "index": 0], to: socketPath)

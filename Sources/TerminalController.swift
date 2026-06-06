@@ -3702,7 +3702,7 @@ class TerminalController {
             "id": section.id.uuidString,
             "ref": v2Ref(kind: .section, uuid: section.id),
             "name": section.name,
-            "is_collapsed": section.isCollapsed,
+            "collapsed": section.isCollapsed,
             "index": index,
             "workspace_ids": section.workspaceIds.map { $0.uuidString },
             "workspace_refs": section.workspaceIds.map { v2Ref(kind: .workspace, uuid: $0) },
@@ -3875,7 +3875,7 @@ class TerminalController {
             "window_ref": v2Ref(kind: .window, uuid: windowId),
             "section_id": sectionId.uuidString,
             "section_ref": v2Ref(kind: .section, uuid: sectionId),
-            "is_collapsed": collapsed
+            "collapsed": collapsed
         ])
     }
 

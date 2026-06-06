@@ -3791,11 +3791,10 @@ struct CMUXCLI {
     // MARK: - Section commands
 
     private func parseBoolArg(_ raw: String, flag: String) throws -> Bool {
-        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "1", "true", "yes", "on": return true
-        case "0", "false", "no", "off": return false
-        default: throw CLIError(message: "\(flag) must be a boolean (true/false)")
+        guard let value = parseBoolString(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw CLIError(message: "\(flag) must be a boolean (true/false)")
         }
+        return value
     }
 
     private func runListSections(
@@ -3820,7 +3819,7 @@ struct CMUXCLI {
                     let handle = textHandle(section, idFormat: idFormat)
                     let name = (section["name"] as? String) ?? ""
                     let count = intFromAny(section["workspace_count"]) ?? 0
-                    let collapsedTag = (section["is_collapsed"] as? Bool) == true ? "  [collapsed]" : ""
+                    let collapsedTag = (section["collapsed"] as? Bool) == true ? "  [collapsed]" : ""
                     let namePart = name.isEmpty ? "" : "  \(name)"
                     print("  \(handle)\(namePart)  (\(count))\(collapsedTag)")
                 }
@@ -3893,7 +3892,7 @@ struct CMUXCLI {
     ) throws {
         let sectionRaw = optionValue(commandArgs, name: "--section") ?? commandArgs.first
         guard let sectionRaw else {
-            throw CLIError(message: "reorder-section requires --section <id|ref|index>")
+            throw CLIError(message: "reorder-section requires a section (--section <id|ref|index> or positional)")
         }
         let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
         let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
@@ -3947,7 +3946,7 @@ struct CMUXCLI {
         windowOverride: String?
     ) throws {
         guard let sectionRaw = optionValue(commandArgs, name: "--section") ?? commandArgs.first else {
-            throw CLIError(message: "delete-section requires --section <id|ref|index>")
+            throw CLIError(message: "delete-section requires a section (--section <id|ref|index> or positional)")
         }
         let windowHandle = try normalizeWindowHandle(optionValue(commandArgs, name: "--window") ?? windowOverride, client: client)
         let sectionHandle = try normalizeSectionHandle(sectionRaw, client: client, windowHandle: windowHandle)
