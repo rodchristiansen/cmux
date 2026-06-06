@@ -1035,6 +1035,13 @@ struct cmuxApp: App {
             }
         }
 
+        Button(String(localized: "contextMenu.duplicateWorkspace", defaultValue: "Duplicate Workspace")) {
+            if let workspace {
+                AppDelegate.shared?.duplicateWorkspace(tabId: workspace.id, in: manager)
+            }
+        }
+        .disabled(workspace == nil)
+
         Divider()
 
         Button(String(localized: "contextMenu.moveUp", defaultValue: "Move Up")) {
