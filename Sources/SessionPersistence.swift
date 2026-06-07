@@ -337,6 +337,9 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     var customColor: String?
     var isPinned: Bool
     var currentDirectory: String
+    /// Optional for backwards compatibility with sessions saved before
+    /// duplicate-workspace support. nil decodes as the primary (1).
+    var instanceIndex: Int?
     var focusedPanelId: UUID?
     var layout: SessionWorkspaceLayoutSnapshot
     var panels: [SessionPanelSnapshot]

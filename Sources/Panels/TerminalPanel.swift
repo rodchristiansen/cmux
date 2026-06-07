@@ -100,6 +100,7 @@ final class TerminalPanel: Panel, ObservableObject {
         configTemplate: CmuxSurfaceConfigTemplate? = nil,
         workingDirectory: String? = nil,
         portOrdinal: Int = 0,
+        instanceIndex: Int = 1,
         initialCommand: String? = nil,
         initialEnvironmentOverrides: [String: String] = [:],
         additionalEnvironment: [String: String] = [:]
@@ -114,6 +115,7 @@ final class TerminalPanel: Panel, ObservableObject {
             additionalEnvironment: additionalEnvironment
         )
         surface.portOrdinal = portOrdinal
+        surface.instanceIndex = instanceIndex
         self.init(workspaceId: workspaceId, surface: surface)
     }
 
