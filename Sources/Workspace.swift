@@ -7512,6 +7512,18 @@ final class Workspace: Identifiable, ObservableObject {
         processTitle = title
         guard customTitle == nil else { return }
         self.title = title
+        syncWorkspaceNameToPanes()
+    }
+
+    /// Keep panes' exported CMUX_WORKSPACE_NAME in sync with the live display
+    /// title so a pane spawned after a rename/restore picks up the current name.
+    /// Called from both title paths — the custom-title rename and the
+    /// process-title update — since either can change `self.title`.
+    private func syncWorkspaceNameToPanes() {
+        let resolved = self.title
+        for panel in panels.values.compactMap({ $0 as? TerminalPanel }) {
+            panel.surface.workspaceName = resolved
+        }
     }
 
     func setCustomColor(_ hex: String?) {
@@ -7540,12 +7552,7 @@ final class Workspace: Identifiable, ObservableObject {
             customTitle = trimmed
             self.title = trimmed
         }
-        // Keep panes' exported CMUX_WORKSPACE_NAME in sync so a pane spawned after
-        // a rename/restore picks up the current title.
-        let resolved = self.title
-        for panel in panels.values.compactMap({ $0 as? TerminalPanel }) {
-            panel.surface.workspaceName = resolved
-        }
+        syncWorkspaceNameToPanes()
     }
 
     func setCustomDescription(_ description: String?) {

@@ -2738,13 +2738,30 @@ class TabManager: ObservableObject {
             .replacingOccurrences(of: "\r", with: " ")
         var sent = 0
         for panel in workspace.panels.values.compactMap({ $0 as? TerminalPanel })
-        where (panel.configuredCommand ?? "").localizedCaseInsensitiveContains("claude") {
-            panel.sendText("/rename \(safeName)\r")
+        where Self.isClaudeAgentCommand(panel.configuredCommand) {
+            // Deliver via sendInput so the trailing Return arrives as a real key
+            // event. Claude's TUI runs in bracketed-paste mode, where a raw CR
+            // byte (what sendText writes) lands as a newline in the composer
+            // instead of submitting the slash command.
+            panel.sendInput("/rename \(safeName)\r")
             sent += 1
         }
         #if DEBUG
         dlog("rename.propagate sent=\(sent) name='\(safeName)'")
         #endif
+    }
+
+    /// True when a pane's configured command is the Claude agent itself, not
+    /// merely a command that happens to mention "claude" somewhere (a path like
+    /// `~/claude-notes`, `vim claude.md`, etc.). Matches the launched
+    /// executable's basename — `claude` or a `claude-*` wrapper (e.g. the
+    /// `claude-remote` pane wrapper) — so `/rename` only reaches real agent panes.
+    nonisolated static func isClaudeAgentCommand(_ command: String?) -> Bool {
+        guard let first = command?
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .first.map(String.init) else { return false }
+        let exe = (first as NSString).lastPathComponent.lowercased()
+        return exe == "claude" || exe.hasPrefix("claude-")
     }
 
     func clearCustomTitle(tabId: UUID) {
