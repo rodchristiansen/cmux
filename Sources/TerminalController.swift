@@ -149,6 +149,7 @@ class TerminalController {
         case workspace
         case pane
         case surface
+        case section
     }
 
     private var v2NextHandleOrdinal: [V2HandleKind: Int] = [
@@ -156,18 +157,21 @@ class TerminalController {
         .workspace: 1,
         .pane: 1,
         .surface: 1,
+        .section: 1,
     ]
     private var v2RefByUUID: [V2HandleKind: [UUID: String]] = [
         .window: [:],
         .workspace: [:],
         .pane: [:],
         .surface: [:],
+        .section: [:],
     ]
     private var v2UUIDByRef: [V2HandleKind: [String: UUID]] = [
         .window: [:],
         .workspace: [:],
         .pane: [:],
         .surface: [:],
+        .section: [:],
     ]
 
     private struct V2BrowserElementRefEntry {
@@ -2097,6 +2101,23 @@ class TerminalController {
             return v2Result(id: id, self.v2WorkspaceReorder(params: params))
         case "workspace.rename":
             return v2Result(id: id, self.v2WorkspaceRename(params: params))
+
+        // Sections
+        case "section.list":
+            return v2Result(id: id, self.v2SectionList(params: params))
+        case "section.create":
+            return v2Result(id: id, self.v2SectionCreate(params: params))
+        case "section.rename":
+            return v2Result(id: id, self.v2SectionRename(params: params))
+        case "section.reorder":
+            return v2Result(id: id, self.v2SectionReorder(params: params))
+        case "section.set_collapsed":
+            return v2Result(id: id, self.v2SectionSetCollapsed(params: params))
+        case "section.delete":
+            return v2Result(id: id, self.v2SectionDelete(params: params))
+        case "section.move_workspace":
+            return v2Result(id: id, self.v2SectionMoveWorkspace(params: params))
+
         case "workspace.action":
             return v2Result(id: id, self.v2WorkspaceAction(params: params))
         case "workspace.next":
@@ -2481,6 +2502,13 @@ class TerminalController {
             "workspace.move_to_window",
             "workspace.reorder",
             "workspace.rename",
+            "section.list",
+            "section.create",
+            "section.rename",
+            "section.reorder",
+            "section.set_collapsed",
+            "section.delete",
+            "section.move_workspace",
             "workspace.action",
             "workspace.next",
             "workspace.previous",
@@ -3068,6 +3096,9 @@ class TerminalController {
                     for panelId in ws.panels.keys {
                         _ = v2EnsureHandleRef(kind: .surface, uuid: panelId)
                     }
+                }
+                for section in tm.sections {
+                    _ = v2EnsureHandleRef(kind: .section, uuid: section.id)
                 }
             }
         }
@@ -3662,6 +3693,297 @@ class TerminalController {
             "window_ref": v2Ref(kind: .window, uuid: windowId),
             "title": title
         ])
+    }
+
+    // MARK: - V2 Section Methods
+
+    private func v2SectionSummaryPayload(_ section: SidebarSection, index: Int) -> [String: Any] {
+        return [
+            "id": section.id.uuidString,
+            "ref": v2Ref(kind: .section, uuid: section.id),
+            "name": section.name,
+            "collapsed": section.isCollapsed,
+            "index": index,
+            "workspace_ids": section.workspaceIds.map { $0.uuidString },
+            "workspace_refs": section.workspaceIds.map { v2Ref(kind: .workspace, uuid: $0) },
+            "workspace_count": section.workspaceIds.count
+        ]
+    }
+
+    private func v2SectionList(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        var payload: [[String: Any]] = []
+        v2MainSync {
+            payload = tabManager.sections.enumerated().map { index, section in
+                v2SectionSummaryPayload(section, index: index)
+            }
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+        return .ok([
+            "window_id": v2OrNull(windowId?.uuidString),
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "sections": payload
+        ])
+    }
+
+    private func v2SectionCreate(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let nameRaw = v2String(params, "name"),
+              !nameRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .err(code: "invalid_params", message: "Missing or invalid name", data: nil)
+        }
+        let name = nameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let collapsed = v2Bool(params, "collapsed")
+
+        var sectionId: UUID?
+        var index: Int?
+        v2MainSync {
+            let section = tabManager.createSection(name: name, triggerRename: false)
+            if let collapsed { section.setCollapsed(collapsed) }
+            sectionId = section.id
+            index = tabManager.sections.firstIndex(where: { $0.id == section.id })
+        }
+        guard let sectionId else {
+            return .err(code: "internal_error", message: "Failed to create section", data: nil)
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+        return .ok([
+            "window_id": v2OrNull(windowId?.uuidString),
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "section_id": sectionId.uuidString,
+            "section_ref": v2Ref(kind: .section, uuid: sectionId),
+            "name": name,
+            "index": v2OrNull(index)
+        ])
+    }
+
+    private func v2SectionRename(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let sectionId = v2UUID(params, "section_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid section_id", data: nil)
+        }
+        guard let nameRaw = v2String(params, "name"),
+              !nameRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .err(code: "invalid_params", message: "Missing or invalid name", data: nil)
+        }
+        let name = nameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var renamed = false
+        v2MainSync {
+            guard tabManager.sections.contains(where: { $0.id == sectionId }) else { return }
+            tabManager.renameSection(sectionId: sectionId, name: name)
+            renamed = true
+        }
+        guard renamed else {
+            return .err(code: "not_found", message: "Section not found", data: [
+                "section_id": sectionId.uuidString,
+                "section_ref": v2Ref(kind: .section, uuid: sectionId)
+            ])
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+        return .ok([
+            "window_id": v2OrNull(windowId?.uuidString),
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "section_id": sectionId.uuidString,
+            "section_ref": v2Ref(kind: .section, uuid: sectionId),
+            "name": name
+        ])
+    }
+
+    private func v2SectionReorder(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let sectionId = v2UUID(params, "section_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid section_id", data: nil)
+        }
+        let index = v2Int(params, "index")
+        let beforeId = v2UUID(params, "before_section_id")
+        let afterId = v2UUID(params, "after_section_id")
+        let targetCount = (index != nil ? 1 : 0) + (beforeId != nil ? 1 : 0) + (afterId != nil ? 1 : 0)
+        if targetCount != 1 {
+            return .err(
+                code: "invalid_params",
+                message: "Specify exactly one target: index, before_section_id, or after_section_id",
+                data: nil
+            )
+        }
+        var moved = false
+        var newIndex: Int?
+        v2MainSync {
+            guard let currentIndex = tabManager.sections.firstIndex(where: { $0.id == sectionId }) else { return }
+            var target: Int?
+            if let index {
+                target = index
+            } else if let beforeId, let bi = tabManager.sections.firstIndex(where: { $0.id == beforeId }) {
+                // Adjust for the removal shift so the section lands immediately before the reference.
+                target = (currentIndex < bi) ? bi - 1 : bi
+            } else if let afterId, let ai = tabManager.sections.firstIndex(where: { $0.id == afterId }) {
+                target = (currentIndex < ai) ? ai : ai + 1
+            }
+            guard let target else { return }
+            tabManager.reorderSection(sectionId: sectionId, toIndex: target)
+            moved = true
+            newIndex = tabManager.sections.firstIndex(where: { $0.id == sectionId })
+        }
+        guard moved else {
+            return .err(code: "not_found", message: "Section (or reference section) not found", data: [
+                "section_id": sectionId.uuidString,
+                "section_ref": v2Ref(kind: .section, uuid: sectionId)
+            ])
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+        return .ok([
+            "window_id": v2OrNull(windowId?.uuidString),
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "section_id": sectionId.uuidString,
+            "section_ref": v2Ref(kind: .section, uuid: sectionId),
+            "index": v2OrNull(newIndex)
+        ])
+    }
+
+    private func v2SectionSetCollapsed(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let sectionId = v2UUID(params, "section_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid section_id", data: nil)
+        }
+        guard let collapsed = v2Bool(params, "collapsed") else {
+            return .err(code: "invalid_params", message: "Missing or invalid collapsed (boolean)", data: nil)
+        }
+        var updated = false
+        v2MainSync {
+            guard let section = tabManager.sections.first(where: { $0.id == sectionId }) else { return }
+            section.setCollapsed(collapsed)
+            updated = true
+        }
+        guard updated else {
+            return .err(code: "not_found", message: "Section not found", data: [
+                "section_id": sectionId.uuidString,
+                "section_ref": v2Ref(kind: .section, uuid: sectionId)
+            ])
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+        return .ok([
+            "window_id": v2OrNull(windowId?.uuidString),
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "section_id": sectionId.uuidString,
+            "section_ref": v2Ref(kind: .section, uuid: sectionId),
+            "collapsed": collapsed
+        ])
+    }
+
+    private func v2SectionDelete(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let sectionId = v2UUID(params, "section_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid section_id", data: nil)
+        }
+        var deleted = false
+        v2MainSync {
+            guard tabManager.sections.contains(where: { $0.id == sectionId }) else { return }
+            tabManager.deleteSection(sectionId: sectionId)
+            deleted = true
+        }
+        guard deleted else {
+            return .err(code: "not_found", message: "Section not found", data: [
+                "section_id": sectionId.uuidString,
+                "section_ref": v2Ref(kind: .section, uuid: sectionId)
+            ])
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+        return .ok([
+            "window_id": v2OrNull(windowId?.uuidString),
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "section_id": sectionId.uuidString,
+            "section_ref": v2Ref(kind: .section, uuid: sectionId)
+        ])
+    }
+
+    private func v2SectionMoveWorkspace(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let sectionId = v2UUID(params, "section_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid section_id", data: nil)
+        }
+        guard let workspaceId = v2UUID(params, "workspace_id") else {
+            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
+        }
+        let index = v2Int(params, "index")
+        let beforeId = v2UUID(params, "before_workspace_id")
+        let afterId = v2UUID(params, "after_workspace_id")
+        let targetCount = (index != nil ? 1 : 0) + (beforeId != nil ? 1 : 0) + (afterId != nil ? 1 : 0)
+        if targetCount > 1 {
+            return .err(
+                code: "invalid_params",
+                message: "Specify at most one position target: index, before_workspace_id, or after_workspace_id",
+                data: nil
+            )
+        }
+        let windowId = v2ResolveWindowId(tabManager: tabManager)
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to move workspace", data: nil)
+        v2MainSync {
+            guard let section = tabManager.sections.first(where: { $0.id == sectionId }) else {
+                result = .err(code: "not_found", message: "Section not found", data: [
+                    "section_id": sectionId.uuidString,
+                    "section_ref": v2Ref(kind: .section, uuid: sectionId)
+                ])
+                return
+            }
+            guard tabManager.tabs.contains(where: { $0.id == workspaceId }) else {
+                result = .err(code: "not_found", message: "Workspace not found", data: [
+                    "workspace_id": workspaceId.uuidString,
+                    "workspace_ref": v2Ref(kind: .workspace, uuid: workspaceId)
+                ])
+                return
+            }
+            // Compute the insertion index against the destination order *excluding*
+            // the workspace being moved — moveWorkspaceToSection removes it from all
+            // sections before inserting, so a reference index taken from the current
+            // list would be off by one when reordering within the same section.
+            let destOrder = section.workspaceIds.filter { $0 != workspaceId }
+            var atIndex = index
+            if let beforeId {
+                guard let bi = destOrder.firstIndex(of: beforeId) else {
+                    result = .err(code: "not_found", message: "before_workspace_id is not in the destination section", data: [
+                        "workspace_id": beforeId.uuidString,
+                        "workspace_ref": v2Ref(kind: .workspace, uuid: beforeId)
+                    ])
+                    return
+                }
+                atIndex = bi
+            } else if let afterId {
+                guard let ai = destOrder.firstIndex(of: afterId) else {
+                    result = .err(code: "not_found", message: "after_workspace_id is not in the destination section", data: [
+                        "workspace_id": afterId.uuidString,
+                        "workspace_ref": v2Ref(kind: .workspace, uuid: afterId)
+                    ])
+                    return
+                }
+                atIndex = ai + 1
+            }
+            tabManager.moveWorkspaceToSection(tabId: workspaceId, sectionId: sectionId, atIndex: atIndex)
+            let newIndex = section.workspaceIds.firstIndex(of: workspaceId)
+            result = .ok([
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "section_id": sectionId.uuidString,
+                "section_ref": v2Ref(kind: .section, uuid: sectionId),
+                "workspace_id": workspaceId.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: workspaceId),
+                "index": v2OrNull(newIndex)
+            ])
+        }
+        return result
     }
     private func v2WorkspaceNext(params: [String: Any]) -> V2CallResult {
         guard let tabManager = v2ResolveTabManager(params: params) else {
