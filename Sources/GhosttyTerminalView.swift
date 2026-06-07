@@ -3432,6 +3432,13 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private(set) var tabId: UUID
     /// Port ordinal for CMUX_PORT range assignment
     var portOrdinal: Int = 0
+    /// Workspace instance index, exported as CMUX_WORKSPACE_INSTANCE (1 = primary,
+    /// 2+ = a duplicate). Lets the *-remote pane scripts pick an independent session.
+    var instanceIndex: Int = 1
+    /// Workspace display name, exported as CMUX_WORKSPACE_NAME so the *-remote
+    /// pane scripts can label the agent session (e.g. `claude -n`) by the human
+    /// workspace name. Set at panel creation and refreshed when the title changes.
+    var workspaceName: String?
     /// Snapshotted once per app session so all workspaces use consistent values
     private static let sessionPortBase: Int = {
         let val = UserDefaults.standard.integer(forKey: "cmuxPortBase")
@@ -4168,6 +4175,22 @@ final class TerminalSurface: Identifiable, ObservableObject {
             setManagedEnvironmentValue("CMUX_PORT", String(startPort))
             setManagedEnvironmentValue("CMUX_PORT_END", String(startPort + Self.sessionPortRangeSize - 1))
             setManagedEnvironmentValue("CMUX_PORT_RANGE", String(Self.sessionPortRangeSize))
+        }
+
+        // Workspace instance index for duplicated workspaces. Only exported when
+        // > 1 so the primary's panes see no suffix and behave exactly as before.
+        if instanceIndex > 1 {
+            setManagedEnvironmentValue("CMUX_WORKSPACE_INSTANCE", String(instanceIndex))
+        }
+
+        // Workspace display name → exported so the *-remote wrappers can label the
+        // agent session (e.g. `claude -n`) by the human workspace name instead of
+        // the tmux session slug. Carried as a stored property (set at panel
+        // creation and refreshed on rename) so this nonisolated env build can read
+        // it without touching main-actor state.
+        if let workspaceName = workspaceName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !workspaceName.isEmpty {
+            setManagedEnvironmentValue("CMUX_WORKSPACE_NAME", workspaceName)
         }
 
         let claudeHooksEnabled = ClaudeCodeIntegrationSettings.hooksEnabled()

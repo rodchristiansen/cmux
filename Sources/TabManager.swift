@@ -1454,6 +1454,63 @@ class TabManager: ObservableObject {
         }
     }
 
+    /// Structural half of "Duplicate Workspace": create a new sidebar row on the
+    /// same directory as `sourceId`, placed immediately after it (and in the same
+    /// section), carrying the next free instance index for that directory. The
+    /// copy is left unselected with its default panes — AppDelegate finishes by
+    /// rebuilding it from the template and selecting it. Returns nil if the
+    /// source no longer exists.
+    @discardableResult
+    func makeDuplicateWorkspace(of sourceId: UUID) -> Workspace? {
+        guard let source = tabs.first(where: { $0.id == sourceId }) else { return nil }
+        let directory = source.currentDirectory
+
+        let highestInstance = tabs
+            .filter { $0.currentDirectory == directory }
+            .map(\.instanceIndex)
+            .max() ?? 1
+        let nextInstance = max(2, highestInstance + 1)
+
+        let baseTitle = Self.strippingInstanceSuffix(from: source.title)
+        let duplicate = addWorkspace(
+            title: "\(baseTitle) (\(nextInstance))",
+            workingDirectory: directory,
+            select: false,
+            placementOverride: .end,
+            autoWelcomeIfNeeded: false
+        )
+        duplicate.instanceIndex = nextInstance
+
+        // Position the copy right after its source.
+        if let section = sectionForWorkspace(source.id),
+           let indexInSection = section.workspaceIds.firstIndex(of: source.id) {
+            moveWorkspaceToSection(tabId: duplicate.id, sectionId: section.id, atIndex: indexInSection + 1)
+        } else {
+            var updated = tabs
+            if let dupIndex = updated.firstIndex(where: { $0.id == duplicate.id }) {
+                updated.remove(at: dupIndex)
+            }
+            if let srcIndex = updated.firstIndex(where: { $0.id == source.id }) {
+                updated.insert(duplicate, at: min(srcIndex + 1, updated.count))
+            } else {
+                updated.append(duplicate)
+            }
+            tabs = updated
+        }
+
+        return duplicate
+    }
+
+    /// Drop a trailing " (<digits>)" copy suffix so duplicating "Repo (2)"
+    /// yields a base of "Repo" (→ "Repo (3)") rather than nesting suffixes.
+    private static func strippingInstanceSuffix(from title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") else { return trimmed }
+        let inside = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+        guard !inside.isEmpty, inside.allSatisfy(\.isNumber) else { return trimmed }
+        return String(trimmed[..<open]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     @MainActor
     private func sendWelcomeWhenReady(to workspace: Workspace) {
         if let terminalPanel = workspace.focusedTerminalPanel,
@@ -2636,10 +2693,75 @@ class TabManager: ObservableObject {
 
     func setCustomTitle(tabId: UUID, title: String?) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        let previousTitle = tabs[index].title
         tabs[index].setCustomTitle(title)
         if selectedTabId == tabId {
             updateWindowTitle(for: tabs[index])
         }
+        propagateWorkspaceRenameToAgents(in: tabs[index], previousTitle: previousTitle)
+    }
+
+    /// When a workspace's display name changes, ask a running Claude pane to
+    /// `/rename` itself to match, so the agent's own session label (shown in
+    /// `/resume` and the prompt box) tracks the workspace name automatically.
+    /// `/rename` is a fast slash command that doesn't disturb an active prompt.
+    ///
+    /// Gated so it only fires when (a) the name actually changed and (b) a live
+    /// Claude agent PID is registered for the workspace — so it never fires
+    /// during workspace-set import or session restore, when the title is set
+    /// programmatically before the agent exists. Only panes whose configured
+    /// command is `claude*` receive it, leaving shells/files/lazygit untouched.
+    private func propagateWorkspaceRenameToAgents(in workspace: Workspace, previousTitle: String) {
+        let newName = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let claudeCommands = workspace.panels.values
+            .compactMap { $0 as? TerminalPanel }
+            .map { $0.configuredCommand ?? "<nil>" }
+        #if DEBUG
+        dlog("rename.propagate ws=\(workspace.id.uuidString.prefix(5)) new='\(newName)' prev='\(previousTitle)' agentPIDs=\(workspace.agentPIDs) cmds=\(claudeCommands)")
+        #endif
+        guard !newName.isEmpty, newName != previousTitle else {
+            #if DEBUG
+            dlog("rename.propagate skip: empty-or-unchanged")
+            #endif
+            return
+        }
+        guard let claudePID = workspace.agentPIDs["claude"], claudePID > 0,
+              kill(claudePID, 0) == 0 else {
+            #if DEBUG
+            dlog("rename.propagate skip: no live claude agent")
+            #endif
+            return
+        }
+        // Strip line-splitting characters so the slash command stays one line.
+        let safeName = newName
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        var sent = 0
+        for panel in workspace.panels.values.compactMap({ $0 as? TerminalPanel })
+        where Self.isClaudeAgentCommand(panel.configuredCommand) {
+            // Deliver via sendInput so the trailing Return arrives as a real key
+            // event. Claude's TUI runs in bracketed-paste mode, where a raw CR
+            // byte (what sendText writes) lands as a newline in the composer
+            // instead of submitting the slash command.
+            panel.sendInput("/rename \(safeName)\r")
+            sent += 1
+        }
+        #if DEBUG
+        dlog("rename.propagate sent=\(sent) name='\(safeName)'")
+        #endif
+    }
+
+    /// True when a pane's configured command is the Claude agent itself, not
+    /// merely a command that happens to mention "claude" somewhere (a path like
+    /// `~/claude-notes`, `vim claude.md`, etc.). Matches the launched
+    /// executable's basename — `claude` or a `claude-*` wrapper (e.g. the
+    /// `claude-remote` pane wrapper) — so `/rename` only reaches real agent panes.
+    nonisolated static func isClaudeAgentCommand(_ command: String?) -> Bool {
+        guard let first = command?
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .first.map(String.init) else { return false }
+        let exe = (first as NSString).lastPathComponent.lowercased()
+        return exe == "claude" || exe.hasPrefix("claude-")
     }
 
     func clearCustomTitle(tabId: UUID) {

@@ -300,6 +300,7 @@ extension Workspace {
             customColor: customColor,
             isPinned: isPinned,
             currentDirectory: currentDirectory,
+            instanceIndex: instanceIndex,
             focusedPanelId: focusedPanelId,
             layout: layout,
             panels: panelSnapshots,
@@ -317,6 +318,7 @@ extension Workspace {
         if !normalizedCurrentDirectory.isEmpty {
             currentDirectory = normalizedCurrentDirectory
         }
+        instanceIndex = snapshot.instanceIndex ?? 1
 
         let panelSnapshotsById = Dictionary(uniqueKeysWithValues: snapshot.panels.map { ($0.id, $0) })
         let leafEntries = restoreSessionLayout(snapshot.layout)
@@ -6504,6 +6506,13 @@ final class Workspace: Identifiable, ObservableObject {
     /// Ordinal for CMUX_PORT range assignment (monotonically increasing per app session)
     var portOrdinal: Int = 0
 
+    /// Instance index for this workspace's working directory. 1 = the primary
+    /// workspace; 2+ identify copies made via "Duplicate Workspace". Surfaces
+    /// export it as CMUX_WORKSPACE_INSTANCE so the *-remote pane scripts route a
+    /// duplicate onto its own "-<n>" tmux session instead of attaching the
+    /// primary's. Persisted so the suffix survives restarts.
+    var instanceIndex: Int = 1
+
     /// The bonsplit controller managing the split panes for this workspace
     let bonsplitController: BonsplitController
 
@@ -6890,6 +6899,7 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: configTemplate,
             workingDirectory: hasWorkingDirectory ? trimmedWorkingDirectory : nil,
             portOrdinal: portOrdinal,
+            instanceIndex: instanceIndex,
             initialCommand: initialTerminalCommand,
             initialEnvironmentOverrides: initialTerminalEnvironment
         )
@@ -7099,6 +7109,9 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     private func configureTerminalPanel(_ terminalPanel: TerminalPanel) {
+        // Seed the workspace display name so the pane exports CMUX_WORKSPACE_NAME
+        // for the *-remote wrappers (claude -n). Refreshed on rename in setCustomTitle.
+        terminalPanel.surface.workspaceName = title
         terminalPanel.onRequestWorkspacePaneFlash = { [weak self, weak terminalPanel] reason in
             guard let self, let terminalPanel else { return }
             self.triggerWorkspacePaneFlash(panelId: terminalPanel.id, reason: reason)
@@ -7499,6 +7512,18 @@ final class Workspace: Identifiable, ObservableObject {
         processTitle = title
         guard customTitle == nil else { return }
         self.title = title
+        syncWorkspaceNameToPanes()
+    }
+
+    /// Keep panes' exported CMUX_WORKSPACE_NAME in sync with the live display
+    /// title so a pane spawned after a rename/restore picks up the current name.
+    /// Called from both title paths — the custom-title rename and the
+    /// process-title update — since either can change `self.title`.
+    private func syncWorkspaceNameToPanes() {
+        let resolved = self.title
+        for panel in panels.values.compactMap({ $0 as? TerminalPanel }) {
+            panel.surface.workspaceName = resolved
+        }
     }
 
     func setCustomColor(_ hex: String?) {
@@ -7527,6 +7552,7 @@ final class Workspace: Identifiable, ObservableObject {
             customTitle = trimmed
             self.title = trimmed
         }
+        syncWorkspaceNameToPanes()
     }
 
     func setCustomDescription(_ description: String?) {
@@ -8842,6 +8868,7 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: inheritedConfig,
             workingDirectory: splitWorkingDirectory,
             portOrdinal: portOrdinal,
+            instanceIndex: instanceIndex,
             initialCommand: remoteTerminalStartupCommand
         )
         configureTerminalPanel(newPanel)
@@ -8937,6 +8964,7 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: inheritedConfig,
             workingDirectory: workingDirectory,
             portOrdinal: portOrdinal,
+            instanceIndex: instanceIndex,
             initialCommand: remoteTerminalStartupCommand,
             additionalEnvironment: startupEnvironment
         )
@@ -10270,7 +10298,8 @@ final class Workspace: Identifiable, ObservableObject {
             workspaceId: id,
             context: GHOSTTY_SURFACE_CONTEXT_TAB,
             configTemplate: inheritedConfig,
-            portOrdinal: portOrdinal
+            portOrdinal: portOrdinal,
+            instanceIndex: instanceIndex
         )
         configureTerminalPanel(newPanel)
         panels[newPanel.id] = newPanel
@@ -12016,7 +12045,8 @@ extension Workspace: BonsplitDelegate {
                         workspaceId: id,
                         context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
                         configTemplate: inheritedConfig,
-                        portOrdinal: portOrdinal
+                        portOrdinal: portOrdinal,
+                        instanceIndex: instanceIndex
                     )
                     configureTerminalPanel(replacementPanel)
                     panels[replacementPanel.id] = replacementPanel
@@ -12083,7 +12113,8 @@ extension Workspace: BonsplitDelegate {
             workspaceId: id,
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
             configTemplate: inheritedConfig,
-            portOrdinal: portOrdinal
+            portOrdinal: portOrdinal,
+            instanceIndex: instanceIndex
         )
         configureTerminalPanel(newPanel)
         panels[newPanel.id] = newPanel

@@ -180,3 +180,39 @@ cmux ping
 1. **Always check availability first** - Use `command -v cmux` before calling
 2. **Provide fallbacks** - Use `|| osascript` for macOS fallback
 3. **Keep notifications concise** - Title should be brief, use body for details
+
+## Running inside tmux
+
+cmux's sidebar notification indicator is triggered when the terminal emits an OSC desktop-notification escape sequence (OSC 9, OSC 99, or OSC 777). Ghostty parses these and hands them to cmux, which then lights up the workspace in the sidebar and (optionally) shows a system notification.
+
+Tmux, by default, **does not pass OSC sequences through to the underlying terminal** — they are consumed by tmux itself. That means notifications emitted by any program running inside a tmux pane (Claude Code hooks, build scripts, anything calling `printf '\033]9;...\007'`) never reach cmux. The terminal bell (BEL) still rings because it is not an OSC sequence.
+
+To enable passthrough, add this to your `~/.tmux.conf`:
+
+```
+set -g allow-passthrough on
+```
+
+Then reload tmux:
+
+```
+tmux source ~/.tmux.conf
+```
+
+Verify it took effect:
+
+```
+tmux show-options -g allow-passthrough
+```
+
+To confirm notifications now reach cmux, run this inside a tmux pane:
+
+```
+printf '\033]9;hello from tmux\007'
+```
+
+The workspace should show a notification indicator in the sidebar.
+
+Notes:
+- The `cmux notify` CLI command does **not** require `allow-passthrough` — it talks to the cmux socket directly. If `cmux` is on `$PATH` inside your tmux session, prefer it over raw OSC sequences.
+- `allow-passthrough` was introduced in tmux 3.3. Older versions ignore the option silently; upgrade tmux if the setting has no effect.

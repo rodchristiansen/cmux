@@ -4126,6 +4126,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         workspaceSetReconciledIds.insert(workspace.id)
     }
 
+    /// "Duplicate Workspace" context-menu action. Creates a sibling workspace on
+    /// the same directory (next instance index), rebuilds it from the template so
+    /// its panes spawn, then selects it. The copy's panes inherit
+    /// CMUX_WORKSPACE_INSTANCE, so the Claude/Copilot panes land on an
+    /// independent "-<n>" tmux session instead of attaching the primary's.
+    func duplicateWorkspace(tabId: UUID, in tabManager: TabManager) {
+        guard let duplicate = tabManager.makeDuplicateWorkspace(of: tabId) else { return }
+        if let count = WorkspaceSetImporter.rebuildWorkspaceFromTemplate(duplicate) {
+            NSLog("[WorkspaceSetImporter] duplicate: recreated %d panels in '%@'",
+                  count, duplicate.title)
+            refreshTerminalSurfacesAfterGhosttyConfigReload(source: "duplicateWorkspace")
+        }
+        // Mark reconciled before selecting so the selection observer doesn't
+        // rebuild (and re-run the panel commands) a second time.
+        workspaceSetReconciledIds.insert(duplicate.id)
+        tabManager.selectedTabId = duplicate.id
+        NotificationCenter.default.post(
+            name: .ghosttyDidFocusTab,
+            object: nil,
+            userInfo: [GhosttyNotificationKey.tabId: duplicate.id]
+        )
+    }
+
     /// After session restore finishes, watch the active window's selected
     /// workspace. The first time the user navigates into any workspace this
     /// launch — including re-clicking the one that was restored as selected —

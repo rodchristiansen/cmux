@@ -1035,6 +1035,13 @@ struct cmuxApp: App {
             }
         }
 
+        Button(String(localized: "contextMenu.duplicateWorkspace", defaultValue: "Duplicate Workspace")) {
+            if let workspace {
+                AppDelegate.shared?.duplicateWorkspace(tabId: workspace.id, in: manager)
+            }
+        }
+        .disabled(workspace == nil)
+
         Divider()
 
         Button(String(localized: "contextMenu.moveUp", defaultValue: "Move Up")) {
@@ -4932,6 +4939,31 @@ struct SettingsView: View {
                             TextField("say \"done\"", text: $notificationCustomCommand)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 200)
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(
+                                localized: "settings.notifications.tmux.title",
+                                defaultValue: "Running inside tmux?"
+                            ),
+                            subtitle: String(
+                                localized: "settings.notifications.tmux.subtitle",
+                                defaultValue: "Tmux blocks OSC notification escapes by default. Add `set -g allow-passthrough on` to your ~/.tmux.conf to forward them to cmux."
+                            )
+                        ) {
+                            Button(
+                                String(
+                                    localized: "settings.notifications.tmux.copy",
+                                    defaultValue: "Copy snippet"
+                                )
+                            ) {
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.setString("set -g allow-passthrough on", forType: .string)
+                            }
+                            .controlSize(.small)
                         }
 
                         SettingsCardDivider()

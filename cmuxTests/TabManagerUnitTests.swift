@@ -2147,3 +2147,29 @@ final class TabManagerReopenClosedBrowserFocusTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 }
+
+final class TabManagerClaudeAgentCommandTests: XCTestCase {
+    func testMatchesBareAndFlaggedClaude() {
+        XCTAssertTrue(TabManager.isClaudeAgentCommand("claude"))
+        XCTAssertTrue(TabManager.isClaudeAgentCommand("claude -n \"My Workspace\""))
+        XCTAssertTrue(TabManager.isClaudeAgentCommand("/usr/local/bin/claude"))
+    }
+
+    func testMatchesClaudeWrappers() {
+        XCTAssertTrue(TabManager.isClaudeAgentCommand("claude-remote"))
+        XCTAssertTrue(TabManager.isClaudeAgentCommand("/Users/rod/bin/claude-remote --foo"))
+    }
+
+    func testRejectsCommandsThatMerelyMentionClaude() {
+        XCTAssertFalse(TabManager.isClaudeAgentCommand("vim claude.md"))
+        XCTAssertFalse(TabManager.isClaudeAgentCommand("git commit -m \"claude\""))
+        XCTAssertFalse(TabManager.isClaudeAgentCommand("cat ~/claude-notes/todo.txt"))
+        XCTAssertFalse(TabManager.isClaudeAgentCommand("myclaude"))
+    }
+
+    func testRejectsEmptyOrNil() {
+        XCTAssertFalse(TabManager.isClaudeAgentCommand(nil))
+        XCTAssertFalse(TabManager.isClaudeAgentCommand(""))
+        XCTAssertFalse(TabManager.isClaudeAgentCommand("   "))
+    }
+}
