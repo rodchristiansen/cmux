@@ -1111,6 +1111,73 @@ struct cmuxApp: App {
             markSelectedWorkspaceUnread(in: manager)
         }
         .disabled(!selectedWorkspaceHasReadNotifications(in: manager))
+
+        Divider()
+
+        Button(
+            String(
+                localized: "menu.view.clearOrphanedTmuxSessions",
+                defaultValue: "Clear Orphaned tmux Sessions…"
+            )
+        ) {
+            clearOrphanedTmuxSessions()
+        }
+    }
+
+    /// Kill tmux sessions that no open workspace claims, after showing which ones.
+    ///
+    /// The orphans are sessions whose workspace was closed while cmux was not running
+    /// to tear them down — a crash, a force reboot, or a session started before
+    /// ownership registration existed. Their agents stay resident indefinitely.
+    private func clearOrphanedTmuxSessions() {
+        let owned = AppDelegate.shared?.allOwnedTmuxSessions() ?? []
+        let orphans = TmuxSessionReaper.orphans(ownedSessions: owned)
+
+        let alert = NSAlert()
+        guard !orphans.isEmpty else {
+            alert.messageText = String(
+                localized: "dialog.tmuxPrune.none.title",
+                defaultValue: "No orphaned tmux sessions"
+            )
+            alert.informativeText = String(
+                localized: "dialog.tmuxPrune.none.message",
+                defaultValue: "Every live tmux session belongs to an open workspace."
+            )
+            alert.addButton(withTitle: String(localized: "dialog.tmuxPrune.ok", defaultValue: "OK"))
+            if NSApp.activationPolicy() == .regular {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            alert.runModal()
+            return
+        }
+
+        // The count and the session list are interpolated OUTSIDE the localized
+        // strings: interpolating into `defaultValue` turns each one into a format
+        // string, which is far harder to translate and easy to get wrong per-locale.
+        alert.messageText = String(
+            localized: "dialog.tmuxPrune.confirm.title",
+            defaultValue: "Kill orphaned tmux sessions?"
+        )
+        let explanation = String(
+            localized: "dialog.tmuxPrune.confirm.message",
+            defaultValue:
+                "No open workspace claims these sessions. Anything running inside them, including unsaved agent context, will be lost."
+        )
+        alert.informativeText = explanation + "\n\n" + orphans.joined(separator: "\n")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "dialog.tmuxPrune.kill", defaultValue: "Kill Sessions"))
+        alert.addButton(withTitle: String(localized: "dialog.tmuxPrune.cancel", defaultValue: "Cancel"))
+        if let cancelButton = alert.buttons.dropFirst().first {
+            cancelButton.keyEquivalent = "\u{1b}"
+        }
+        if NSApp.activationPolicy() == .regular {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for session in orphans {
+            TmuxSessionReaper.kill(session)
+        }
     }
 
     @ViewBuilder

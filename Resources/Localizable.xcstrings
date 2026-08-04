@@ -1218,6 +1218,142 @@
         }
       }
     },
+    "dialog.tmuxPrune.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャンセル"
+          }
+        }
+      }
+    },
+    "dialog.tmuxPrune.confirm.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No open workspace claims these sessions. Anything running inside them, including unsaved agent context, will be lost."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これらのセッションを保持しているワークスペースはありません。保存されていないエージェントの状態を含め、実行中の内容は失われます。"
+          }
+        }
+      }
+    },
+    "dialog.tmuxPrune.confirm.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kill orphaned tmux sessions?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "孤立した tmux セッションを終了しますか？"
+          }
+        }
+      }
+    },
+    "dialog.tmuxPrune.kill": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kill Sessions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "セッションを終了"
+          }
+        }
+      }
+    },
+    "dialog.tmuxPrune.none.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every live tmux session belongs to an open workspace."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべての tmux セッションは開いているワークスペースに属しています。"
+          }
+        }
+      }
+    },
+    "dialog.tmuxPrune.none.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No orphaned tmux sessions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "孤立した tmux セッションはありません"
+          }
+        }
+      }
+    },
+    "dialog.tmuxPrune.ok": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "menu.view.clearOrphanedTmuxSessions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Orphaned tmux Sessions…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "孤立した tmux セッションを削除…"
+          }
+        }
+      }
+    },
     "sidebar.help.button": {
       "extractionState": "manual",
       "localizations": {

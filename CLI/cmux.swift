@@ -2606,6 +2606,29 @@ struct CMUXCLI {
             )
             print(response)
 
+        case "set-tmux-session":
+            let response = try forwardSidebarMetadataCommand(
+                "set_tmux_session",
+                commandArgs: commandArgs,
+                client: client,
+                windowOverride: windowId
+            )
+            print(response)
+
+        case "clear-tmux-session":
+            let response = try forwardSidebarMetadataCommand(
+                "clear_tmux_session",
+                commandArgs: commandArgs,
+                client: client,
+                windowOverride: windowId
+            )
+            print(response)
+
+        case "tmux-prune":
+            let suffix = commandArgs.isEmpty ? "" : " " + commandArgs.joined(separator: " ")
+            let response = try sendV1Command("tmux_prune" + suffix, client: client)
+            print(response)
+
         case "clear-agent-pid":
             let response = try forwardSidebarMetadataCommand(
                 "clear_agent_pid",
@@ -8109,6 +8132,54 @@ struct CMUXCLI {
 
             Example:
               cmux set-agent-pid claude "$$"
+            """
+        case "set-tmux-session":
+            return """
+            Usage: cmux set-tmux-session <name> [flags]
+
+            Declare that this workspace owns a tmux session, so closing the
+            workspace also kills the session. Use it from wrappers that start an
+            agent inside a persistent `tmux new-session -A` (claude-remote and
+            friends) — without it the session outlives the workspace and keeps
+            the agent resident indefinitely.
+
+            Registration is the opt-in: sessions nobody registers are never
+            touched, and a cmux crash never runs the close path, so
+            crash-resilient reattach keeps working.
+
+            Flags:
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+
+            Example:
+              cmux set-tmux-session "$NAME" --workspace "$CMUX_WORKSPACE_ID"
+            """
+        case "clear-tmux-session":
+            return """
+            Usage: cmux clear-tmux-session [flags]
+
+            Give up ownership of this workspace's tmux session, leaving it
+            running when the workspace closes.
+
+            Flags:
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+            """
+        case "tmux-prune":
+            return """
+            Usage: cmux tmux-prune [--kill]
+
+            List tmux sessions that no open workspace claims, and optionally kill
+            them. Reports only by default so you can see the list first.
+
+            Only cmux can work this out: a session name derives from the
+            workspace directory AND its instance index, and the instance index is
+            not recoverable from outside the app.
+
+            Flags:
+              --kill   Actually kill the orphaned sessions
+
+            Example:
+              cmux tmux-prune
+              cmux tmux-prune --kill
             """
         case "clear-agent-pid":
             return """
