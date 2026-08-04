@@ -5152,6 +5152,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    /// Every tmux session currently claimed by an open workspace, across all windows.
+    ///
+    /// The prune pass needs the union over every window: a session owned by a workspace
+    /// in another window is not an orphan, and killing it from this window's view would
+    /// take down a live agent.
+    func allOwnedTmuxSessions() -> Set<String> {
+        var owned: Set<String> = []
+        for context in mainWindowContexts.values {
+            for workspace in context.tabManager.tabs {
+                if let session = workspace.ownedTmuxSession, !session.isEmpty {
+                    owned.insert(session)
+                }
+            }
+        }
+        return owned
+    }
+
     func windowMoveTargets(referenceWindowId: UUID?) -> [WindowMoveTarget] {
         let orderedSummaries = orderedMainWindowSummaries(referenceWindowId: referenceWindowId)
         let labels = windowLabelsById(orderedSummaries: orderedSummaries, referenceWindowId: referenceWindowId)

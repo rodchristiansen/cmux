@@ -1782,6 +1782,15 @@ class TerminalController {
         case "clear_agent_pid":
             return clearAgentPID(args)
 
+        case "set_tmux_session":
+            return setTmuxSession(args)
+
+        case "clear_tmux_session":
+            return clearTmuxSession(args)
+
+        case "tmux_prune":
+            return pruneTmuxSessions(args)
+
         case "clear_meta":
             return clearMeta(args)
 
@@ -15064,6 +15073,64 @@ class TerminalController {
             controller.refreshTrackedAgentPorts(for: tab)
         }
         return "OK"
+    }
+
+    /// Register the tmux session this workspace owns, so closing the workspace ends it.
+    /// Usage: set_tmux_session <name> [--tab=<id>]
+    private func setTmuxSession(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let name = parsed.positional.first, !name.isEmpty else {
+            return "ERROR: Usage: set_tmux_session <name> [--tab=<id>]"
+        }
+        let targetResolution = parseSidebarMutationTabTarget(options: parsed.options)
+        guard let target = targetResolution.target else {
+            return targetResolution.error ?? "ERROR: No tab selected"
+        }
+        scheduleSidebarMutation(target: target) { _, tab in
+            tab.ownedTmuxSession = name
+        }
+        return "OK"
+    }
+
+    /// Unregister the tmux session, leaving it running when the workspace closes.
+    /// Usage: clear_tmux_session [--tab=<id>]
+    private func clearTmuxSession(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        let targetResolution = parseSidebarMutationTabTarget(options: parsed.options)
+        guard let target = targetResolution.target else {
+            return targetResolution.error ?? "ERROR: No tab selected"
+        }
+        scheduleSidebarMutation(target: target) { _, tab in
+            tab.ownedTmuxSession = nil
+        }
+        return "OK"
+    }
+
+    /// Kill every live tmux session that no open workspace claims.
+    ///
+    /// cmux is the only thing that can compute this: the session name derives from the
+    /// workspace directory *and* its instance index, and the instance index is not
+    /// recoverable from outside the app. Reports without killing unless `--kill` is
+    /// passed, so the caller can show the list first.
+    ///
+    /// Usage: tmux_prune [--kill]
+    private func pruneTmuxSessions(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        let shouldKill = parsed.options["kill"] != nil
+
+        let owned = v2MainSync { AppDelegate.shared?.allOwnedTmuxSessions() } ?? []
+        let orphans = TmuxSessionReaper.orphans(ownedSessions: owned)
+        guard !orphans.isEmpty else { return "OK: no orphaned sessions" }
+
+        guard shouldKill else {
+            return "DRY-RUN: \(orphans.count) orphaned\n" + orphans.joined(separator: "\n")
+        }
+
+        var killed: [String] = []
+        for session in orphans where TmuxSessionReaper.kill(session) {
+            killed.append(session)
+        }
+        return "OK: killed \(killed.count)\n" + killed.joined(separator: "\n")
     }
 
     /// Unregister an agent PID. Usage: clear_agent_pid <key> [--tab=<id>]
