@@ -4131,8 +4131,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// its panes spawn, then selects it. The copy's panes inherit
     /// CMUX_WORKSPACE_INSTANCE, so the Claude/Copilot panes land on an
     /// independent "-<n>" tmux session instead of attaching the primary's.
-    func duplicateWorkspace(tabId: UUID, in tabManager: TabManager) {
-        guard let duplicate = tabManager.makeDuplicateWorkspace(of: tabId) else { return }
+    /// `select` is false for socket/CLI callers: duplicating is not a focus-intent
+    /// command, so it must not move the user's selection out from under them.
+    @discardableResult
+    func duplicateWorkspace(
+        tabId: UUID,
+        in tabManager: TabManager,
+        instanceIndex: Int? = nil,
+        select: Bool = true
+    ) -> Workspace? {
+        guard let duplicate = tabManager.makeDuplicateWorkspace(of: tabId, instanceIndex: instanceIndex) else {
+            return nil
+        }
         if let count = WorkspaceSetImporter.rebuildWorkspaceFromTemplate(duplicate) {
             NSLog("[WorkspaceSetImporter] duplicate: recreated %d panels in '%@'",
                   count, duplicate.title)
@@ -4141,12 +4151,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // Mark reconciled before selecting so the selection observer doesn't
         // rebuild (and re-run the panel commands) a second time.
         workspaceSetReconciledIds.insert(duplicate.id)
+        guard select else { return duplicate }
         tabManager.selectedTabId = duplicate.id
         NotificationCenter.default.post(
             name: .ghosttyDidFocusTab,
             object: nil,
             userInfo: [GhosttyNotificationKey.tabId: duplicate.id]
         )
+        return duplicate
     }
 
     /// After session restore finishes, watch the active window's selected

@@ -1460,16 +1460,28 @@ class TabManager: ObservableObject {
     /// copy is left unselected with its default panes — AppDelegate finishes by
     /// rebuilding it from the template and selecting it. Returns nil if the
     /// source no longer exists.
+    ///
+    /// Pass `instanceIndex` to claim one specific index instead of the next free
+    /// one. Restore tooling needs this: a live tmux session named `<dir>-19` can
+    /// only be reattached by a workspace whose instance index is exactly 19, and
+    /// walking there via 17 throwaway duplicates is not a recovery path. Returns
+    /// nil when the requested index is below 2 or already taken in `directory`,
+    /// so a collision fails loudly rather than silently landing elsewhere.
     @discardableResult
-    func makeDuplicateWorkspace(of sourceId: UUID) -> Workspace? {
+    func makeDuplicateWorkspace(of sourceId: UUID, instanceIndex requested: Int? = nil) -> Workspace? {
         guard let source = tabs.first(where: { $0.id == sourceId }) else { return nil }
         let directory = source.currentDirectory
 
-        let highestInstance = tabs
-            .filter { $0.currentDirectory == directory }
-            .map(\.instanceIndex)
-            .max() ?? 1
-        let nextInstance = max(2, highestInstance + 1)
+        let usedInstances = Set(
+            tabs.filter { $0.currentDirectory == directory }.map(\.instanceIndex)
+        )
+        let nextInstance: Int
+        if let requested {
+            guard requested >= 2, !usedInstances.contains(requested) else { return nil }
+            nextInstance = requested
+        } else {
+            nextInstance = max(2, (usedInstances.max() ?? 1) + 1)
+        }
 
         let baseTitle = Self.strippingInstanceSuffix(from: source.title)
         let duplicate = addWorkspace(

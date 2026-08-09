@@ -4004,8 +4004,9 @@ struct CMUXCLI {
         let (titleOpt, rem2) = parseOption(rem1, name: "--title")
         let (colorOpt, rem3) = parseOption(rem2, name: "--color")
         let (descriptionOpt, rem4) = parseOption(rem3, name: "--description")
+        let (instanceIndexOpt, rem5) = parseOption(rem4, name: "--instance-index")
 
-        var positional = rem4
+        var positional = rem5
         let actionRaw: String
         if let actionOpt {
             actionRaw = actionOpt
@@ -4046,9 +4047,23 @@ struct CMUXCLI {
             throw CLIError(message: "workspace-action set-description requires --description <text> (or trailing text)")
         }
 
+        var instanceIndex: Int?
+        if let instanceIndexOpt {
+            guard action == "duplicate" else {
+                throw CLIError(message: "workspace-action: --instance-index is only valid with --action duplicate")
+            }
+            guard let parsed = Int(instanceIndexOpt.trimmingCharacters(in: .whitespaces)), parsed >= 2 else {
+                throw CLIError(message: "workspace-action: --instance-index must be an integer >= 2")
+            }
+            instanceIndex = parsed
+        }
+
         var params: [String: Any] = ["action": action]
         if let workspaceId {
             params["workspace_id"] = workspaceId
+        }
+        if let instanceIndex {
+            params["instance_index"] = instanceIndex
         }
         if let title, !title.isEmpty {
             params["title"] = title
@@ -7366,6 +7381,7 @@ struct CMUXCLI {
               close-others | close-above | close-below
               mark-read | mark-unread
               set-color | clear-color
+              duplicate
 
             Flags:
               --action <name>              Action name (required if not positional)
@@ -7373,6 +7389,7 @@ struct CMUXCLI {
               --title <text>               Title for rename
               --color <name|#hex>          Color for set-color (name or #RRGGBB hex)
               --description <text>         Description for set-description
+              --instance-index <n>         Instance index for duplicate (>= 2, must be free)
 
             Named colors:
               Red, Crimson, Orange, Amber, Olive, Green, Teal, Aqua,
