@@ -4652,7 +4652,8 @@ class TerminalController {
             "move_up", "move_down", "move_top",
             "close_others", "close_above", "close_below",
             "mark_read", "mark_unread",
-            "set_color", "clear_color"
+            "set_color", "clear_color",
+            "duplicate"
         ]
 
         var result: V2CallResult = .err(code: "invalid_params", message: "Unknown workspace action", data: [
@@ -4707,6 +4708,40 @@ class TerminalController {
             case "unpin":
                 tabManager.setPinned(workspace, pinned: false)
                 finish(["pinned": false])
+
+            case "duplicate":
+                let requestedIndex = v2Int(params, "instance_index")
+                if let requestedIndex, requestedIndex < 2 {
+                    result = .err(
+                        code: "invalid_params",
+                        message: "instance_index must be 2 or greater",
+                        data: ["instance_index": requestedIndex]
+                    )
+                    return
+                }
+                guard let duplicate = AppDelegate.shared?.duplicateWorkspace(
+                    tabId: workspace.id,
+                    in: tabManager,
+                    instanceIndex: requestedIndex,
+                    select: false
+                ) else {
+                    // The only in-range failure is a taken index; report it as a
+                    // conflict so restore tooling can tell "already there" apart
+                    // from a genuine error and move on.
+                    result = .err(
+                        code: requestedIndex == nil ? "unavailable" : "conflict",
+                        message: requestedIndex == nil
+                            ? "Could not duplicate workspace"
+                            : "instance_index already in use for this directory",
+                        data: ["instance_index": v2OrNull(requestedIndex)]
+                    )
+                    return
+                }
+                finish([
+                    "duplicate_id": duplicate.id.uuidString,
+                    "duplicate_ref": v2Ref(kind: .workspace, uuid: duplicate.id),
+                    "instance_index": duplicate.instanceIndex
+                ])
 
             case "rename":
                 guard let titleRaw = v2String(params, "title"),
