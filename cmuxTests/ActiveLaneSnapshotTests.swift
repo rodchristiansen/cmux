@@ -70,7 +70,7 @@ final class ActiveLaneSnapshotTests: XCTestCase {
 
     func testLanesIgnoresWorkspacesWithNoLiveSession() {
         let lanes = ActiveLaneSnapshot.lanes(
-            from: [candidate(directory: "/Users/rod/Developer/Personal", title: "Personal")],
+            from: [candidate(title: "Personal", directory: "/Users/rod/Developer/Personal")],
             live: [(session: "syndeavors", directory: "/Users/rod/Developer/GitHub/syndeavors")]
         )
         XCTAssertTrue(lanes.isEmpty)
