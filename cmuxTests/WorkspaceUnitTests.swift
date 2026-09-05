@@ -3697,3 +3697,89 @@ final class WorkspaceAgentRetargetTests: XCTestCase {
         XCTAssertNil(WorkspaceAgent(argument: ""))
     }
 }
+
+// MARK: - Agent-aware session naming and pane detection
+
+final class AgentSessionNamingTests: XCTestCase {
+
+    func testPredictsCodexSessionsWithTheCxPrefix() {
+        XCTAssertEqual(
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/GitHub/syndeavors",
+                                          instanceIndex: 1, agent: .codex),
+            "cx-syndeavors"
+        )
+        XCTAssertEqual(
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/GitHub/syndeavors",
+                                          instanceIndex: 3, agent: .codex),
+            "cx-syndeavors-3"
+        )
+    }
+
+    func testClaudePredictionIsUnchanged() {
+        XCTAssertEqual(
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/GitHub/syndeavors",
+                                          instanceIndex: 3),
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/GitHub/syndeavors",
+                                          instanceIndex: 3, agent: .claude)
+        )
+        XCTAssertEqual(
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/GitHub/syndeavors",
+                                          instanceIndex: 3),
+            "syndeavors-3"
+        )
+    }
+
+    func testAgentOfSessionReadsThePrefix() {
+        XCTAssertEqual(WorkspaceAgent(sessionName: "cx-syndeavors"), .codex)
+        XCTAssertEqual(WorkspaceAgent(sessionName: "syndeavors"), .claude)
+        XCTAssertEqual(WorkspaceAgent(sessionName: "codex-notes"), .claude)
+        XCTAssertEqual(WorkspaceAgent(sessionName: ""), .claude)
+    }
+
+    func testAgentCommandDetectionCoversCodexAndEnvPrefixes() {
+        XCTAssertTrue(TabManager.isAgentCommand("codex-remote"))
+        XCTAssertTrue(TabManager.isAgentCommand("codex"))
+        XCTAssertTrue(TabManager.isAgentCommand("CLAUDE_REMOTE_HOST=win-desktop claude-remote -n win"))
+        XCTAssertTrue(TabManager.isAgentCommand("/Users/rod/.local/bin/codex-remote -n boards"))
+        XCTAssertFalse(TabManager.isAgentCommand("vim claude.md"))
+        XCTAssertFalse(TabManager.isAgentCommand("lazygit-remote"))
+        XCTAssertFalse(TabManager.isAgentCommand(nil))
+    }
+}
+
+// MARK: - Multi-agent tmux ownership
+
+final class WorkspaceTmuxOwnershipTests: XCTestCase {
+
+    func testLanesPrefersARegisteredSessionOverTheDirectoryMatch() {
+        let workspace = UUID()
+        let lanes = ActiveLaneSnapshot.lanes(
+            from: [ActiveLaneSnapshot.Candidate(
+                workspace: workspace,
+                title: "Syndeavors",
+                directory: "/Users/rod/Developer/GitHub/syndeavors",
+                instanceIndex: 1,
+                registered: ["cx-syndeavors"]
+            )],
+            live: [
+                (session: "syndeavors", directory: "/Users/rod/Developer/GitHub/syndeavors"),
+                (session: "cx-syndeavors", directory: "/Users/rod/Developer/GitHub/syndeavors")
+            ]
+        )
+        XCTAssertEqual(lanes.map(\.session), ["cx-syndeavors"])
+    }
+
+    func testLanesIgnoresRegisteredSessionsThatAreNotLive() {
+        let lanes = ActiveLaneSnapshot.lanes(
+            from: [ActiveLaneSnapshot.Candidate(
+                workspace: UUID(),
+                title: "Syndeavors",
+                directory: "/Users/rod/Developer/GitHub/syndeavors",
+                instanceIndex: 1,
+                registered: ["cx-syndeavors"]
+            )],
+            live: [(session: "syndeavors", directory: "/Users/rod/Developer/GitHub/syndeavors")]
+        )
+        XCTAssertEqual(lanes.map(\.session), ["syndeavors"])
+    }
+}
