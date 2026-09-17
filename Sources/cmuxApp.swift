@@ -367,7 +367,7 @@ struct cmuxApp: App {
                     GhosttyApp.shared.reloadConfiguration(source: "menu.reload_configuration")
                 }
                 Menu(String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")) {
-                    ForEach(WorkspaceAgent.allCases, id: \.self) { agent in
+                    ForEach(WorkspaceAgent.roster) { agent in
                         Button(agent.panelTitle) {
                             AppDelegate.shared?.reloadWorkspaceSet(agent: agent)
                         }
@@ -377,7 +377,7 @@ struct cmuxApp: App {
                     AppDelegate.shared?.reloadWindowSet()
                 }
                 Menu(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Rebuild Workspace Layout")) {
-                    ForEach(WorkspaceAgent.allCases, id: \.self) { agent in
+                    ForEach(WorkspaceAgent.roster) { agent in
                         Button(agent.panelTitle) {
                             AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate(agent: agent)
                         }
@@ -1060,7 +1060,7 @@ struct cmuxApp: App {
         }
 
         Menu(String(localized: "contextMenu.duplicateWorkspace", defaultValue: "Duplicate Workspace")) {
-            ForEach(WorkspaceAgent.allCases, id: \.self) { agent in
+            ForEach(WorkspaceAgent.roster) { agent in
                 Button(agent.panelTitle) {
                     if let workspace {
                         AppDelegate.shared?.duplicateWorkspace(
