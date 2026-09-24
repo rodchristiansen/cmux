@@ -3662,7 +3662,7 @@ final class WorkspaceAgentRetargetTests: XCTestCase {
         )
 
         XCTAssertEqual(result.panels.map(\.title), ["Terminal", "Codex"])
-        XCTAssertEqual(result.panels[1].command, "codex-remote")
+        XCTAssertEqual(result.panels[1].command, "codex")
         XCTAssertEqual(paneTitles(result.layout), ["Codex"])
     }
 
@@ -3680,7 +3680,7 @@ final class WorkspaceAgentRetargetTests: XCTestCase {
         // the new executable is exactly what the roster names for that agent.
         XCTAssertEqual(
             result.panels[0].command,
-            "CLAUDE_REMOTE_HOST=win-desktop codex-remote -n win"
+            "CLAUDE_REMOTE_HOST=win-desktop codex -n win"
         )
     }
 
@@ -3688,7 +3688,7 @@ final class WorkspaceAgentRetargetTests: XCTestCase {
         let panels = [
             WorkspaceSetPanelTemplate(title: "Files", command: "files-remote"),
             WorkspaceSetPanelTemplate(title: "Notes", command: "vim claude.md"),
-            WorkspaceSetPanelTemplate(title: "Codex", command: "codex-remote")
+            WorkspaceSetPanelTemplate(title: "Codex", command: "codex")
         ]
         let result = WorkspaceSetImporter.retargeted(panels: panels, layout: nil, to: .codex)
 
@@ -3704,7 +3704,7 @@ final class WorkspaceAgentRetargetTests: XCTestCase {
         )
 
         XCTAssertEqual(result.panels[0].title, "Boards")
-        XCTAssertEqual(result.panels[0].command, "codex-remote -n boards")
+        XCTAssertEqual(result.panels[0].command, "codex -n boards")
         XCTAssertEqual(paneTitles(result.layout), ["Boards"])
     }
 
