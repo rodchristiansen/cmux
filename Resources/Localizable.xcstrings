@@ -50302,6 +50302,28 @@
         }
       }
     },
+    "settings.app.showAgentIdleStatus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Idle Agent Status in Sidebar"
+          }
+        }
+      }
+    },
+    "settings.app.showAgentIdleStatus.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the Idle pill after a Claude Code or Codex turn ends. Running and Needs input always show."
+          }
+        }
+      }
+    },
     "settings.app.showMetadata": {
       "extractionState": "manual",
       "localizations": {

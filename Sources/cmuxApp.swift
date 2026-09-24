@@ -4422,6 +4422,7 @@ struct SettingsView: View {
     @AppStorage("sidebarShowLog") private var sidebarShowLog = true
     @AppStorage("sidebarShowProgress") private var sidebarShowProgress = true
     @AppStorage("sidebarShowStatusPills") private var sidebarShowMetadata = true
+    @AppStorage("sidebarShowAgentIdleStatus") private var sidebarShowAgentIdleStatus = true
     @AppStorage("sidebarTintHex") private var sidebarTintHex = SidebarTintDefaults.hex
     @AppStorage("sidebarTintHexLight") private var sidebarTintHexLight: String?
     @AppStorage("sidebarTintHexDark") private var sidebarTintHexDark: String?
@@ -5443,6 +5444,18 @@ struct SettingsView: View {
                                 .controlSize(.small)
                         }
                         .disabled(sidebarHideAllDetails)
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.showAgentIdleStatus", defaultValue: "Show Idle Agent Status in Sidebar"),
+                            subtitle: String(localized: "settings.app.showAgentIdleStatus.subtitle", defaultValue: "Keep the Idle pill after a Claude Code or Codex turn ends. Running and Needs input always show.")
+                        ) {
+                            Toggle("", isOn: $sidebarShowAgentIdleStatus)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+                        .disabled(sidebarHideAllDetails || !sidebarShowMetadata)
                     }
 
                     SettingsSectionHeader(title: String(localized: "settings.section.workspaceColors", defaultValue: "Workspace Colors"))
@@ -6421,6 +6434,7 @@ struct SettingsView: View {
         sidebarShowLog = true
         sidebarShowProgress = true
         sidebarShowMetadata = true
+        sidebarShowAgentIdleStatus = true
         sidebarTintHex = SidebarTintDefaults.hex
         sidebarTintHexLight = nil
         sidebarTintHexDark = nil

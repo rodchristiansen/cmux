@@ -158,6 +158,13 @@ struct SidebarStatusEntry: Equatable {
     }
 }
 
+extension SidebarStatusEntry {
+    /// The pill the Claude Code and Codex hooks leave behind when a turn ends.
+    var isAgentIdleStatus: Bool {
+        (key == "claude_code" || key == "codex") && value == "Idle"
+    }
+}
+
 struct SidebarMetadataBlock: Equatable {
     let key: String
     let markdown: String

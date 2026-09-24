@@ -9932,6 +9932,7 @@ private struct SidebarTabItemSettingsSnapshot: Equatable {
     let openPullRequestLinksInCmuxBrowser: Bool
     let openPortLinksInCmuxBrowser: Bool
     let showsNotificationMessage: Bool
+    let showsAgentIdleStatus: Bool
     let activeTabIndicatorStyle: SidebarActiveTabIndicatorStyle
     let selectionColorHex: String?
     let notificationBadgeColorHex: String?
@@ -9974,6 +9975,7 @@ private struct SidebarTabItemSettingsSnapshot: Equatable {
         )
 
         let showsMetadata = Self.bool(defaults: defaults, key: "sidebarShowStatusPills", defaultValue: true)
+        showsAgentIdleStatus = Self.bool(defaults: defaults, key: "sidebarShowAgentIdleStatus", defaultValue: true)
         let showsLog = Self.bool(defaults: defaults, key: "sidebarShowLog", defaultValue: true)
         let showsProgress = Self.bool(defaults: defaults, key: "sidebarShowProgress", defaultValue: true)
         let showsBranchDirectory = Self.bool(defaults: defaults, key: "sidebarShowBranchDirectory", defaultValue: true)
@@ -13122,6 +13124,10 @@ private struct TabItemView: View, Equatable {
         settings.showsSSH
     }
 
+    private var sidebarShowAgentIdleStatus: Bool {
+        settings.showsAgentIdleStatus
+    }
+
     private var activeTabIndicatorStyle: SidebarActiveTabIndicatorStyle {
         settings.activeTabIndicatorStyle
     }
@@ -13451,6 +13457,7 @@ private struct TabItemView: View, Equatable {
 
             if detailVisibility.showsMetadata {
                 let metadataEntries = tab.sidebarStatusEntriesInDisplayOrder()
+                    .filter { sidebarShowAgentIdleStatus || !$0.isAgentIdleStatus }
                 let metadataBlocks = tab.sidebarMetadataBlocksInDisplayOrder()
                 if !metadataEntries.isEmpty {
                     SidebarMetadataRows(

@@ -205,6 +205,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show custom metadata pills."
+        },
+        "showAgentIdleStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the Idle pill after a Claude Code or Codex turn ends."
         }
       }
     },
