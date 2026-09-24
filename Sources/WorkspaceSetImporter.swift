@@ -139,12 +139,14 @@ struct WorkspaceAgent: Hashable, Sendable, Identifiable {
 }
 
 extension WorkspaceAgent {
-    /// What applies when the workspace-set declares no `agents:` block. Kept
-    /// identical to the pair this used to hardcode, so a file written before
-    /// the roster existed behaves exactly as it did.
+    /// What applies when the workspace-set declares no `agents:` block: the
+    /// bare CLIs, run straight in the pane. A set that wants the tmux wrappers
+    /// (`claude-remote`, `codex-remote`) names them in its roster. Codex keeps
+    /// the `cx-` prefix so a leftover `codex-remote` session still reads as
+    /// Codex's rather than Claude's.
     static let builtInRoster: [WorkspaceAgent] = [
-        WorkspaceAgent(id: "claude", panelTitle: "Claude", command: "claude-remote", sessionPrefix: ""),
-        WorkspaceAgent(id: "codex", panelTitle: "Codex", command: "codex-remote", sessionPrefix: "cx-")
+        WorkspaceAgent(id: "claude", panelTitle: "Claude", command: "claude", sessionPrefix: ""),
+        WorkspaceAgent(id: "codex", panelTitle: "Codex", command: "codex", sessionPrefix: "cx-")
     ]
 
     // The roster is read from nonisolated code (command matching, session-name
