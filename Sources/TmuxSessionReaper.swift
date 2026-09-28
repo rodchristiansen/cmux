@@ -68,6 +68,33 @@ enum TmuxSessionReaper {
         }
     }
 
+    /// The tmux user option `cmux-lane-session` stamps on a lane for one workspace:
+    /// `@cmux_ws_` plus the workspace id with every non-alphanumeric byte folded to `_`
+    /// (`tr -c 'A-Za-z0-9\n' '_'` in the script). Ids are per host, so a session carries
+    /// one tag for each Mac that has opened it.
+    static func workspaceTag(for id: UUID) -> String {
+        "@cmux_ws_" + String(id.uuidString.map { $0.isLetter || $0.isNumber ? $0 : "_" })
+    }
+
+    /// Live session name -> the `@cmux_ws_*` tags it carries.
+    ///
+    /// The tag is the one link to a workspace that survives a rename: a lane named
+    /// after its workspace's title keeps its old name when the title changes, and no
+    /// prediction from the new title can find it.
+    static func workspaceTagsBySession() -> [String: Set<String>] {
+        guard let tmuxPath else { return [:] }
+        var result: [String: Set<String>] = [:]
+        for session in liveSessions() {
+            guard let output = run(tmuxPath, ["show-options", "-t", "=\(session):"]) else { continue }
+            let tags = output.split(separator: "\n").compactMap { line -> String? in
+                let key = line.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+                return key.hasPrefix("@cmux_ws_") ? key : nil
+            }
+            if !tags.isEmpty { result[session] = Set(tags) }
+        }
+        return result
+    }
+
     /// Lowercase, with spaces and dots folded to hyphens.
     ///
     /// Mirrors `slugify()` in `claude-remote` (`tr '[:upper:]' '[:lower:]' | tr ' .' '-'`).

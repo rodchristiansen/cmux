@@ -5390,9 +5390,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let live = Set(TmuxSessionReaper.liveSessions())
         guard !live.isEmpty else { return [] }
         var matches: [(workspace: Workspace, session: String, agent: WorkspaceAgent)] = []
-        var claimed: Set<String> = []
+        let tagged = TmuxSessionReaper.workspaceTagsBySession()
+        // Sessions some workspace already shows are never handed to another.
+        var claimed: Set<String> = Set(
+            mainWindowContexts.values.flatMap { $0.tabManager.tabs.flatMap(\.ownedTmuxSessions) }
+        )
         for context in mainWindowContexts.values {
-            for workspace in context.tabManager.tabs {
+            workspaces: for workspace in context.tabManager.tabs {
                 // Agents in declaration order, Claude first: a workspace has one agent
                 // pane, so if both a Claude and a Codex session are live on this
                 // directory only one can be rebuilt onto, and the template's default wins.
@@ -5408,15 +5412,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     // is exactly what makes it a usable "not yet reattached" signal. Skipping
                     // these keeps the command idempotent and safe to invoke at any time, not
                     // only after a crash.
-                    if names.contains(where: workspace.ownedTmuxSessions.contains) { break }
+                    if names.contains(where: workspace.ownedTmuxSessions.contains) { continue workspaces }
                     // One workspace per session: two workspaces on the same directory and
                     // instance would otherwise both rebuild onto the same session, and the
                     // second would steal the pane from the first.
                     for name in names where live.contains(name) && !claimed.contains(name) {
                         claimed.insert(name)
                         matches.append((workspace, name, agent))
-                        break agents
+                        continue workspaces
                     }
+                }
+                // No predicted name is live. A workspace retitled while its lane ran
+                // (session titles now rename workspaces) still owns that lane through
+                // the tag the wrapper stamped on it, so match on that before giving up:
+                // an unmatched live lane is an orphan nobody can see.
+                guard workspace.ownedTmuxSessions.isEmpty else { continue workspaces }
+                let tag = TmuxSessionReaper.workspaceTag(for: workspace.id)
+                for (session, sessionTags) in tagged.sorted(by: { $0.key < $1.key })
+                where sessionTags.contains(tag) && !claimed.contains(session)
+                    && !workspace.ownedTmuxSessions.contains(session) {
+                    let agent = WorkspaceAgent.roster
+                        .filter { !$0.sessionPrefix.isEmpty && session.hasPrefix($0.sessionPrefix) }
+                        .max(by: { $0.sessionPrefix.count < $1.sessionPrefix.count })
+                        ?? WorkspaceAgent.roster.first(where: { $0.sessionPrefix.isEmpty })
+                        ?? WorkspaceAgent.roster[0]
+                    claimed.insert(session)
+                    matches.append((workspace, session, agent))
+                    continue workspaces
                 }
             }
         }
@@ -5430,7 +5452,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// re-runs each panel's command, and `tmux new-session -A` attaches the existing
     /// session instead of creating one. Registers ownership as it goes, so a subsequent
     /// prune sees these as claimed even before the wrapper re-registers.
-    @discardableResult
     /// Rejoin surviving tmux lanes once at launch, without the menu.
     ///
     /// A quit, an update relaunch or a crash leaves every lane's tmux session running,
@@ -5443,6 +5464,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// autoReattachTmuxOnLaunch -bool NO` turns it off.
     private func scheduleLaunchTmuxReattachIfNeeded() {
         guard !isRunningUnderXCTest(ProcessInfo.processInfo.environment) else { return }
+        // Only the installed app: a DEV build (and the unit-test host, which is one)
+        // shares the user's tmux server, and must never rebuild real workspaces'
+        // panes onto the user's lanes. The test host hung at launch when it did.
+        guard Bundle.main.bundleIdentifier == "com.cmuxterm.app" else { return }
         if UserDefaults.standard.object(forKey: "autoReattachTmuxOnLaunch") as? Bool == false { return }
         for delay in [4.0, 15.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -5455,6 +5480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    @discardableResult
     func recoverLiveTmuxSessions() -> [String] {
         let targets = workspacesAwaitingTmuxReattach()
         guard !targets.isEmpty else { return [] }

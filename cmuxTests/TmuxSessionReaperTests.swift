@@ -172,6 +172,15 @@ final class TmuxSessionReaperTests: XCTestCase {
             XCTAssertFalse(name.hasSuffix(" "))
         }
     }
+
+    /// Must match `tr -c 'A-Za-z0-9\n' '_'` in cmux-lane-session, which stamps the tag.
+    func testWorkspaceTagMatchesTheWrapper() {
+        let id = UUID(uuidString: "8AF94A11-F936-4A02-8396-F407F6126794")!
+        XCTAssertEqual(
+            TmuxSessionReaper.workspaceTag(for: id),
+            "@cmux_ws_8AF94A11_F936_4A02_8396_F407F6126794"
+        )
+    }
 }
 
 // MARK: - Title-based lane names
@@ -303,4 +312,5 @@ final class TmuxSessionReaperRunTests: XCTestCase {
     func testRunReturnsNilForAFailingCommand() {
         XCTAssertNil(TmuxSessionReaper.run("/usr/bin/false", [], timeout: 5))
     }
+
 }
