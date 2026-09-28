@@ -219,6 +219,21 @@ final class TmuxLaneNameTests: XCTestCase {
         )
     }
 
+    func testUnsuffixedDuplicateTakesItsInstanceIndex() {
+        XCTAssertEqual(
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/AzDevOps",
+                                          title: "Vantage Dev", instanceIndex: 10,
+                                          agent: .claude),
+            "vantage-dev-10"
+        )
+        XCTAssertEqual(
+            TmuxSessionReaper.sessionName(directory: "/Users/rod/Developer/AzDevOps/Devices/Munki",
+                                          title: "AzDevOps · Devices · Munki", instanceIndex: 2,
+                                          agent: .claude),
+            "munki-2"
+        )
+    }
+
     /// A workspace titled after its repo keeps the basename name, so claude-launch and
     /// anything else addressing lanes by directory keeps working.
     func testRepoTitledLaneKeepsTheBasenameName() {
