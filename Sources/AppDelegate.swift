@@ -3051,6 +3051,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // current lane set, which after a reboot is empty.
         loadPendingRestoreSnapshotIfNeeded()
         startLaneSnapshotTimerIfNeeded()
+        scheduleLaunchTmuxReattachIfNeeded()
 #if DEBUG
         setupJumpUnreadUITestIfNeeded()
         setupTerminalCmdClickUITestIfNeeded()
@@ -5430,6 +5431,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// session instead of creating one. Registers ownership as it goes, so a subsequent
     /// prune sees these as claimed even before the wrapper re-registers.
     @discardableResult
+    /// Rejoin surviving tmux lanes once at launch, without the menu.
+    ///
+    /// A quit, an update relaunch or a crash leaves every lane's tmux session running,
+    /// but cmux comes back with no clients attached, so each workspace sat blank until
+    /// someone chose Reattach Live tmux Sessions. `recoverLiveTmuxSessions` only rebuilds
+    /// workspaces whose predicted session is live right now, so running it unprompted
+    /// can only rejoin an agent, never start one. The delay lets session restore and
+    /// the workspace-set import finish naming the workspaces first; the second pass
+    /// catches rows those finished late. `defaults write com.cmuxterm.app
+    /// autoReattachTmuxOnLaunch -bool NO` turns it off.
+    private func scheduleLaunchTmuxReattachIfNeeded() {
+        guard !isRunningUnderXCTest(ProcessInfo.processInfo.environment) else { return }
+        if UserDefaults.standard.object(forKey: "autoReattachTmuxOnLaunch") as? Bool == false { return }
+        for delay in [4.0, 15.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, !self.isTerminatingApp else { return }
+                let recovered = self.recoverLiveTmuxSessions()
+                if !recovered.isEmpty {
+                    NSLog("[TmuxRecover] launch pass after %.0fs reattached %d", delay, recovered.count)
+                }
+            }
+        }
+    }
+
     func recoverLiveTmuxSessions() -> [String] {
         let targets = workspacesAwaitingTmuxReattach()
         guard !targets.isEmpty else { return [] }
