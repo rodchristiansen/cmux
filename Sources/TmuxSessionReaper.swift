@@ -130,7 +130,8 @@ enum TmuxSessionReaper {
     /// - no title: the legacy basename-and-instance name;
     /// - a title that names the repo (`rodchristiansen · cmux`, `Personal - Nutrition`,
     ///   optionally ending in a duplicate's ` (N)`): the legacy name, unchanged;
-    /// - any other title: the slugified title, duplicate suffix included.
+    /// - any other title: the slugified title, plus `-N` for a duplicate (from its
+    ///   ` (N)` suffix, or its instance index when the title has none).
     static func sessionName(
         directory: String,
         title: String,
@@ -146,6 +147,11 @@ enum TmuxSessionReaper {
         let base = laneSlug((directory as NSString).lastPathComponent)
         if !base.isEmpty, core == base || core.hasSuffix("-" + base) {
             return legacy
+        }
+        // Duplicates no longer carry " (N)" in their title, so the instance is
+        // appended here instead; a legacy suffixed title already has it.
+        if core == titled, instanceIndex > 1 {
+            return agent.sessionPrefix + titled + "-\(instanceIndex)"
         }
         return agent.sessionPrefix + titled
     }

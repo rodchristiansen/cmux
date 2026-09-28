@@ -1487,9 +1487,13 @@ class TabManager: ObservableObject {
             nextInstance = max(2, (usedInstances.max() ?? 1) + 1)
         }
 
+        // The copy keeps its source's title. instanceIndex is what tells the two
+        // apart (lane names, CMUX_WORKSPACE_INSTANCE), and each row's current
+        // task shows as its description, so a "(n)" suffix only added noise.
+        // Legacy "(n)" titles are still stripped when duplicated.
         let baseTitle = Self.strippingInstanceSuffix(from: source.title)
         let duplicate = addWorkspace(
-            title: "\(baseTitle) (\(nextInstance))",
+            title: baseTitle,
             workingDirectory: directory,
             select: false,
             placementOverride: .end,
