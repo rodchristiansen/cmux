@@ -12202,6 +12202,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 
+        // Cmd+[ / Cmd+] step through workspace history, except in a focused
+        // browser panel, where the same keys keep their page back/forward.
+        if tabManager?.focusedBrowserPanel == nil {
+            if matchConfiguredShortcut(event: event, action: .workspaceHistoryBack) {
+                if tabManager?.navigateBack() != true { NSSound.beep() }
+                return true
+            }
+            if matchConfiguredShortcut(event: event, action: .workspaceHistoryForward) {
+                if tabManager?.navigateForward() != true { NSSound.beep() }
+                return true
+            }
+        }
+
         if matchConfiguredShortcut(event: event, action: .browserBack) {
             guard let focusedBrowserPanel = tabManager?.focusedBrowserPanel else {
                 return false

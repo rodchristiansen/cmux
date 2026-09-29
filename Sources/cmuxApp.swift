@@ -765,11 +765,19 @@ struct cmuxApp: App {
                 }
 
                 splitCommandButton(title: String(localized: "menu.view.back", defaultValue: "Back"), shortcut: menuShortcut(for: .browserBack)) {
-                    activeTabManager.focusedBrowserPanel?.goBack()
+                    if let browser = activeTabManager.focusedBrowserPanel {
+                        browser.goBack()
+                    } else {
+                        activeTabManager.navigateBack()
+                    }
                 }
 
                 splitCommandButton(title: String(localized: "menu.view.forward", defaultValue: "Forward"), shortcut: menuShortcut(for: .browserForward)) {
-                    activeTabManager.focusedBrowserPanel?.goForward()
+                    if let browser = activeTabManager.focusedBrowserPanel {
+                        browser.goForward()
+                    } else {
+                        activeTabManager.navigateForward()
+                    }
                 }
 
                 splitCommandButton(title: String(localized: "menu.view.reloadPage", defaultValue: "Reload Page"), shortcut: menuShortcut(for: .browserReload)) {
