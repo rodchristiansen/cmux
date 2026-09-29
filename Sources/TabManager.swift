@@ -757,13 +757,21 @@ class TabManager: ObservableObject {
     /// Used to apply title updates to the correct window instead of NSApp.keyWindow.
     weak var window: NSWindow?
 
-    @Published var tabs: [Workspace] = []
+    @Published var tabs: [Workspace] = [] {
+        didSet { scheduleUngroupedWorkspaceAdoption() }
+    }
     @Published var sections: [SidebarSection] = [] {
-        didSet { rebindSectionObservers() }
+        didSet {
+            rebindSectionObservers()
+            scheduleUngroupedWorkspaceAdoption()
+        }
     }
     /// Bumped when any section's internal state changes (collapse, membership, name).
     /// Views that read `sidebarLayout` also read this to ensure re-evaluation.
-    @Published private(set) var sectionRevision: UInt64 = 0
+    @Published private(set) var sectionRevision: UInt64 = 0 {
+        didSet { scheduleUngroupedWorkspaceAdoption() }
+    }
+    private var ungroupedWorkspaceAdoptionScheduled = false
     private var sectionObserverCancellables: [AnyCancellable] = []
     /// Set to a section ID to auto-enter rename mode on the next render.
     @Published var pendingRenameSectionId: UUID?
@@ -2991,6 +2999,49 @@ class TabManager: ObservableObject {
         )
     }
 
+    static let unsortedSectionName = "Unsorted"
+
+    /// Once a window uses sections, no workspace sits outside one: a loose
+    /// (unpinned, unsectioned) workspace joins an "Unsorted" section kept at the
+    /// top, and that section goes away when it empties. Coalesced onto the next
+    /// main-loop turn so a session restore, which assigns tabs before sections,
+    /// is judged on its finished state rather than the half-restored one.
+    private func scheduleUngroupedWorkspaceAdoption() {
+        guard !ungroupedWorkspaceAdoptionScheduled else { return }
+        ungroupedWorkspaceAdoptionScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.adoptUngroupedWorkspaces()
+        }
+    }
+
+    func adoptUngroupedWorkspaces() {
+        ungroupedWorkspaceAdoptionScheduled = false
+        guard !sections.isEmpty else { return }
+        let sectioned = Set(sections.flatMap(\.workspaceIds))
+        let loose = tabs.filter { !$0.isPinned && !sectioned.contains($0.id) }.map(\.id)
+        var unsorted = sections.first {
+            $0.name.caseInsensitiveCompare(Self.unsortedSectionName) == .orderedSame
+        }
+        if unsorted == nil, !loose.isEmpty {
+            let section = SidebarSection(name: Self.unsortedSectionName)
+            sections.insert(section, at: 0)
+            unsorted = section
+        }
+        guard let unsorted else { return }
+        let liveIds = Set(tabs.map(\.id))
+        if loose.isEmpty, !unsorted.workspaceIds.contains(where: liveIds.contains) {
+            sections.removeAll { $0.id == unsorted.id }
+            return
+        }
+        for id in loose {
+            unsorted.addWorkspace(id)
+        }
+        if sections.first?.id != unsorted.id {
+            sections.removeAll { $0.id == unsorted.id }
+            sections.insert(unsorted, at: 0)
+        }
+    }
+
     private func cleanupSectionsForRemovedWorkspace(_ workspaceId: UUID) {
         for section in sections {
             section.removeWorkspace(workspaceId)
@@ -4281,8 +4332,9 @@ class TabManager: ObservableObject {
         historyIndex = tabHistory.count - 1
     }
 
-    func navigateBack() {
-        guard historyIndex > 0 else { return }
+    @discardableResult
+    func navigateBack() -> Bool {
+        guard historyIndex > 0 else { return false }
 
         // Find the previous valid tab in history (skip closed tabs)
         var targetIndex = historyIndex - 1
@@ -4293,17 +4345,19 @@ class TabManager: ObservableObject {
                 historyIndex = targetIndex
                 selectedTabId = tabId
                 isNavigatingHistory = false
-                return
+                return true
             }
             // Remove closed tab from history
             tabHistory.remove(at: targetIndex)
             historyIndex -= 1
             targetIndex -= 1
         }
+        return false
     }
 
-    func navigateForward() {
-        guard historyIndex < tabHistory.count - 1 else { return }
+    @discardableResult
+    func navigateForward() -> Bool {
+        guard historyIndex < tabHistory.count - 1 else { return false }
 
         // Find the next valid tab in history (skip closed tabs)
         let targetIndex = historyIndex + 1
@@ -4314,12 +4368,13 @@ class TabManager: ObservableObject {
                 historyIndex = targetIndex
                 selectedTabId = tabId
                 isNavigatingHistory = false
-                return
+                return true
             }
             // Remove closed tab from history
             tabHistory.remove(at: targetIndex)
             // Don't increment targetIndex since we removed the element
         }
+        return false
     }
 
     var canNavigateBack: Bool {

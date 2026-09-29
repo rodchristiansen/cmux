@@ -269,12 +269,18 @@ struct TitlebarControlsView: View {
     private let titlebarHintBaseXShift: CGFloat = -10
 
     private enum HintSlot: Int, CaseIterable {
+        case workspaceHistoryBack
+        case workspaceHistoryForward
         case toggleSidebar
         case showNotifications
         case newTab
 
         var action: KeyboardShortcutSettings.Action {
             switch self {
+            case .workspaceHistoryBack:
+                return .workspaceHistoryBack
+            case .workspaceHistoryForward:
+                return .workspaceHistoryForward
             case .toggleSidebar:
                 return .toggleSidebar
             case .showNotifications:
@@ -357,6 +363,24 @@ struct TitlebarControlsView: View {
     private func controlsGroup(config: TitlebarControlsStyleConfig) -> some View {
         let hintLayoutItems = titlebarHintLayoutItems(config: config)
         let content = HStack(spacing: config.spacing) {
+            TitlebarControlButton(config: config, action: {
+                if AppDelegate.shared?.tabManager?.navigateBack() != true { NSSound.beep() }
+            }) {
+                iconLabel(systemName: "chevron.left", config: config)
+            }
+            .accessibilityIdentifier("titlebarControl.workspaceHistoryBack")
+            .accessibilityLabel(String(localized: "titlebar.workspaceHistoryBack.accessibilityLabel", defaultValue: "Back"))
+            .safeHelp(KeyboardShortcutSettings.Action.workspaceHistoryBack.tooltip(String(localized: "titlebar.workspaceHistoryBack.tooltip", defaultValue: "Back to the previous workspace")))
+
+            TitlebarControlButton(config: config, action: {
+                if AppDelegate.shared?.tabManager?.navigateForward() != true { NSSound.beep() }
+            }) {
+                iconLabel(systemName: "chevron.right", config: config)
+            }
+            .accessibilityIdentifier("titlebarControl.workspaceHistoryForward")
+            .accessibilityLabel(String(localized: "titlebar.workspaceHistoryForward.accessibilityLabel", defaultValue: "Forward"))
+            .safeHelp(KeyboardShortcutSettings.Action.workspaceHistoryForward.tooltip(String(localized: "titlebar.workspaceHistoryForward.tooltip", defaultValue: "Forward to the next workspace")))
+
             TitlebarControlButton(config: config, action: {
                 #if DEBUG
                 dlog("titlebar.toggleSidebar")
@@ -551,7 +575,7 @@ struct HiddenTitlebarSidebarControlsView: View {
     @ObservedObject var notificationStore: TerminalNotificationStore
     @StateObject private var viewModel = TitlebarControlsViewModel()
 
-    private let hostWidth: CGFloat = 124
+    private let hostWidth: CGFloat = 192
     private let hostHeight: CGFloat = 28
 
     var body: some View {
