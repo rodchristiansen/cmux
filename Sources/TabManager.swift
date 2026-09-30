@@ -2776,6 +2776,20 @@ class TabManager: ObservableObject {
     /// are what call `cmux set-agent-pid`.
     static let propagateRenameToAgentsKey = "propagateWorkspaceRenameToAgents"
 
+    /// True when the agent's input line holds text: the last line opening with
+    /// Claude's `❯`, Codex's `›` or a bare `>` prompt has something after it.
+    /// A greyed placeholder reads as text too, which errs toward not typing.
+    static func agentComposerHasText(_ screen: String) -> Bool {
+        let prompts: [Character] = ["❯", "›", ">"]
+        for raw in screen.split(separator: "\n", omittingEmptySubsequences: false).reversed() {
+            var line = Substring(raw).drop(while: { $0 == " " || $0 == "│" || $0 == "|" })
+            guard let first = line.first, prompts.contains(first) else { continue }
+            line = line.dropFirst()
+            return !line.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "│|")).isEmpty
+        }
+        return false
+    }
+
     private func propagateWorkspaceRenameToAgents(in workspace: Workspace, previousTitle: String) {
         let newName = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let claudeCommands = workspace.panels.values
@@ -2813,6 +2827,16 @@ class TabManager: ObservableObject {
         var sent = 0
         for panel in workspace.panels.values.compactMap({ $0 as? TerminalPanel })
         where Self.isAgentCommand(panel.configuredCommand) {
+            // Never type into a prompt the user is composing: the /rename would
+            // land in the middle of their text. An unreadable screen counts as
+            // busy too.
+            guard let screen = TerminalController.shared.readTerminalTextForSnapshot(terminalPanel: panel),
+                  !Self.agentComposerHasText(screen) else {
+                #if DEBUG
+                dlog("rename.propagate skip: composer not empty")
+                #endif
+                continue
+            }
             // Deliver via sendInput so the Return arrives as a real key event
             // (sendInput maps a trailing CR to a kVK_Return key, not a raw CR
             // byte — Claude's TUI runs in bracketed-paste mode, where a raw CR
