@@ -2774,6 +2774,8 @@ class TabManager: ObservableObject {
     /// untouched. A pane running a bare `claude`/`codex` rather than one of the
     /// `*-remote` wrappers registers no PID, so it is never renamed: the wrappers
     /// are what call `cmux set-agent-pid`.
+    static let propagateRenameToAgentsKey = "propagateWorkspaceRenameToAgents"
+
     private func propagateWorkspaceRenameToAgents(in workspace: Workspace, previousTitle: String) {
         let newName = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let claudeCommands = workspace.panels.values
@@ -2786,6 +2788,13 @@ class TabManager: ObservableObject {
             #if DEBUG
             dlog("rename.propagate skip: empty-or-unchanged")
             #endif
+            return
+        }
+        // Off when something else already names the agent's session. The
+        // session-title hook sets Claude's title itself and then renames the
+        // row, so echoing that back as a typed `/rename` only filled the pane
+        // with rename commands.
+        guard UserDefaults.standard.object(forKey: Self.propagateRenameToAgentsKey) as? Bool ?? true else {
             return
         }
         // Any registered agent, not just Claude: `codex-remote` registers under
