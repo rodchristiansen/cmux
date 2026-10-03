@@ -1824,6 +1824,43 @@ class TabManager: ObservableObject {
         )
     }
 
+    // Every poll used to ask GitHub again: one `gh pr list` per candidate repo
+    // plus `gh pr checks`, each a GraphQL request, for every tracked workspace
+    // every 30 seconds and the selected one every 5. A few dozen open
+    // workspaces spent the account's 5,000 GraphQL points an hour on their own,
+    // and every other `gh` call then failed until the window rolled over. A
+    // pull request's state changes over minutes, so the answer is kept for
+    // that long; branch and dirty state still refresh on every poll.
+    private nonisolated static let workspacePullRequestCacheLifetime: TimeInterval = 300
+    private nonisolated static let workspacePullRequestFailureCacheLifetime: TimeInterval = 60
+
+    private final class WorkspacePullRequestCache: @unchecked Sendable {
+        private struct Entry {
+            let snapshot: WorkspacePullRequestSnapshot
+            let expires: Date
+        }
+
+        private let lock = NSLock()
+        private var entries: [String: Entry] = [:]
+
+        func snapshot(for key: String, now: Date = Date()) -> WorkspacePullRequestSnapshot? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry = entries[key], entry.expires > now else { return nil }
+            return entry.snapshot
+        }
+
+        func store(_ snapshot: WorkspacePullRequestSnapshot, for key: String, lifetime: TimeInterval) {
+            lock.lock()
+            defer { lock.unlock() }
+            let now = Date()
+            entries = entries.filter { $0.value.expires > now }
+            entries[key] = Entry(snapshot: snapshot, expires: now.addingTimeInterval(lifetime))
+        }
+    }
+
+    private nonisolated static let workspacePullRequestCache = WorkspacePullRequestCache()
+
     private nonisolated static func workspacePullRequestSnapshot(
         directory: String,
         branch: String
@@ -1832,6 +1869,25 @@ class TabManager: ObservableObject {
             return .notFound
         }
 
+        let cacheKey = directory + "\u{0}" + branch
+        if let cached = workspacePullRequestCache.snapshot(for: cacheKey) {
+            return cached
+        }
+        let snapshot = uncachedWorkspacePullRequestSnapshot(directory: directory, branch: branch)
+        workspacePullRequestCache.store(
+            snapshot,
+            for: cacheKey,
+            lifetime: snapshot == .transientFailure
+                ? workspacePullRequestFailureCacheLifetime
+                : workspacePullRequestCacheLifetime
+        )
+        return snapshot
+    }
+
+    private nonisolated static func uncachedWorkspacePullRequestSnapshot(
+        directory: String,
+        branch: String
+    ) -> WorkspacePullRequestSnapshot {
         let repoSlugs = githubRepositorySlugs(directory: directory)
         guard !repoSlugs.isEmpty else {
             return .unsupportedRepository
