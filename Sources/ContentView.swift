@@ -2930,6 +2930,28 @@ struct ContentView: View {
                         .help(String(localized: "toolbar.sidebar.tooltip", defaultValue: "Toggle Sidebar"))
                     }
 
+                    // The classic titlebar carries these too (UpdateTitlebarAccessory);
+                    // this toolbar replaces it, so without them here they never show.
+                    ToolbarItemGroup(placement: .navigation) {
+                        Button {
+                            if tabManager.navigateBack() != true { NSSound.beep() }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                        }
+                        .accessibilityIdentifier("toolbar.workspaceHistoryBack")
+                        .accessibilityLabel(String(localized: "titlebar.workspaceHistoryBack.accessibilityLabel", defaultValue: "Back"))
+                        .help(KeyboardShortcutSettings.Action.workspaceHistoryBack.tooltip(String(localized: "titlebar.workspaceHistoryBack.tooltip", defaultValue: "Back to the previous workspace")))
+
+                        Button {
+                            if tabManager.navigateForward() != true { NSSound.beep() }
+                        } label: {
+                            Image(systemName: "chevron.right")
+                        }
+                        .accessibilityIdentifier("toolbar.workspaceHistoryForward")
+                        .accessibilityLabel(String(localized: "titlebar.workspaceHistoryForward.accessibilityLabel", defaultValue: "Forward"))
+                        .help(KeyboardShortcutSettings.Action.workspaceHistoryForward.tooltip(String(localized: "titlebar.workspaceHistoryForward.tooltip", defaultValue: "Forward to the next workspace")))
+                    }
+
                     ToolbarItemGroup(placement: .primaryAction) {
                         ControlGroup {
                             Button {
