@@ -10239,9 +10239,14 @@ struct VerticalTabsSidebar: View {
         let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
+        // While a search query is active, every section with a match is shown
+        // expanded so matches are never hidden behind a collapsed header. The
+        // stored collapsed state is left untouched and returns when the query
+        // is cleared.
+        let isSearchingSidebar = !sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
             let filtered = workspacesMatchingFilter(group.workspaces)
-            if sidebarFilterMode != .none && filtered.isEmpty { return nil }
+            if (sidebarFilterMode != .none || isSearchingSidebar) && filtered.isEmpty { return nil }
             return SidebarLayout.SectionGroup(section: group.section, workspaces: filtered)
         }
         let canCloseWorkspace = workspaceCount > 1
@@ -10354,10 +10359,11 @@ struct VerticalTabsSidebar: View {
                                     SidebarSectionHeaderView(
                                         section: group.section,
                                         tabManager: tabManager,
-                                        workspaceCount: group.workspaces.count
+                                        workspaceCount: group.workspaces.count,
+                                        isForcedExpanded: isSearchingSidebar
                                     )
 
-                                    if !group.section.isCollapsed {
+                                    if !group.section.isCollapsed || isSearchingSidebar {
                                         VStack(spacing: tabRowSpacing) {
                                             ForEach(group.workspaces, id: \.id) { tab in
                                                 tabItemViewForWorkspace(
@@ -12748,18 +12754,21 @@ private struct SidebarSectionHeaderView: View {
     @ObservedObject var section: SidebarSection
     let tabManager: TabManager
     let workspaceCount: Int
+    var isForcedExpanded: Bool = false
     @State private var isEditing = false
     @State private var editedName = ""
     @FocusState private var isTextFieldFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
+
+    private var isCollapsed: Bool { section.isCollapsed && !isForcedExpanded }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(section.isCollapsed ? 0 : 90))
-                .animation(.easeInOut(duration: 0.15), value: section.isCollapsed)
+                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                .animation(.easeInOut(duration: 0.15), value: isCollapsed)
                 .frame(width: 12, height: 12)
 
             if isEditing {
@@ -12795,7 +12804,7 @@ private struct SidebarSectionHeaderView: View {
 
             Spacer()
 
-            if !section.isCollapsed {
+            if !isCollapsed {
                 Text("\(workspaceCount)")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
