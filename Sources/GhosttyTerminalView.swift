@@ -4536,17 +4536,23 @@ final class TerminalSurface: Identifiable, ObservableObject {
     /// its conditional state (light/dark) to the current config, then re-applies the color
     /// scheme from the Swift side to keep tracking in sync.
     func reapplyColorSchemeAndConfig() {
-        guard let surface, let view = attachedView else { return }
-        // Force the surface to re-derive its config with its current conditional state.
-        // ghostty_surface_set_color_scheme has an internal dedup that skips when the
-        // scheme hasn't changed, but after a config reload the underlying theme data
-        // may have changed. ghostty_surface_update_config bypasses that dedup.
+        guard let surface else { return }
+        // Set the scheme first, then re-derive the config, so the config is built
+        // from the corrected conditional state. Ghostty answers a scheme change
+        // with a reload_config action, which handleAction drops once the
+        // callback's weak surfaceView is gone; the surface then keeps a dark
+        // state over light colours, and every later set_color_scheme is deduped.
+        // ghostty_surface_update_config bypasses that dedup.
+        //
+        // Neither call needs a view. attachedView is weak, and requiring it made
+        // Reload Configuration skip exactly the surfaces that had drifted.
+        let isDark = NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ghostty_surface_set_color_scheme(surface, isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
         if let config = GhosttyApp.shared.config {
             ghostty_surface_update_config(surface, config)
         }
-        // Re-apply color scheme to ensure the surface's conditional state matches
-        // the current macOS appearance, in case it drifted.
-        view.applySurfaceColorScheme(force: true)
+        // Keep the view's tracked scheme in sync when it is attached.
+        attachedView?.applySurfaceColorScheme(force: true)
     }
 
     func applyWindowBackgroundIfActive() {
