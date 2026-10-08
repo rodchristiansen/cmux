@@ -771,6 +771,14 @@ class TabManager: ObservableObject {
     @Published private(set) var sectionRevision: UInt64 = 0 {
         didSet { scheduleUngroupedWorkspaceAdoption() }
     }
+    /// Fires when any workspace's status pills change, so sidebar filters
+    /// and sorts that read agent status re-evaluate.
+    lazy var workspaceStatusEntriesPublisher: AnyPublisher<Void, Never> = $tabs
+        .map { tabs in
+            Publishers.MergeMany(tabs.map { $0.$statusEntries.dropFirst().map { _ in () } })
+        }
+        .switchToLatest()
+        .eraseToAnyPublisher()
     private var ungroupedWorkspaceAdoptionScheduled = false
     private var sectionObserverCancellables: [AnyCancellable] = []
     /// Set to a section ID to auto-enter rename mode on the next render.
