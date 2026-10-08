@@ -10091,6 +10091,8 @@ struct VerticalTabsSidebar: View {
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
     @AppStorage("sidebar.filter.active")
     private var sidebarFilterActive = false
+    @AppStorage("sidebar.filter.running")
+    private var sidebarFilterRunning = false
     @AppStorage("sidebar.filter.idle")
     private var sidebarFilterIdle = false
     @AppStorage("sidebar.sort.mode")
@@ -10105,11 +10107,12 @@ struct VerticalTabsSidebar: View {
     }
 
     private var hasSidebarFilter: Bool {
-        sidebarFilterActive || sidebarFilterIdle
+        sidebarFilterActive || sidebarFilterRunning || sidebarFilterIdle
     }
 
-    private func autoClearSidebarFilterIfEmpty(active: Int, idle: Int) {
+    private func autoClearSidebarFilterIfEmpty(active: Int, running: Int, idle: Int) {
         if sidebarFilterActive && active == 0 { sidebarFilterActive = false }
+        if sidebarFilterRunning && running == 0 { sidebarFilterRunning = false }
         if sidebarFilterIdle && idle == 0 { sidebarFilterIdle = false }
     }
 
@@ -10190,12 +10193,14 @@ struct VerticalTabsSidebar: View {
         if !trimmedSearch.isEmpty {
             return workspaces.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
         }
-        // Active and Idle combine as a union: a workspace shows when it
-        // matches any chip that is on.
+        // Chips combine as an intersection: a workspace shows only when it
+        // matches every chip that is on. Running and Idle never overlap, so
+        // turning one on turns the other off.
         guard hasSidebarFilter else { return workspaces }
         return workspaces.filter { workspace in
-            (sidebarFilterActive && workspaceHasAgentSession(workspace)) ||
-                (sidebarFilterIdle && workspaceHasIdleAgent(workspace))
+            (!sidebarFilterActive || workspaceHasAgentSession(workspace)) &&
+                (!sidebarFilterRunning || workspaceHasRunningAgent(workspace)) &&
+                (!sidebarFilterIdle || workspaceHasIdleAgent(workspace))
         }
     }
 
@@ -10286,6 +10291,7 @@ struct VerticalTabsSidebar: View {
         let workspaceCount = tabs.count
         let _ = workspaceStatusRevision
         let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
+        let runningWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasRunningAgent($1) ? 1 : 0) }
         let idleWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasIdleAgent($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
@@ -10329,8 +10335,10 @@ struct VerticalTabsSidebar: View {
 
                 SidebarFilterBar(
                     isActiveOn: sidebarFilterActive,
+                    isRunningOn: sidebarFilterRunning,
                     isIdleOn: sidebarFilterIdle,
                     activeCount: activeWorkspaceCount,
+                    runningCount: runningWorkspaceCount,
                     idleCount: idleWorkspaceCount,
                     sortMode: sidebarSortMode,
                     setSortMode: { sidebarSortModeRaw = $0.rawValue },
@@ -10345,6 +10353,12 @@ struct VerticalTabsSidebar: View {
                     toggleIdle: {
                         sidebarSearchText = ""
                         sidebarFilterIdle.toggle()
+                        if sidebarFilterIdle { sidebarFilterRunning = false }
+                    },
+                    toggleRunning: {
+                        sidebarSearchText = ""
+                        sidebarFilterRunning.toggle()
+                        if sidebarFilterRunning { sidebarFilterIdle = false }
                     },
                     searchText: $sidebarSearchText
                 )
@@ -10358,13 +10372,16 @@ struct VerticalTabsSidebar: View {
                     // (and no live PIDs yet, so no workspaces visible). Reset
                     // on appear so the user always sees their workspaces on
                     // first paint. `.onChange` below handles later transitions.
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, idle: idleWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount, idle: idleWorkspaceCount)
                 }
                 .onChange(of: activeWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, idle: idleWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount, idle: idleWorkspaceCount)
+                }
+                .onChange(of: runningWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount, idle: idleWorkspaceCount)
                 }
                 .onChange(of: idleWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, idle: idleWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount, idle: idleWorkspaceCount)
                 }
                 .onReceive(
                     tabManager.workspaceStatusEntriesPublisher
@@ -10586,12 +10603,15 @@ enum SidebarSortMode: String, CaseIterable {
 
 private struct SidebarFilterBar: View {
     let isActiveOn: Bool
+    let isRunningOn: Bool
     let isIdleOn: Bool
     let activeCount: Int
+    let runningCount: Int
     let idleCount: Int
     let sortMode: SidebarSortMode
     let setSortMode: (SidebarSortMode) -> Void
     let toggleActive: () -> Void
+    let toggleRunning: () -> Void
     let toggleIdle: () -> Void
     @Binding var searchText: String
 
@@ -10599,17 +10619,34 @@ private struct SidebarFilterBar: View {
         HStack(spacing: 6) {
             SidebarFilterChip(
                 title: String(localized: "sidebar.filter.active", defaultValue: "Active"),
-                icon: "bolt.fill",
+                icon: "circle.fill",
+                // A filled dot reads heavier than the glyphs beside it.
+                iconSize: 10,
                 count: activeCount,
                 isActive: isActiveOn,
                 isDisabled: activeCount == 0,
-                activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.active.showAll",
-                                      defaultValue: "Show all workspaces"),
+                activeColor: .green,
+                tooltipActive: String(localized: "sidebar.filter.active.turnOff",
+                                      defaultValue: "Stop filtering to workspaces with an agent session"),
                 tooltipInactive: String(localized: "sidebar.filter.active.tooltip",
                                         defaultValue: "Show only workspaces with an agent session"),
                 accessibilityId: "SidebarActiveFilterToggle",
                 action: toggleActive
+            )
+
+            SidebarFilterChip(
+                title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
+                icon: "bolt.fill",
+                count: runningCount,
+                isActive: isRunningOn,
+                isDisabled: runningCount == 0,
+                activeColor: .accentColor,
+                tooltipActive: String(localized: "sidebar.filter.running.turnOff",
+                                      defaultValue: "Stop filtering to running agents"),
+                tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
+                                        defaultValue: "Show only workspaces whose agent is running"),
+                accessibilityId: "SidebarRunningFilterToggle",
+                action: toggleRunning
             )
 
             SidebarFilterChip(
@@ -10619,8 +10656,8 @@ private struct SidebarFilterBar: View {
                 isActive: isIdleOn,
                 isDisabled: idleCount == 0,
                 activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.idle.showAll",
-                                      defaultValue: "Show all workspaces"),
+                tooltipActive: String(localized: "sidebar.filter.idle.turnOff",
+                                      defaultValue: "Stop filtering to agents waiting on you"),
                 tooltipInactive: String(localized: "sidebar.filter.idle.tooltip",
                                         defaultValue: "Show only workspaces whose agent is waiting on you"),
                 accessibilityId: "SidebarIdleFilterToggle",
@@ -10631,7 +10668,7 @@ private struct SidebarFilterBar: View {
 
             SidebarSearchField(text: $searchText)
         }
-        .animation(.easeOut(duration: 0.15), value: [isActiveOn, isIdleOn])
+        .animation(.easeOut(duration: 0.15), value: [isActiveOn, isRunningOn, isIdleOn])
     }
 }
 
@@ -10673,7 +10710,7 @@ private struct SidebarSortMenu: View {
             }
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(mode == .manual ? Color(nsColor: .secondaryLabelColor) : Color.accentColor)
         }
         .menuStyle(.borderlessButton)
@@ -10763,6 +10800,7 @@ final class SidebarSearchTextField: NSSearchField {
 private struct SidebarFilterChip: View {
     let title: String
     let icon: String
+    var iconSize: CGFloat = 14
     let count: Int
     let isActive: Bool
     let isDisabled: Bool
@@ -10788,11 +10826,12 @@ private struct SidebarFilterChip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            // Icon-only to fit the narrow sidebar; the title lives in the
+            // tooltip and the accessibility label.
+            HStack(spacing: 3) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .frame(minWidth: 14, minHeight: 14)
                 if count > 0 {
                     Text("\(count)")
                         .font(.system(size: 10, weight: .medium))
@@ -10818,7 +10857,8 @@ private struct SidebarFilterChip: View {
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .animation(.easeOut(duration: 0.12), value: isActive)
         .safeHelp(isActive ? tooltipActive : tooltipInactive)
-        .accessibilityLabel(isActive ? tooltipActive : tooltipInactive)
+        .accessibilityLabel(title)
+        .accessibilityHint(isActive ? tooltipActive : tooltipInactive)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier(accessibilityId)
     }
