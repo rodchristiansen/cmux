@@ -13561,6 +13561,14 @@ private struct TabItemView: View, Equatable {
         let moveDownActionText = String(localized: "sidebar.workspace.moveDownAction", defaultValue: "Move Down")
         let latestNotificationSubtitle = latestNotificationText
         let effectiveSubtitle = latestNotificationSubtitle
+        // A one-line description is the session's task: it heads the row and the
+        // workspace name drops to the line below, so rows in one folder read apart.
+        // Multi-line descriptions are notes and keep the name as the headline.
+        let taskHeadline: String? = {
+            guard let text = tab.customDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty, !text.contains("\n") else { return nil }
+            return text
+        }()
         let detailVisibility = visibleAuxiliaryDetails
         let orderedPanelIds: [UUID]? = (detailVisibility.showsBranchDirectory || detailVisibility.showsPullRequests)
             ? tab.sidebarOrderedPanelIds()
@@ -13620,7 +13628,7 @@ private struct TabItemView: View, Equatable {
                         .safeHelp(protectedWorkspaceTooltip)
                 }
 
-                Text(tab.title)
+                Text(taskHeadline ?? tab.title)
                     .font(.system(size: 12.5, weight: titleFontWeight))
                     .foregroundColor(activePrimaryTextColor)
                     .lineLimit(1)
@@ -13667,7 +13675,13 @@ private struct TabItemView: View, Equatable {
                 .frame(width: trailingAccessoryWidth, height: 16, alignment: .trailing)
             }
 
-            if let description = tab.customDescription {
+            if taskHeadline != nil {
+                Text(tab.title)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(activeSecondaryColor(0.8))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else if let description = tab.customDescription {
                 SidebarWorkspaceDescriptionText(
                     markdown: description,
                     isActive: usesInvertedActiveForeground
