@@ -10089,8 +10089,10 @@ struct VerticalTabsSidebar: View {
     @State private var dropIndicator: SidebarDropIndicator?
     @AppStorage(WorkspacePresentationModeSettings.modeKey)
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
-    @AppStorage("sidebar.filter.mode")
-    private var sidebarFilterModeRaw: String = SidebarFilterMode.none.rawValue
+    @AppStorage("sidebar.filter.active")
+    private var sidebarFilterActive = false
+    @AppStorage("sidebar.filter.running")
+    private var sidebarFilterRunning = false
     @AppStorage("sidebar.sort.mode")
     private var sidebarSortModeRaw: String = SidebarSortMode.manual.rawValue
     @State private var sidebarSearchText: String = ""
@@ -10102,19 +10104,13 @@ struct VerticalTabsSidebar: View {
         SidebarSortMode(rawValue: sidebarSortModeRaw) ?? .manual
     }
 
-    private var sidebarFilterMode: SidebarFilterMode {
-        SidebarFilterMode(rawValue: sidebarFilterModeRaw) ?? .none
-    }
-
-    private func setSidebarFilter(_ mode: SidebarFilterMode) {
-        sidebarFilterModeRaw = mode.rawValue
+    private var hasSidebarFilter: Bool {
+        sidebarFilterActive || sidebarFilterRunning
     }
 
     private func autoClearSidebarFilterIfEmpty(active: Int, running: Int) {
-        if (sidebarFilterMode == .active && active == 0) ||
-            (sidebarFilterMode == .running && running == 0) {
-            setSidebarFilter(.none)
-        }
+        if sidebarFilterActive && active == 0 { sidebarFilterActive = false }
+        if sidebarFilterRunning && running == 0 { sidebarFilterRunning = false }
     }
 
     /// Space at top of sidebar for traffic light buttons. In fullscreen the
@@ -10186,10 +10182,12 @@ struct VerticalTabsSidebar: View {
         if !trimmedSearch.isEmpty {
             return workspaces.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
         }
-        switch sidebarFilterMode {
-        case .none: return workspaces
-        case .active: return workspaces.filter(workspaceHasAgentSession)
-        case .running: return workspaces.filter(workspaceHasRunningAgent)
+        // Active and Running combine as a union: a workspace shows when it
+        // matches any chip that is on.
+        guard hasSidebarFilter else { return workspaces }
+        return workspaces.filter { workspace in
+            (sidebarFilterActive && workspaceHasAgentSession(workspace)) ||
+                (sidebarFilterRunning && workspaceHasRunningAgent(workspace))
         }
     }
 
@@ -10285,7 +10283,7 @@ struct VerticalTabsSidebar: View {
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
             let filtered = workspacesMatchingFilter(group.workspaces)
-            if sidebarFilterMode != .none && filtered.isEmpty { return nil }
+            if hasSidebarFilter && filtered.isEmpty { return nil }
             return SidebarLayout.SectionGroup(section: group.section, workspaces: filtered)
         }
         // Sorting by activity flattens the sidebar: pinned, ungrouped and every
@@ -10322,18 +10320,23 @@ struct VerticalTabsSidebar: View {
                     .frame(height: trafficLightPadding)
 
                 SidebarFilterBar(
-                    mode: sidebarFilterMode,
+                    isActiveOn: sidebarFilterActive,
+                    isRunningOn: sidebarFilterRunning,
                     activeCount: activeWorkspaceCount,
                     runningCount: runningWorkspaceCount,
                     sortMode: sidebarSortMode,
                     setSortMode: { sidebarSortModeRaw = $0.rawValue },
-                    setMode: { newMode in
-                        // Clicking the Active chip clears the search field so the
-                        // toggle's intent isn't masked by a stale query. The search
-                        // override in `workspacesMatchingFilter` would otherwise
-                        // make the click look like a no-op while a query is set.
+                    // Clicking a chip clears the search field so the toggle's
+                    // intent isn't masked by a stale query. The search override
+                    // in `workspacesMatchingFilter` would otherwise make the
+                    // click look like a no-op while a query is set.
+                    toggleActive: {
                         sidebarSearchText = ""
-                        setSidebarFilter(newMode)
+                        sidebarFilterActive.toggle()
+                    },
+                    toggleRunning: {
+                        sidebarSearchText = ""
+                        sidebarFilterRunning.toggle()
                     },
                     searchText: $sidebarSearchText
                 )
@@ -10567,12 +10570,6 @@ struct VerticalTabsSidebar: View {
     }
 }
 
-enum SidebarFilterMode: String, CaseIterable {
-    case none
-    case active
-    case running
-}
-
 enum SidebarSortMode: String, CaseIterable {
     case manual
     case recentFirst
@@ -10580,12 +10577,14 @@ enum SidebarSortMode: String, CaseIterable {
 }
 
 private struct SidebarFilterBar: View {
-    let mode: SidebarFilterMode
+    let isActiveOn: Bool
+    let isRunningOn: Bool
     let activeCount: Int
     let runningCount: Int
     let sortMode: SidebarSortMode
     let setSortMode: (SidebarSortMode) -> Void
-    let setMode: (SidebarFilterMode) -> Void
+    let toggleActive: () -> Void
+    let toggleRunning: () -> Void
     @Binding var searchText: String
 
     var body: some View {
@@ -10594,7 +10593,7 @@ private struct SidebarFilterBar: View {
                 title: String(localized: "sidebar.filter.active", defaultValue: "Active"),
                 icon: "bolt.fill",
                 count: activeCount,
-                isActive: mode == .active,
+                isActive: isActiveOn,
                 isDisabled: activeCount == 0,
                 activeColor: .accentColor,
                 tooltipActive: String(localized: "sidebar.filter.active.showAll",
@@ -10602,14 +10601,14 @@ private struct SidebarFilterBar: View {
                 tooltipInactive: String(localized: "sidebar.filter.active.tooltip",
                                         defaultValue: "Show only workspaces with an agent session"),
                 accessibilityId: "SidebarActiveFilterToggle",
-                action: { setMode(mode == .active ? .none : .active) }
+                action: toggleActive
             )
 
             SidebarFilterChip(
                 title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
                 icon: "play.fill",
                 count: runningCount,
-                isActive: mode == .running,
+                isActive: isRunningOn,
                 isDisabled: runningCount == 0,
                 activeColor: .accentColor,
                 tooltipActive: String(localized: "sidebar.filter.running.showAll",
@@ -10617,14 +10616,14 @@ private struct SidebarFilterBar: View {
                 tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
                                         defaultValue: "Show only workspaces whose agent is running"),
                 accessibilityId: "SidebarRunningFilterToggle",
-                action: { setMode(mode == .running ? .none : .running) }
+                action: toggleRunning
             )
 
             SidebarSortMenu(mode: sortMode, setMode: setSortMode)
 
             SidebarSearchField(text: $searchText)
         }
-        .animation(.easeOut(duration: 0.15), value: mode)
+        .animation(.easeOut(duration: 0.15), value: [isActiveOn, isRunningOn])
     }
 }
 
