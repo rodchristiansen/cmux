@@ -10091,12 +10091,12 @@ struct VerticalTabsSidebar: View {
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
     @AppStorage("sidebar.filter.active")
     private var sidebarFilterActive = false
-    @AppStorage("sidebar.filter.running")
-    private var sidebarFilterRunning = false
+    @AppStorage("sidebar.filter.idle")
+    private var sidebarFilterIdle = false
     @AppStorage("sidebar.sort.mode")
     private var sidebarSortModeRaw: String = SidebarSortMode.manual.rawValue
     @State private var sidebarSearchText: String = ""
-    /// Bumped when any workspace's status pills change, so the Running
+    /// Bumped when any workspace's status pills change, so the Idle
     /// filter and the recent-activity sort re-evaluate.
     @State private var workspaceStatusRevision: UInt64 = 0
 
@@ -10105,12 +10105,12 @@ struct VerticalTabsSidebar: View {
     }
 
     private var hasSidebarFilter: Bool {
-        sidebarFilterActive || sidebarFilterRunning
+        sidebarFilterActive || sidebarFilterIdle
     }
 
-    private func autoClearSidebarFilterIfEmpty(active: Int, running: Int) {
+    private func autoClearSidebarFilterIfEmpty(active: Int, idle: Int) {
         if sidebarFilterActive && active == 0 { sidebarFilterActive = false }
-        if sidebarFilterRunning && running == 0 { sidebarFilterRunning = false }
+        if sidebarFilterIdle && idle == 0 { sidebarFilterIdle = false }
     }
 
     /// Space at top of sidebar for traffic light buttons. In fullscreen the
@@ -10139,6 +10139,14 @@ struct VerticalTabsSidebar: View {
 
     private func workspaceHasRunningAgent(_ workspace: Workspace) -> Bool {
         workspace.statusEntries.values.contains(where: \.isAgentRunningStatus)
+    }
+
+    /// The agent is waiting on the user: its turn ended (Idle), it asked a
+    /// question (Needs input), or a live session has not been prompted yet.
+    private func workspaceHasIdleAgent(_ workspace: Workspace) -> Bool {
+        guard !workspaceHasRunningAgent(workspace) else { return false }
+        return workspace.statusEntries.values.contains(where: \.isAgentStatus) ||
+            workspaceHasAgentSession(workspace)
     }
 
     /// The last time an agent changed state or posted a notification here.
@@ -10182,12 +10190,12 @@ struct VerticalTabsSidebar: View {
         if !trimmedSearch.isEmpty {
             return workspaces.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
         }
-        // Active and Running combine as a union: a workspace shows when it
+        // Active and Idle combine as a union: a workspace shows when it
         // matches any chip that is on.
         guard hasSidebarFilter else { return workspaces }
         return workspaces.filter { workspace in
             (sidebarFilterActive && workspaceHasAgentSession(workspace)) ||
-                (sidebarFilterRunning && workspaceHasRunningAgent(workspace))
+                (sidebarFilterIdle && workspaceHasIdleAgent(workspace))
         }
     }
 
@@ -10278,7 +10286,7 @@ struct VerticalTabsSidebar: View {
         let workspaceCount = tabs.count
         let _ = workspaceStatusRevision
         let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
-        let runningWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasRunningAgent($1) ? 1 : 0) }
+        let idleWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasIdleAgent($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
@@ -10321,9 +10329,9 @@ struct VerticalTabsSidebar: View {
 
                 SidebarFilterBar(
                     isActiveOn: sidebarFilterActive,
-                    isRunningOn: sidebarFilterRunning,
+                    isIdleOn: sidebarFilterIdle,
                     activeCount: activeWorkspaceCount,
-                    runningCount: runningWorkspaceCount,
+                    idleCount: idleWorkspaceCount,
                     sortMode: sidebarSortMode,
                     setSortMode: { sidebarSortModeRaw = $0.rawValue },
                     // Clicking a chip clears the search field so the toggle's
@@ -10334,9 +10342,9 @@ struct VerticalTabsSidebar: View {
                         sidebarSearchText = ""
                         sidebarFilterActive.toggle()
                     },
-                    toggleRunning: {
+                    toggleIdle: {
                         sidebarSearchText = ""
-                        sidebarFilterRunning.toggle()
+                        sidebarFilterIdle.toggle()
                     },
                     searchText: $sidebarSearchText
                 )
@@ -10350,13 +10358,13 @@ struct VerticalTabsSidebar: View {
                     // (and no live PIDs yet, so no workspaces visible). Reset
                     // on appear so the user always sees their workspaces on
                     // first paint. `.onChange` below handles later transitions.
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, idle: idleWorkspaceCount)
                 }
                 .onChange(of: activeWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, idle: idleWorkspaceCount)
                 }
-                .onChange(of: runningWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount)
+                .onChange(of: idleWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, idle: idleWorkspaceCount)
                 }
                 .onReceive(
                     tabManager.workspaceStatusEntriesPublisher
@@ -10578,13 +10586,13 @@ enum SidebarSortMode: String, CaseIterable {
 
 private struct SidebarFilterBar: View {
     let isActiveOn: Bool
-    let isRunningOn: Bool
+    let isIdleOn: Bool
     let activeCount: Int
-    let runningCount: Int
+    let idleCount: Int
     let sortMode: SidebarSortMode
     let setSortMode: (SidebarSortMode) -> Void
     let toggleActive: () -> Void
-    let toggleRunning: () -> Void
+    let toggleIdle: () -> Void
     @Binding var searchText: String
 
     var body: some View {
@@ -10605,25 +10613,25 @@ private struct SidebarFilterBar: View {
             )
 
             SidebarFilterChip(
-                title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
-                icon: "play.fill",
-                count: runningCount,
-                isActive: isRunningOn,
-                isDisabled: runningCount == 0,
+                title: String(localized: "sidebar.filter.idle", defaultValue: "Idle"),
+                icon: "pause.fill",
+                count: idleCount,
+                isActive: isIdleOn,
+                isDisabled: idleCount == 0,
                 activeColor: .accentColor,
-                tooltipActive: String(localized: "sidebar.filter.running.showAll",
+                tooltipActive: String(localized: "sidebar.filter.idle.showAll",
                                       defaultValue: "Show all workspaces"),
-                tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
-                                        defaultValue: "Show only workspaces whose agent is running"),
-                accessibilityId: "SidebarRunningFilterToggle",
-                action: toggleRunning
+                tooltipInactive: String(localized: "sidebar.filter.idle.tooltip",
+                                        defaultValue: "Show only workspaces whose agent is waiting on you"),
+                accessibilityId: "SidebarIdleFilterToggle",
+                action: toggleIdle
             )
 
             SidebarSortMenu(mode: sortMode, setMode: setSortMode)
 
             SidebarSearchField(text: $searchText)
         }
-        .animation(.easeOut(duration: 0.15), value: [isActiveOn, isRunningOn])
+        .animation(.easeOut(duration: 0.15), value: [isActiveOn, isIdleOn])
     }
 }
 
