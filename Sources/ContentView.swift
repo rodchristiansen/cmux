@@ -10620,9 +10620,9 @@ private struct SidebarFilterBar: View {
                 action: { setMode(mode == .running ? .none : .running) }
             )
 
-            SidebarSearchField(text: $searchText)
-
             SidebarSortMenu(mode: sortMode, setMode: setSortMode)
+
+            SidebarSearchField(text: $searchText)
         }
         .animation(.easeOut(duration: 0.15), value: mode)
     }
@@ -10635,7 +10635,7 @@ private struct SidebarSortMenu: View {
     private func title(for mode: SidebarSortMode) -> String {
         switch mode {
         case .manual:
-            return String(localized: "sidebar.sort.manual", defaultValue: "Sidebar Order")
+            return String(localized: "sidebar.sort.manual", defaultValue: "By Section")
         case .recentFirst:
             return String(localized: "sidebar.sort.recentFirst", defaultValue: "Recently Active on Top")
         case .recentLast:
