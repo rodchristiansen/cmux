@@ -161,7 +161,18 @@ struct SidebarStatusEntry: Equatable {
 extension SidebarStatusEntry {
     /// The pill the Claude Code and Codex hooks leave behind when a turn ends.
     var isAgentIdleStatus: Bool {
-        (key == "claude_code" || key == "codex") && value == "Idle"
+        isAgentStatus && value == "Idle"
+    }
+
+    /// Any Claude Code or Codex status pill, whatever its value.
+    var isAgentStatus: Bool {
+        key == "claude_code" || key == "codex"
+    }
+
+    /// The agent is mid-turn: "Running", or a tool description when
+    /// `claudeCodeVerboseStatus` is on. Idle and Needs input are not running.
+    var isAgentRunningStatus: Bool {
+        isAgentStatus && value != "Idle" && value != "Needs input"
     }
 }
 

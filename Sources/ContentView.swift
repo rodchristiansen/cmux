@@ -10091,7 +10091,16 @@ struct VerticalTabsSidebar: View {
     private var workspacePresentationMode = WorkspacePresentationModeSettings.defaultMode.rawValue
     @AppStorage("sidebar.filter.mode")
     private var sidebarFilterModeRaw: String = SidebarFilterMode.none.rawValue
+    @AppStorage("sidebar.sort.mode")
+    private var sidebarSortModeRaw: String = SidebarSortMode.manual.rawValue
     @State private var sidebarSearchText: String = ""
+    /// Bumped when any workspace's status pills change, so the Running
+    /// filter and the recent-activity sort re-evaluate.
+    @State private var workspaceStatusRevision: UInt64 = 0
+
+    private var sidebarSortMode: SidebarSortMode {
+        SidebarSortMode(rawValue: sidebarSortModeRaw) ?? .manual
+    }
 
     private var sidebarFilterMode: SidebarFilterMode {
         SidebarFilterMode(rawValue: sidebarFilterModeRaw) ?? .none
@@ -10101,8 +10110,9 @@ struct VerticalTabsSidebar: View {
         sidebarFilterModeRaw = mode.rawValue
     }
 
-    private func autoClearSidebarFilterIfEmpty(active: Int) {
-        if sidebarFilterMode == .active && active == 0 {
+    private func autoClearSidebarFilterIfEmpty(active: Int, running: Int) {
+        if (sidebarFilterMode == .active && active == 0) ||
+            (sidebarFilterMode == .running && running == 0) {
             setSidebarFilter(.none)
         }
     }
@@ -10131,6 +10141,37 @@ struct VerticalTabsSidebar: View {
         return false
     }
 
+    private func workspaceHasRunningAgent(_ workspace: Workspace) -> Bool {
+        workspace.statusEntries.values.contains(where: \.isAgentRunningStatus)
+    }
+
+    /// The last time an agent changed state or posted a notification here.
+    private func workspaceLastActivity(_ workspace: Workspace) -> Date? {
+        let statusDate = workspace.statusEntries.values
+            .filter(\.isAgentStatus)
+            .map(\.timestamp)
+            .max()
+        let notificationDate = notificationStore.latestNotification(forTabId: workspace.id)?.createdAt
+        return [statusDate, notificationDate].compactMap { $0 }.max()
+    }
+
+    /// Orders workspaces by last activity, keeping sidebar order for ties.
+    /// Workspaces with no activity sit at the far end from the recent ones.
+    private func workspacesInSortOrder(_ workspaces: [Workspace]) -> [Workspace] {
+        let recentFirst = workspaces.enumerated()
+            .map { (offset: $0.offset, workspace: $0.element, date: workspaceLastActivity($0.element)) }
+            .sorted { lhs, rhs in
+                switch (lhs.date, rhs.date) {
+                case let (l?, r?) where l != r: return l > r
+                case (_?, nil): return true
+                case (nil, _?): return false
+                default: return lhs.offset < rhs.offset
+                }
+            }
+            .map(\.workspace)
+        return sidebarSortMode == .recentFirst ? recentFirst : recentFirst.reversed()
+    }
+
     private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
         if query.isEmpty { return true }
         return workspace.title.range(of: query, options: .caseInsensitive) != nil
@@ -10148,6 +10189,7 @@ struct VerticalTabsSidebar: View {
         switch sidebarFilterMode {
         case .none: return workspaces
         case .active: return workspaces.filter(workspaceHasAgentSession)
+        case .running: return workspaces.filter(workspaceHasRunningAgent)
         }
     }
 
@@ -10236,7 +10278,9 @@ struct VerticalTabsSidebar: View {
         // SwiftUI dependency — no separate read needed here.
         let layout = tabManager.sidebarLayout
         let workspaceCount = tabs.count
+        let _ = workspaceStatusRevision
         let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
+        let runningWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasRunningAgent($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
@@ -10244,6 +10288,15 @@ struct VerticalTabsSidebar: View {
             if sidebarFilterMode != .none && filtered.isEmpty { return nil }
             return SidebarLayout.SectionGroup(section: group.section, workspaces: filtered)
         }
+        // Sorting by activity flattens the sidebar: pinned, ungrouped and every
+        // section's workspaces (collapsed ones included) form one list, and
+        // the section headers are hidden until the sort goes back to manual.
+        let activitySortedWorkspaces: [Workspace]? = sidebarSortMode == .manual
+            ? nil
+            : workspacesInSortOrder(
+                filteredPinnedWorkspaces + filteredUngroupedWorkspaces +
+                    layout.sectionGroups.flatMap { workspacesMatchingFilter($0.workspaces) }
+            )
         let canCloseWorkspace = workspaceCount > 1
         let workspaceNumberShortcut = self.workspaceNumberShortcut
         let tabItemSettings = tabItemSettingsStore.snapshot
@@ -10271,6 +10324,9 @@ struct VerticalTabsSidebar: View {
                 SidebarFilterBar(
                     mode: sidebarFilterMode,
                     activeCount: activeWorkspaceCount,
+                    runningCount: runningWorkspaceCount,
+                    sortMode: sidebarSortMode,
+                    setSortMode: { sidebarSortModeRaw = $0.rawValue },
                     setMode: { newMode in
                         // Clicking the Active chip clears the search field so the
                         // toggle's intent isn't masked by a stale query. The search
@@ -10291,10 +10347,22 @@ struct VerticalTabsSidebar: View {
                     // (and no live PIDs yet, so no workspaces visible). Reset
                     // on appear so the user always sees their workspaces on
                     // first paint. `.onChange` below handles later transitions.
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount)
                 }
                 .onChange(of: activeWorkspaceCount) { _ in
-                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount)
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount)
+                }
+                .onChange(of: runningWorkspaceCount) { _ in
+                    autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount)
+                }
+                .onReceive(
+                    tabManager.workspaceStatusEntriesPublisher
+                        .receive(on: RunLoop.main)
+                        // Agents flip status in bursts; settle before re-sorting
+                        // so rows don't jump on every tool call.
+                        .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+                ) { _ in
+                    workspaceStatusRevision &+= 1
                 }
             }
             .overlay(alignment: .top) {
@@ -10318,60 +10386,76 @@ struct VerticalTabsSidebar: View {
                         // Workspaces are bounded, so prefer a non-lazy stack here.
                         // LazyVStack + drag-state invalidations can recurse through layout.
                         VStack(spacing: tabRowSpacing) {
-                            // Pinned workspaces always render first
-                            ForEach(filteredPinnedWorkspaces, id: \.id) { tab in
-                                tabItemViewForWorkspace(
-                                    tab, index: tabIndexById[tab.id] ?? 0,
-                                    workspaceCount: workspaceCount,
-                                    canCloseWorkspace: canCloseWorkspace,
-                                    workspaceNumberShortcut: workspaceNumberShortcut,
-                                    tabItemSettings: tabItemSettings,
-                                    selectedContextTargetIds: selectedContextTargetIds,
-                                    selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
-                                    allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
-                                    allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
-                                )
-                            }
-
-                            // Ungrouped (not in any section) unpinned workspaces
-                            ForEach(filteredUngroupedWorkspaces, id: \.id) { tab in
-                                tabItemViewForWorkspace(
-                                    tab, index: tabIndexById[tab.id] ?? 0,
-                                    workspaceCount: workspaceCount,
-                                    canCloseWorkspace: canCloseWorkspace,
-                                    workspaceNumberShortcut: workspaceNumberShortcut,
-                                    tabItemSettings: tabItemSettings,
-                                    selectedContextTargetIds: selectedContextTargetIds,
-                                    selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
-                                    allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
-                                    allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
-                                )
-                            }
-
-                            // Collapsible user-defined sections
-                            ForEach(filteredSectionGroups, id: \.section.id) { group in
-                                VStack(spacing: 0) {
-                                    SidebarSectionHeaderView(
-                                        section: group.section,
-                                        tabManager: tabManager,
-                                        workspaceCount: group.workspaces.count
+                            if let activitySortedWorkspaces {
+                                ForEach(activitySortedWorkspaces, id: \.id) { tab in
+                                    tabItemViewForWorkspace(
+                                        tab, index: tabIndexById[tab.id] ?? 0,
+                                        workspaceCount: workspaceCount,
+                                        canCloseWorkspace: canCloseWorkspace,
+                                        workspaceNumberShortcut: workspaceNumberShortcut,
+                                        tabItemSettings: tabItemSettings,
+                                        selectedContextTargetIds: selectedContextTargetIds,
+                                        selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
+                                        allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
+                                        allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
                                     )
+                                }
+                            } else {
+                                // Pinned workspaces always render first
+                                ForEach(filteredPinnedWorkspaces, id: \.id) { tab in
+                                    tabItemViewForWorkspace(
+                                        tab, index: tabIndexById[tab.id] ?? 0,
+                                        workspaceCount: workspaceCount,
+                                        canCloseWorkspace: canCloseWorkspace,
+                                        workspaceNumberShortcut: workspaceNumberShortcut,
+                                        tabItemSettings: tabItemSettings,
+                                        selectedContextTargetIds: selectedContextTargetIds,
+                                        selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
+                                        allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
+                                        allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
+                                    )
+                                }
 
-                                    if !group.section.isCollapsed {
-                                        VStack(spacing: tabRowSpacing) {
-                                            ForEach(group.workspaces, id: \.id) { tab in
-                                                tabItemViewForWorkspace(
-                                                    tab, index: tabIndexById[tab.id] ?? 0,
-                                                    workspaceCount: workspaceCount,
-                                                    canCloseWorkspace: canCloseWorkspace,
-                                                    workspaceNumberShortcut: workspaceNumberShortcut,
-                                                    tabItemSettings: tabItemSettings,
-                                                    selectedContextTargetIds: selectedContextTargetIds,
-                                                    selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
-                                                    allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
-                                                    allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
-                                                )
-                                                .padding(.leading, 8)
+                                // Ungrouped (not in any section) unpinned workspaces
+                                ForEach(filteredUngroupedWorkspaces, id: \.id) { tab in
+                                    tabItemViewForWorkspace(
+                                        tab, index: tabIndexById[tab.id] ?? 0,
+                                        workspaceCount: workspaceCount,
+                                        canCloseWorkspace: canCloseWorkspace,
+                                        workspaceNumberShortcut: workspaceNumberShortcut,
+                                        tabItemSettings: tabItemSettings,
+                                        selectedContextTargetIds: selectedContextTargetIds,
+                                        selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
+                                        allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
+                                        allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
+                                    )
+                                }
+
+                                // Collapsible user-defined sections
+                                ForEach(filteredSectionGroups, id: \.section.id) { group in
+                                    VStack(spacing: 0) {
+                                        SidebarSectionHeaderView(
+                                            section: group.section,
+                                            tabManager: tabManager,
+                                            workspaceCount: group.workspaces.count
+                                        )
+
+                                        if !group.section.isCollapsed {
+                                            VStack(spacing: tabRowSpacing) {
+                                                ForEach(group.workspaces, id: \.id) { tab in
+                                                    tabItemViewForWorkspace(
+                                                        tab, index: tabIndexById[tab.id] ?? 0,
+                                                        workspaceCount: workspaceCount,
+                                                        canCloseWorkspace: canCloseWorkspace,
+                                                        workspaceNumberShortcut: workspaceNumberShortcut,
+                                                        tabItemSettings: tabItemSettings,
+                                                        selectedContextTargetIds: selectedContextTargetIds,
+                                                        selectedRemoteContextMenuWorkspaceIds: selectedRemoteContextMenuWorkspaceIds,
+                                                        allSelectedRemoteContextMenuTargetsConnecting: allSelectedRemoteContextMenuTargetsConnecting,
+                                                        allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected
+                                                    )
+                                                    .padding(.leading, 8)
+                                                }
                                             }
                                         }
                                     }
@@ -10486,11 +10570,21 @@ struct VerticalTabsSidebar: View {
 enum SidebarFilterMode: String, CaseIterable {
     case none
     case active
+    case running
+}
+
+enum SidebarSortMode: String, CaseIterable {
+    case manual
+    case recentFirst
+    case recentLast
 }
 
 private struct SidebarFilterBar: View {
     let mode: SidebarFilterMode
     let activeCount: Int
+    let runningCount: Int
+    let sortMode: SidebarSortMode
+    let setSortMode: (SidebarSortMode) -> Void
     let setMode: (SidebarFilterMode) -> Void
     @Binding var searchText: String
 
@@ -10511,9 +10605,77 @@ private struct SidebarFilterBar: View {
                 action: { setMode(mode == .active ? .none : .active) }
             )
 
+            SidebarFilterChip(
+                title: String(localized: "sidebar.filter.running", defaultValue: "Running"),
+                icon: "play.fill",
+                count: runningCount,
+                isActive: mode == .running,
+                isDisabled: runningCount == 0,
+                activeColor: .accentColor,
+                tooltipActive: String(localized: "sidebar.filter.running.showAll",
+                                      defaultValue: "Show all workspaces"),
+                tooltipInactive: String(localized: "sidebar.filter.running.tooltip",
+                                        defaultValue: "Show only workspaces whose agent is running"),
+                accessibilityId: "SidebarRunningFilterToggle",
+                action: { setMode(mode == .running ? .none : .running) }
+            )
+
             SidebarSearchField(text: $searchText)
+
+            SidebarSortMenu(mode: sortMode, setMode: setSortMode)
         }
         .animation(.easeOut(duration: 0.15), value: mode)
+    }
+}
+
+private struct SidebarSortMenu: View {
+    let mode: SidebarSortMode
+    let setMode: (SidebarSortMode) -> Void
+
+    private func title(for mode: SidebarSortMode) -> String {
+        switch mode {
+        case .manual:
+            return String(localized: "sidebar.sort.manual", defaultValue: "Sidebar Order")
+        case .recentFirst:
+            return String(localized: "sidebar.sort.recentFirst", defaultValue: "Recently Active on Top")
+        case .recentLast:
+            return String(localized: "sidebar.sort.recentLast", defaultValue: "Recently Active at Bottom")
+        }
+    }
+
+    private var icon: String {
+        switch mode {
+        case .manual: return "arrow.up.arrow.down"
+        case .recentFirst: return "arrow.up.to.line"
+        case .recentLast: return "arrow.down.to.line"
+        }
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(SidebarSortMode.allCases, id: \.self) { option in
+                Button {
+                    setMode(option)
+                } label: {
+                    if option == mode {
+                        Label(title(for: option), systemImage: "checkmark")
+                    } else {
+                        Text(title(for: option))
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(mode == .manual ? Color(nsColor: .secondaryLabelColor) : Color.accentColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .safeHelp(title(for: mode))
+        .accessibilityLabel(String(localized: "sidebar.sort.label", defaultValue: "Sort workspaces"))
+        .accessibilityValue(title(for: mode))
+        .accessibilityIdentifier("SidebarSortMenu")
     }
 }
 
