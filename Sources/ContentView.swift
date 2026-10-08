@@ -10350,15 +10350,15 @@ struct VerticalTabsSidebar: View {
                         sidebarSearchText = ""
                         sidebarFilterActive.toggle()
                     },
-                    toggleIdle: {
-                        sidebarSearchText = ""
-                        sidebarFilterIdle.toggle()
-                        if sidebarFilterIdle { sidebarFilterRunning = false }
-                    },
                     toggleRunning: {
                         sidebarSearchText = ""
                         sidebarFilterRunning.toggle()
                         if sidebarFilterRunning { sidebarFilterIdle = false }
+                    },
+                    toggleIdle: {
+                        sidebarSearchText = ""
+                        sidebarFilterIdle.toggle()
+                        if sidebarFilterIdle { sidebarFilterRunning = false }
                     },
                     searchText: $sidebarSearchText
                 )
