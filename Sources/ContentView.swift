@@ -10184,6 +10184,10 @@ struct VerticalTabsSidebar: View {
         return workspace.title.range(of: query, options: .caseInsensitive) != nil
     }
 
+    private var isSidebarSearching: Bool {
+        !sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
         let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A non-empty search query overrides the Active mode filter: typing
@@ -10465,10 +10469,14 @@ struct VerticalTabsSidebar: View {
                                         SidebarSectionHeaderView(
                                             section: group.section,
                                             tabManager: tabManager,
-                                            workspaceCount: group.workspaces.count
+                                            workspaceCount: group.workspaces.count,
+                                            isForcedExpanded: isSidebarSearching
                                         )
 
-                                        if !group.section.isCollapsed {
+                                        // A search shows every match, so it opens
+                                        // collapsed sections without changing their
+                                        // saved state.
+                                        if isSidebarSearching || !group.section.isCollapsed {
                                             VStack(spacing: tabRowSpacing) {
                                                 ForEach(group.workspaces, id: \.id) { tab in
                                                     tabItemViewForWorkspace(
@@ -12957,18 +12965,21 @@ private struct SidebarSectionHeaderView: View {
     @ObservedObject var section: SidebarSection
     let tabManager: TabManager
     let workspaceCount: Int
+    var isForcedExpanded = false
     @State private var isEditing = false
     @State private var editedName = ""
     @FocusState private var isTextFieldFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
+
+    private var isShownCollapsed: Bool { section.isCollapsed && !isForcedExpanded }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(section.isCollapsed ? 0 : 90))
-                .animation(.easeInOut(duration: 0.15), value: section.isCollapsed)
+                .rotationEffect(.degrees(isShownCollapsed ? 0 : 90))
+                .animation(.easeInOut(duration: 0.15), value: isShownCollapsed)
                 .frame(width: 12, height: 12)
 
             if isEditing {
@@ -13004,7 +13015,7 @@ private struct SidebarSectionHeaderView: View {
 
             Spacer()
 
-            if !section.isCollapsed {
+            if !isShownCollapsed {
                 Text("\(workspaceCount)")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
