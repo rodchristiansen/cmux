@@ -423,10 +423,16 @@ struct cmuxApp: App {
                 Button(String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set")) {
                     AppDelegate.shared?.reloadWindowSet()
                 }
-                // Structure only, like the reload above: the workspace keeps the
-                // agent it is set to, which "Agent" on its own context menu owns.
-                Button(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Rebuild Workspace Layout")) {
-                    AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate()
+                Menu(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Rebuild Workspace Layout")) {
+                    Button(String(localized: "contextMenu.duplicateWorkspace.sameAgent", defaultValue: "Same Agent")) {
+                        AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate()
+                    }
+                    Divider()
+                    ForEach(WorkspaceAgent.roster) { agent in
+                        Button(agent.panelTitle) {
+                            AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate(agent: agent)
+                        }
+                    }
                 }
                 Button(
                     String(
