@@ -11352,7 +11352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return true }
-        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue)
+        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue, userInitiated: true)
         return true
     }
 

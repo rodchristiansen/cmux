@@ -413,17 +413,8 @@ struct cmuxApp: App {
                 splitCommandButton(title: String(localized: "menu.app.reloadConfiguration", defaultValue: "Reload Configuration"), shortcut: menuShortcut(for: .reloadConfiguration)) {
                     GhosttyApp.shared.reloadConfiguration(source: "menu.reload_configuration")
                 }
-                // Reloading the workspace set is the sidebar's cascade and nothing
-                // more: it reconciles rows, sections and panels against the file and
-                // leaves every workspace's own agent alone. Which agent a workspace
-                // runs is that workspace's choice, made on its own context menu.
-                Button(String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")) {
-                    AppDelegate.shared?.reloadWorkspaceSet()
-                }
-                Button(String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set")) {
-                    AppDelegate.shared?.reloadWindowSet()
-                }
-                Menu(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Rebuild Workspace Layout")) {
+                Divider()
+                Menu(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Reload Workspace Layout")) {
                     Button(String(localized: "contextMenu.duplicateWorkspace.sameAgent", defaultValue: "Same Agent")) {
                         AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate()
                     }
@@ -433,6 +424,13 @@ struct cmuxApp: App {
                             AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate(agent: agent)
                         }
                     }
+                }
+                Button(String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")) {
+                    AppDelegate.shared?.reloadWorkspaceSet()
+                }
+                Divider()
+                Button(String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set")) {
+                    AppDelegate.shared?.reloadWindowSet()
                 }
                 Button(
                     String(

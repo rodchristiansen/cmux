@@ -8779,7 +8779,7 @@ struct ContentView: View {
 
         switch target.kind {
         case .workspace(let workspaceId):
-            tabManager.setCustomTitle(tabId: workspaceId, title: normalizedName)
+            tabManager.setCustomTitle(tabId: workspaceId, title: normalizedName, userInitiated: true)
         case .tab(let workspaceId, let panelId):
             guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else {
                 NSSound.beep()
@@ -14954,7 +14954,7 @@ private struct TabItemView: View, Equatable {
         }
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
-        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue)
+        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue, userInitiated: true)
     }
 
     private func beginWorkspaceDescriptionEditFromContextMenu() {
