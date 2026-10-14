@@ -2758,21 +2758,23 @@ class TabManager: ObservableObject {
         return false
     }
 
-    func setCustomTitle(tabId: UUID, title: String?) {
+    func setCustomTitle(tabId: UUID, title: String?, userInitiated: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         let previousTitle = tabs[index].title
         tabs[index].setCustomTitle(title)
         if selectedTabId == tabId {
             updateWindowTitle(for: tabs[index])
         }
-        propagateWorkspaceRenameToAgents(in: tabs[index], previousTitle: previousTitle)
+        if userInitiated {
+            tabs[index].setCustomDescription(nil)
+        }
+        propagateWorkspaceRenameToAgents(in: tabs[index], previousTitle: previousTitle, userInitiated: userInitiated)
     }
 
     /// When a workspace's display name changes, ask a running agent pane to
-    /// `/rename` itself to match, so the agent's own session label (shown in
-    /// `/resume` and the prompt box) tracks the workspace name automatically.
-    /// `/rename` is a fast slash command that doesn't disturb an active prompt,
-    /// and both Claude and Codex understand it.
+    /// match its display name. Explicit GUI renames send Codex's thread RPC
+    /// through the session-title hook; Claude retains the guarded slash-command
+    /// path, which only runs with an empty composer.
     ///
     /// Gated so it only fires when (a) the name actually changed and (b) a live
     /// agent PID is registered for the workspace — so it never fires during
@@ -2798,7 +2800,7 @@ class TabManager: ObservableObject {
         return false
     }
 
-    private func propagateWorkspaceRenameToAgents(in workspace: Workspace, previousTitle: String) {
+    private func propagateWorkspaceRenameToAgents(in workspace: Workspace, previousTitle: String, userInitiated: Bool) {
         let newName = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let claudeCommands = workspace.panels.values
             .compactMap { $0 as? TerminalPanel }
@@ -2816,12 +2818,19 @@ class TabManager: ObservableObject {
         // session-title hook sets Claude's title itself and then renames the
         // row, so echoing that back as a typed `/rename` only filled the pane
         // with rename commands.
-        guard UserDefaults.standard.object(forKey: Self.propagateRenameToAgentsKey) as? Bool ?? true else {
+        guard userInitiated || (UserDefaults.standard.object(forKey: Self.propagateRenameToAgentsKey) as? Bool ?? true) else {
             return
         }
-        // Any registered agent, not just Claude: `codex-remote` registers under
-        // "codex", and a Codex lane's session label tracks the workspace name the
-        // same way.
+        // A GUI rename reaches Codex through its thread RPC even during a turn.
+        // Typing a slash command would corrupt a draft, and the daemon's PID
+        // cannot identify the CLI pane that displays the thread.
+        let codexPanels = workspace.panels.values.compactMap { $0 as? TerminalPanel }.filter {
+            Self.isCodexCommand($0.configuredCommand)
+        }
+        if userInitiated && !codexPanels.isEmpty {
+            renameCodexSession(workspaceId: workspace.id, name: newName)
+        }
+        // Claude's keyboard path still requires a live agent on this row.
         guard workspace.agentPIDs.values.contains(where: { $0 > 0 && kill($0, 0) == 0 }) else {
             #if DEBUG
             dlog("rename.propagate skip: no live agent")
@@ -2834,7 +2843,7 @@ class TabManager: ObservableObject {
             .replacingOccurrences(of: "\r", with: " ")
         var sent = 0
         for panel in workspace.panels.values.compactMap({ $0 as? TerminalPanel })
-        where Self.isAgentCommand(panel.configuredCommand) {
+        where Self.isAgentCommand(panel.configuredCommand) && !Self.isCodexCommand(panel.configuredCommand) {
             // Never type into a prompt the user is composing: the /rename would
             // land in the middle of their text. An unreadable screen counts as
             // busy too.
@@ -2866,6 +2875,30 @@ class TabManager: ObservableObject {
         #if DEBUG
         dlog("rename.propagate sent=\(sent) name='\(safeName)'")
         #endif
+    }
+
+    private func renameCodexSession(workspaceId: UUID, name: String) {
+        let hook = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/hooks/session-title.py")
+        guard FileManager.default.fileExists(atPath: hook.path) else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [hook.path, "rename-row", workspaceId.uuidString, name]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            NSLog("[SessionRename] Could not start Codex rename: %@", error.localizedDescription)
+        }
+    }
+
+    nonisolated static func isCodexCommand(_ command: String?) -> Bool {
+        guard let executable = command?.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map(String.init).first(where: { !WorkspaceSetImporter.isEnvAssignment($0) }) else { return false }
+        let name = (executable as NSString).lastPathComponent.lowercased()
+        return name == "codex" || name == "codex-remote" || name == "codex-lane"
     }
 
     /// True when a pane's configured command is an agent itself, not merely a
