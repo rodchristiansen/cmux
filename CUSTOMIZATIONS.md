@@ -43,14 +43,14 @@ Menu items under **Window**:
 - **Reload Workspace Layout** — rebuild the focused workspace from its template, keeping its agent with *Same Agent* (⌥⌘R) or choosing one explicitly.
 - **Reload Workspace Set** (⌃⌘R) — imports new entries live; rebuilds idle workspaces to match the template (running ones are preserved).
 
-Layout agent shortcuts use stable roster IDs and can be changed in Settings > Keyboard Shortcuts. Remote options have the simpler defaults; direct options add Shift:
+Layout agent shortcuts use stable roster IDs and can be changed in Settings > Keyboard Shortcuts. Remote options have the simpler defaults; direct options add Option:
 
 | Agent | Default shortcut | Roster ID |
 | --- | --- | --- |
-| Claude (remote) | ⌥⌘1 | `claude-remote` |
-| Codex (remote) | ⌥⌘2 | `codex-remote` |
-| Claude (direct) | ⌥⇧⌘1 | `claude` |
-| Codex (direct) | ⌥⇧⌘2 | `codex` |
+| Claude (remote) | ⇧⌘C | `claude-remote` |
+| Codex (remote) | ⇧⌘X | `codex-remote` |
+| Claude (direct) | ⌥⇧⌘C | `claude` |
+| Codex (direct) | ⌥⇧⌘X | `codex` |
 
 An agent shortcut is available only when its exact ID is in the roster; it never falls back to another agent.
 
