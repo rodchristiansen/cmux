@@ -16,6 +16,11 @@ enum KeyboardShortcutSettings {
         // App / window
         case openSettings
         case reloadConfiguration
+        case reloadWorkspaceLayout
+        case reloadWorkspaceSet
+        case reloadWindowSet
+        case reattachLiveSessions
+        case restorePreviousSessions
         case newWindow
         case closeWindow
         case toggleFullScreen
@@ -86,6 +91,11 @@ enum KeyboardShortcutSettings {
             switch self {
             case .openSettings: return String(localized: "menu.app.settings", defaultValue: "Settings…")
             case .reloadConfiguration: return String(localized: "menu.app.reloadConfiguration", defaultValue: "Reload Configuration")
+            case .reloadWorkspaceLayout: return String(localized: "shortcut.reloadWorkspaceLayout.label", defaultValue: "Reload Workspace Layout — Same Agent")
+            case .reloadWorkspaceSet: return String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")
+            case .reloadWindowSet: return String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set")
+            case .reattachLiveSessions: return String(localized: "menu.app.reattachLiveSessions", defaultValue: "Reattach Live tmux Sessions…")
+            case .restorePreviousSessions: return String(localized: "menu.app.restorePreviousSessions", defaultValue: "Restore Previous Sessions…")
             case .newWindow: return String(localized: "shortcut.newWindow.label", defaultValue: "New Window")
             case .closeWindow: return String(localized: "shortcut.closeWindow.label", defaultValue: "Close Window")
             case .toggleFullScreen: return String(localized: "command.toggleFullScreen.title", defaultValue: "Toggle Full Screen")
@@ -152,6 +162,16 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: ",", command: true, shift: false, option: false, control: false)
             case .reloadConfiguration:
                 return StoredShortcut(key: ",", command: true, shift: true, option: false, control: false)
+            case .reloadWorkspaceLayout:
+                return StoredShortcut(key: "r", command: true, shift: false, option: true, control: false)
+            case .reloadWorkspaceSet:
+                return StoredShortcut(key: "r", command: true, shift: false, option: false, control: true)
+            case .reloadWindowSet:
+                return StoredShortcut(key: "r", command: true, shift: true, option: false, control: true)
+            case .reattachLiveSessions:
+                return StoredShortcut(key: "r", command: true, shift: true, option: true, control: false)
+            case .restorePreviousSessions:
+                return StoredShortcut(key: "r", command: true, shift: false, option: true, control: true)
             case .newWindow:
                 return StoredShortcut(key: "n", command: true, shift: true, option: false, control: false)
             case .closeWindow:
