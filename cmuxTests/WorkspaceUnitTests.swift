@@ -214,8 +214,8 @@ final class WorkspaceRenameShortcutDefaultsTests: XCTestCase {
         ]
         for (remote, direct) in pairs {
             var remoteShortcut = remote.defaultShortcut
-            XCTAssertFalse(remoteShortcut.shift)
-            remoteShortcut.shift = true
+            XCTAssertFalse(remoteShortcut.option)
+            remoteShortcut.option = true
             XCTAssertEqual(remoteShortcut, direct.defaultShortcut)
         }
         XCTAssertNil(KeyboardShortcutSettings.Action.reloadWorkspaceLayout.reloadWorkspaceAgentID)

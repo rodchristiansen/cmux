@@ -184,13 +184,13 @@ enum KeyboardShortcutSettings {
             case .reloadWorkspaceLayout:
                 return StoredShortcut(key: "r", command: true, shift: false, option: true, control: false)
             case .reloadWorkspaceLayoutClaudeRemote:
-                return StoredShortcut(key: "1", command: true, shift: false, option: true, control: false)
+                return StoredShortcut(key: "c", command: true, shift: true, option: false, control: false)
             case .reloadWorkspaceLayoutCodexRemote:
-                return StoredShortcut(key: "2", command: true, shift: false, option: true, control: false)
+                return StoredShortcut(key: "x", command: true, shift: true, option: false, control: false)
             case .reloadWorkspaceLayoutClaudeDirect:
-                return StoredShortcut(key: "1", command: true, shift: true, option: true, control: false)
+                return StoredShortcut(key: "c", command: true, shift: true, option: true, control: false)
             case .reloadWorkspaceLayoutCodexDirect:
-                return StoredShortcut(key: "2", command: true, shift: true, option: true, control: false)
+                return StoredShortcut(key: "x", command: true, shift: true, option: true, control: false)
             case .reloadWorkspaceSet:
                 return StoredShortcut(key: "r", command: true, shift: false, option: false, control: true)
             case .reloadWindowSet:
