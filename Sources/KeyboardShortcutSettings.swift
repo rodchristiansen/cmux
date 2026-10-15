@@ -17,6 +17,10 @@ enum KeyboardShortcutSettings {
         case openSettings
         case reloadConfiguration
         case reloadWorkspaceLayout
+        case reloadWorkspaceLayoutClaudeRemote
+        case reloadWorkspaceLayoutCodexRemote
+        case reloadWorkspaceLayoutClaudeDirect
+        case reloadWorkspaceLayoutCodexDirect
         case reloadWorkspaceSet
         case reloadWindowSet
         case reattachLiveSessions
@@ -92,6 +96,10 @@ enum KeyboardShortcutSettings {
             case .openSettings: return String(localized: "menu.app.settings", defaultValue: "Settings…")
             case .reloadConfiguration: return String(localized: "menu.app.reloadConfiguration", defaultValue: "Reload Configuration")
             case .reloadWorkspaceLayout: return String(localized: "shortcut.reloadWorkspaceLayout.label", defaultValue: "Reload Workspace Layout — Same Agent")
+            case .reloadWorkspaceLayoutClaudeRemote: return String(localized: "shortcut.reloadWorkspaceLayoutClaudeRemote.label", defaultValue: "Reload Workspace Layout — Claude (remote)")
+            case .reloadWorkspaceLayoutCodexRemote: return String(localized: "shortcut.reloadWorkspaceLayoutCodexRemote.label", defaultValue: "Reload Workspace Layout — Codex (remote)")
+            case .reloadWorkspaceLayoutClaudeDirect: return String(localized: "shortcut.reloadWorkspaceLayoutClaudeDirect.label", defaultValue: "Reload Workspace Layout — Claude (direct)")
+            case .reloadWorkspaceLayoutCodexDirect: return String(localized: "shortcut.reloadWorkspaceLayoutCodexDirect.label", defaultValue: "Reload Workspace Layout — Codex (direct)")
             case .reloadWorkspaceSet: return String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")
             case .reloadWindowSet: return String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set")
             case .reattachLiveSessions: return String(localized: "menu.app.reattachLiveSessions", defaultValue: "Reattach Live tmux Sessions…")
@@ -154,6 +162,17 @@ enum KeyboardShortcutSettings {
             }
         }
 
+        /// Match stable roster IDs, so reordering the roster cannot retarget a shortcut.
+        var reloadWorkspaceAgentID: String? {
+            switch self {
+            case .reloadWorkspaceLayoutClaudeRemote: return "claude-remote"
+            case .reloadWorkspaceLayoutCodexRemote: return "codex-remote"
+            case .reloadWorkspaceLayoutClaudeDirect: return "claude"
+            case .reloadWorkspaceLayoutCodexDirect: return "codex"
+            default: return nil
+            }
+        }
+
         var defaultsKey: String { "shortcut.\(rawValue)" }
 
         var defaultShortcut: StoredShortcut {
@@ -164,6 +183,14 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: ",", command: true, shift: true, option: false, control: false)
             case .reloadWorkspaceLayout:
                 return StoredShortcut(key: "r", command: true, shift: false, option: true, control: false)
+            case .reloadWorkspaceLayoutClaudeRemote:
+                return StoredShortcut(key: "1", command: true, shift: false, option: true, control: false)
+            case .reloadWorkspaceLayoutCodexRemote:
+                return StoredShortcut(key: "2", command: true, shift: false, option: true, control: false)
+            case .reloadWorkspaceLayoutClaudeDirect:
+                return StoredShortcut(key: "1", command: true, shift: true, option: true, control: false)
+            case .reloadWorkspaceLayoutCodexDirect:
+                return StoredShortcut(key: "2", command: true, shift: true, option: true, control: false)
             case .reloadWorkspaceSet:
                 return StoredShortcut(key: "r", command: true, shift: false, option: false, control: true)
             case .reloadWindowSet:

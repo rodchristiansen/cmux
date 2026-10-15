@@ -11914,6 +11914,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             rebuildCurrentWorkspaceFromTemplate()
             return true
         }
+        for action in KeyboardShortcutSettings.Action.allCases {
+            guard let agentID = action.reloadWorkspaceAgentID,
+                  let agent = WorkspaceAgent.roster.first(where: { $0.id == agentID }),
+                  matchConfiguredShortcut(event: event, action: action) else { continue }
+            rebuildCurrentWorkspaceFromTemplate(agent: agent)
+            return true
+        }
         if matchConfiguredShortcut(event: event, action: .reloadWorkspaceSet) {
             reloadWorkspaceSet()
             return true
