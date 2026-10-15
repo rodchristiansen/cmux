@@ -413,9 +413,12 @@ struct cmuxApp: App {
                 splitCommandButton(title: String(localized: "menu.app.reloadConfiguration", defaultValue: "Reload Configuration"), shortcut: menuShortcut(for: .reloadConfiguration)) {
                     GhosttyApp.shared.reloadConfiguration(source: "menu.reload_configuration")
                 }
+            }
+
+            CommandGroup(before: .windowList) {
                 Divider()
                 Menu(String(localized: "menu.app.rebuildWorkspaceLayout", defaultValue: "Reload Workspace Layout")) {
-                    Button(String(localized: "contextMenu.duplicateWorkspace.sameAgent", defaultValue: "Same Agent")) {
+                    splitCommandButton(title: String(localized: "contextMenu.duplicateWorkspace.sameAgent", defaultValue: "Same Agent"), shortcut: menuShortcut(for: .reloadWorkspaceLayout)) {
                         AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate()
                     }
                     Divider()
@@ -425,29 +428,20 @@ struct cmuxApp: App {
                         }
                     }
                 }
-                Button(String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set")) {
+                splitCommandButton(title: String(localized: "menu.app.reloadWorkspaceSet", defaultValue: "Reload Workspace Set"), shortcut: menuShortcut(for: .reloadWorkspaceSet)) {
                     AppDelegate.shared?.reloadWorkspaceSet()
                 }
-                Divider()
-                Button(String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set")) {
+                splitCommandButton(title: String(localized: "menu.app.reloadWindowSet", defaultValue: "Reload Window Set"), shortcut: menuShortcut(for: .reloadWindowSet)) {
                     AppDelegate.shared?.reloadWindowSet()
                 }
-                Button(
-                    String(
-                        localized: "menu.app.reattachLiveSessions",
-                        defaultValue: "Reattach Live tmux Sessions…"
-                    )
-                ) {
-                    reattachLiveTmuxSessions()
+                Divider()
+                splitCommandButton(title: String(localized: "menu.app.reattachLiveSessions", defaultValue: "Reattach Live tmux Sessions…"), shortcut: menuShortcut(for: .reattachLiveSessions)) {
+                    AppDelegate.shared?.requestReattachLiveTmuxSessions()
                 }
-                Button(
-                    String(
-                        localized: "menu.app.restorePreviousSessions",
-                        defaultValue: "Restore Previous Sessions…"
-                    )
-                ) {
-                    restorePreviousSessions()
+                splitCommandButton(title: String(localized: "menu.app.restorePreviousSessions", defaultValue: "Restore Previous Sessions…"), shortcut: menuShortcut(for: .restorePreviousSessions)) {
+                    AppDelegate.shared?.requestRestorePreviousSessions()
                 }
+                Divider()
             }
 
             CommandGroup(replacing: .appInfo) {
@@ -1278,122 +1272,6 @@ struct cmuxApp: App {
         for session in orphans {
             TmuxSessionReaper.kill(session)
         }
-    }
-
-    /// Reattach workspaces whose tmux session outlived a cmux crash, after showing which.
-    ///
-    /// The mirror of `clearOrphanedTmuxSessions`: that kills sessions no workspace wants,
-    /// this recovers sessions a workspace wants but lost its pane to. Force-quitting cmux
-    /// leaves every agent's tmux daemon running, but relaunching does not reattach them.
-    private func reattachLiveTmuxSessions() {
-        let pending = AppDelegate.shared?.workspacesAwaitingTmuxReattach() ?? []
-
-        let alert = NSAlert()
-        guard !pending.isEmpty else {
-            alert.messageText = String(
-                localized: "dialog.tmuxRecover.none.title",
-                defaultValue: "No sessions to reattach"
-            )
-            alert.informativeText = String(
-                localized: "dialog.tmuxRecover.none.message",
-                defaultValue: "Every live tmux session is already attached to its workspace."
-            )
-            alert.addButton(withTitle: String(localized: "dialog.tmuxRecover.ok", defaultValue: "OK"))
-            if NSApp.activationPolicy() == .regular {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            alert.runModal()
-            return
-        }
-
-        // Count and list stay outside the localized strings: interpolating into
-        // `defaultValue` turns each into a format string, which is far harder to
-        // translate correctly per-locale.
-        alert.messageText = String(
-            localized: "dialog.tmuxRecover.confirm.title",
-            defaultValue: "Reattach live tmux sessions?"
-        )
-        let explanation = String(
-            localized: "dialog.tmuxRecover.confirm.message",
-            defaultValue:
-                "These workspaces have a tmux session still running from before the restart. Reattaching rebuilds each workspace's panels and joins the existing session, so the agent inside it is preserved."
-        )
-        let lines = pending.map { "\($0.session)  —  \($0.workspace.title)" }
-        alert.informativeText = explanation + "\n\n" + lines.joined(separator: "\n")
-        alert.addButton(
-            withTitle: String(localized: "dialog.tmuxRecover.reattach", defaultValue: "Reattach")
-        )
-        alert.addButton(
-            withTitle: String(localized: "dialog.tmuxRecover.cancel", defaultValue: "Cancel")
-        )
-        if let cancelButton = alert.buttons.dropFirst().first {
-            cancelButton.keyEquivalent = "\u{1b}"
-        }
-        if NSApp.activationPolicy() == .regular {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        AppDelegate.shared?.recoverLiveTmuxSessions()
-    }
-
-    /// Bring back the workspaces that had an agent lane before the last shutdown.
-    ///
-    /// The reboot counterpart to `reattachLiveTmuxSessions`: that one joins tmux sessions
-    /// that are still running, this one restarts lanes whose daemons died with the machine.
-    /// Each rebuilt pane re-runs its wrapper, which resumes the conversation from the
-    /// `claude-lane` ledger.
-    private func restorePreviousSessions() {
-        let pending = AppDelegate.shared?.lanesAwaitingRestore() ?? []
-
-        let alert = NSAlert()
-        guard !pending.isEmpty else {
-            alert.messageText = String(
-                localized: "dialog.laneRestore.none.title",
-                defaultValue: "Nothing to restore"
-            )
-            alert.informativeText = String(
-                localized: "dialog.laneRestore.none.message",
-                defaultValue:
-                    "No recorded lane is waiting: either none was running when cmux last closed, or every one of them is already open."
-            )
-            alert.addButton(withTitle: String(localized: "dialog.laneRestore.ok", defaultValue: "OK"))
-            if NSApp.activationPolicy() == .regular {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            alert.runModal()
-            return
-        }
-
-        // Count and list stay outside the localized strings: interpolating into
-        // `defaultValue` turns each into a format string, which is far harder to
-        // translate correctly per-locale.
-        alert.messageText = String(
-            localized: "dialog.laneRestore.confirm.title",
-            defaultValue: "Restore previous sessions?"
-        )
-        let explanation = String(
-            localized: "dialog.laneRestore.confirm.message",
-            defaultValue:
-                "These workspaces had an agent running when cmux last closed. Restoring rebuilds each one and resumes its conversation where it left off."
-        )
-        let lines = pending.map { "\($0.lane.session)  —  \($0.workspace.title)" }
-        alert.informativeText = explanation + "\n\n" + lines.joined(separator: "\n")
-        alert.addButton(
-            withTitle: String(localized: "dialog.laneRestore.restore", defaultValue: "Restore")
-        )
-        alert.addButton(
-            withTitle: String(localized: "dialog.laneRestore.cancel", defaultValue: "Cancel")
-        )
-        if let cancelButton = alert.buttons.dropFirst().first {
-            cancelButton.keyEquivalent = "\u{1b}"
-        }
-        if NSApp.activationPolicy() == .regular {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        AppDelegate.shared?.restorePreviousSessions()
     }
 
     @ViewBuilder
