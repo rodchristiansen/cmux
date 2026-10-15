@@ -39,9 +39,20 @@ Source of truth: `Sources/SidebarSection.swift`, membership persisted via `Sessi
 ### Native workspace set (`workspace-set.json`)
 Read `~/.config/cmux/workspace-set.json` on fresh launch and merge its sections + workspaces + panel templates + split layout into the running app. Replaces the external Python `cmux-import` script that killed cmux and wrote the session file directly.
 
-Menu items:
-- **cmux > Reload Workspace Set** — imports new entries live; rebuilds idle workspaces to match the template (running ones are preserved)
-- **cmux > Rebuild Workspace Layout** — nuclear rebuild of the focused workspace from the template
+Menu items under **Window**:
+- **Reload Workspace Layout** — rebuild the focused workspace from its template, keeping its agent with *Same Agent* (⌥⌘R) or choosing one explicitly.
+- **Reload Workspace Set** (⌃⌘R) — imports new entries live; rebuilds idle workspaces to match the template (running ones are preserved).
+
+Layout agent shortcuts use stable roster IDs and can be changed in Settings > Keyboard Shortcuts. Remote options have the simpler defaults; direct options add Shift:
+
+| Agent | Default shortcut | Roster ID |
+| --- | --- | --- |
+| Claude (remote) | ⌥⌘1 | `claude-remote` |
+| Codex (remote) | ⌥⌘2 | `codex-remote` |
+| Claude (direct) | ⌥⇧⌘1 | `claude` |
+| Codex (direct) | ⌥⇧⌘2 | `codex` |
+
+An agent shortcut is available only when its exact ID is in the roster; it never falls back to another agent.
 
 JSON format supports `defaultPanels` (title + command) and a `defaultLayout` tree mirroring the session's split/pane structure (with `orientation`, `dividerPosition`, and panel-title references).
 
@@ -77,7 +88,7 @@ agents:
 
 Retargeting a pane runs the roster's `command` verbatim, keeping only the pane's env prefix and arguments: `CLAUDE_REMOTE_HOST=win-desktop claude-remote -n win` picked over to Codex becomes `CLAUDE_REMOTE_HOST=win-desktop codex-remote -n win`. The roster is where "what this agent runs" is decided, which is what makes picking `claude` on a pane that ran `claude-remote` actually mean something.
 
-**Where the pick lives.** Each workspace has its own **Agent** submenu (sidebar context menu and the View menu's workspace section), with a checkmark on its current agent and a *From Workspace Set* item that forgets the pick. **Duplicate Workspace** offers the same list plus *Same Agent*. **Reload Workspace Set** and **Rebuild Workspace Layout** carry no agent pick at all — a reload is the sidebar's cascade of rows, sections and panels, and it leaves every workspace on the agent it is set to. Scripted: `cmux rebuild-workspace --agent <id>`.
+**Where the pick lives.** Each workspace has its own **Agent** submenu (sidebar context menu and the View menu's workspace section), with a checkmark on its current agent and a *From Workspace Set* item that forgets the pick. **Duplicate Workspace** offers the same list plus *Same Agent*. **Reload Workspace Set** keeps each workspace’s agent. **Reload Workspace Layout** offers *Same Agent* and the roster’s explicit agent choices. Scripted: `cmux rebuild-workspace --agent <id>`.
 
 Files: `WorkspaceSetAgent` / `WorkspaceAgent` in `Sources/WorkspaceSetImporter.swift`, `setWorkspaceAgent` in `Sources/AppDelegate.swift`, `WorkspaceAgentMenu` in `Sources/cmuxApp.swift`, menus in `Sources/ContentView.swift`. The roster is published from `parseFile` and read under a lock, because it is loaded on the main actor but matched against commands and session names from nonisolated code.
 

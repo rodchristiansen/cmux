@@ -423,8 +423,14 @@ struct cmuxApp: App {
                     }
                     Divider()
                     ForEach(WorkspaceAgent.roster) { agent in
-                        Button(agent.panelTitle) {
-                            AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate(agent: agent)
+                        if let action = KeyboardShortcutSettings.Action.allCases.first(where: { $0.reloadWorkspaceAgentID == agent.id }) {
+                            splitCommandButton(title: agent.panelTitle, shortcut: menuShortcut(for: action)) {
+                                AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate(agent: agent)
+                            }
+                        } else {
+                            Button(agent.panelTitle) {
+                                AppDelegate.shared?.rebuildCurrentWorkspaceFromTemplate(agent: agent)
+                            }
                         }
                     }
                 }

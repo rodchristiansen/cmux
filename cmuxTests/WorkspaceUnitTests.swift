@@ -190,6 +190,37 @@ final class WorkspaceRenameShortcutDefaultsTests: XCTestCase {
         )
     }
 
+    func testLayoutAgentShortcutsDoNotConflictWithOtherDefaultsOrNumberedNavigation() {
+        let actions = KeyboardShortcutSettings.Action.allCases.filter { $0.reloadWorkspaceAgentID != nil }
+        XCTAssertEqual(Set(actions.compactMap(\.reloadWorkspaceAgentID)), ["claude-remote", "codex-remote", "claude", "codex"])
+
+        for action in actions {
+            let shortcut = action.defaultShortcut
+            XCTAssertNotNil(shortcut.menuItemKeyEquivalent)
+            for other in KeyboardShortcutSettings.Action.allCases where other != action {
+                XCTAssertNotEqual(shortcut, other.defaultShortcut, "\(action) conflicts with \(other)")
+            }
+            for navigation in [KeyboardShortcutSettings.Action.selectWorkspaceByNumber, .selectSurfaceByNumber] {
+                for digit in 1...9 {
+                    var numbered = navigation.defaultShortcut
+                    numbered.key = String(digit)
+                    XCTAssertNotEqual(shortcut, numbered, "\(action) conflicts with numbered navigation")
+                }
+            }
+        }
+        let pairs: [(KeyboardShortcutSettings.Action, KeyboardShortcutSettings.Action)] = [
+            (.reloadWorkspaceLayoutClaudeRemote, .reloadWorkspaceLayoutClaudeDirect),
+            (.reloadWorkspaceLayoutCodexRemote, .reloadWorkspaceLayoutCodexDirect)
+        ]
+        for (remote, direct) in pairs {
+            var remoteShortcut = remote.defaultShortcut
+            XCTAssertFalse(remoteShortcut.shift)
+            remoteShortcut.shift = true
+            XCTAssertEqual(remoteShortcut, direct.defaultShortcut)
+        }
+        XCTAssertNil(KeyboardShortcutSettings.Action.reloadWorkspaceLayout.reloadWorkspaceAgentID)
+    }
+
     func testShortcutDefaultsKeysRemainUnique() {
         let keys = KeyboardShortcutSettings.Action.allCases.map(\.defaultsKey)
         XCTAssertEqual(Set(keys).count, keys.count)
