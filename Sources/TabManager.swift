@@ -3005,6 +3005,28 @@ class TabManager: ObservableObject {
         return section
     }
 
+    /// Create unselected so the caller can configure the agent and layout before launch.
+    @discardableResult
+    func makeWorkspaceInSection(sectionId: UUID, directory: String, agent: WorkspaceAgent) -> Workspace? {
+        guard let section = sections.first(where: { $0.id == sectionId }) else { return nil }
+        let directory = URL(fileURLWithPath: directory).standardizedFileURL.path
+        let nextInstance = (tabs.filter {
+            URL(fileURLWithPath: $0.currentDirectory).standardizedFileURL.path == directory
+        }.map(\.instanceIndex).max() ?? 0) + 1
+        let workspace = addWorkspace(
+            title: URL(fileURLWithPath: directory).lastPathComponent,
+            workingDirectory: directory,
+            select: false,
+            placementOverride: .end,
+            autoWelcomeIfNeeded: false
+        )
+        workspace.instanceIndex = nextInstance
+        workspace.preferredAgent = agent
+        moveWorkspaceToSection(tabId: workspace.id, sectionId: sectionId)
+        section.setCollapsed(false)
+        return workspace
+    }
+
     func renameSection(sectionId: UUID, name: String) {
         guard let section = sections.first(where: { $0.id == sectionId }) else { return }
         section.name = name

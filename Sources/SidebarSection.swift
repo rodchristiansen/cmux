@@ -53,6 +53,14 @@ final class SidebarSection: Identifiable, ObservableObject {
 /// Computed layout for sidebar rendering. Separates pinned workspaces, ungrouped workspaces,
 /// and section groups into a single structure consumed by VerticalTabsSidebar.
 struct SidebarLayout {
+    static func matchesSearch(workspaceTitle: String, sectionName: String?, query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return [workspaceTitle, sectionName ?? ""].contains {
+            $0.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
     struct SectionGroup {
         let section: SidebarSection
         let workspaces: [Workspace]

@@ -34,6 +34,8 @@ Key commits:
 - `7662ddef`, `6a152541`, `93a9341e` `workspace target:current` + section rename focus races
 - `2f90041e`, `69e64395` PR review feedback
 
+Sidebar search matches section names as well as workspace names; matching sections show all children even when collapsed. Search expansion does not change the saved collapse state. A small **+** menu on each section lists the configured agent roster. Choose an agent, then a folder, to create and select a workspace in that section. The folder picker starts at the selected member’s folder, or the first member’s folder. Cancel leaves the sidebar unchanged. New workspaces remember their chosen agent and receive a distinct lane instance for a reused folder.
+
 Source of truth: `Sources/SidebarSection.swift`, membership persisted via `SessionSidebarSectionSnapshot` in `Sources/SessionPersistence.swift`.
 
 ### Native workspace set (`workspace-set.json`)

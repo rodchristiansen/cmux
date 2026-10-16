@@ -13,6 +13,53 @@ import UserNotifications
 @testable import cmux
 #endif
 
+final class SidebarSectionSearchTests: XCTestCase {
+    func testSectionNameMatchesEveryChildIndependentlyOfWorkspaceName() {
+        XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "API", sectionName: "Projects", query: " projects "))
+        XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "Web", sectionName: "Projects", query: "PROJECTS"))
+        XCTAssertFalse(SidebarLayout.matchesSearch(workspaceTitle: "API", sectionName: "Archive", query: "projects"))
+        XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "API", sectionName: nil, query: "api"))
+        XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "", sectionName: "Résumé", query: "resume"))
+        XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "API", sectionName: nil, query: " "))
+    }
+}
+
+@MainActor
+final class SidebarSectionWorkspaceCreationTests: XCTestCase {
+    func testNewWorkspaceUsesTargetSectionAndChosenAgentBeforeSelection() throws {
+        let manager = TabManager()
+        let target = manager.createSection(name: "Target", triggerRename: false)
+        target.setCollapsed(true)
+        let other = manager.createSection(name: "Other", triggerRename: false)
+        let source = manager.addWorkspace(title: "Source", workingDirectory: "/tmp", autoWelcomeIfNeeded: false)
+        manager.moveWorkspaceToSection(tabId: source.id, sectionId: other.id)
+        let agent = WorkspaceAgent(id: "codex-remote", panelTitle: "Codex (remote)", command: "codex-remote", sessionPrefix: "cx-")
+        let created = try XCTUnwrap(manager.makeWorkspaceInSection(sectionId: target.id, directory: "/tmp", agent: agent))
+        XCTAssertEqual(manager.sectionForWorkspace(created.id)?.id, target.id)
+        XCTAssertEqual(manager.sectionForWorkspace(source.id)?.id, other.id)
+        XCTAssertEqual(created.preferredAgent, agent)
+        XCTAssertGreaterThan(created.instanceIndex, source.instanceIndex)
+        XCTAssertEqual(manager.selectedTabId, source.id)
+        XCTAssertFalse(target.isCollapsed)
+        let count = manager.tabs.count
+        XCTAssertNil(manager.makeWorkspaceInSection(sectionId: UUID(), directory: "/tmp", agent: agent))
+        XCTAssertEqual(manager.tabs.count, count)
+    }
+
+    func testTerminalOnlyTemplatesStillLaunchChosenAgent() {
+        let agent = WorkspaceAgent(id: "codex", panelTitle: "Codex (direct)", command: "codex", sessionPrefix: "cx-")
+        let plan = WorkspaceSetImporter.newWorkspaceTemplate(
+            panels: [WorkspaceSetPanelTemplate(title: "Shell", command: nil)],
+            layout: .pane(WorkspaceSetPaneLayout(panels: ["Shell"], selected: "Shell")), agent: agent
+        )
+        XCTAssertEqual(plan.panels.map(\.title), ["Codex (direct)", "Shell"])
+        XCTAssertEqual(plan.panels.first?.command, "codex")
+        guard let layout = plan.layout, case .split(let split) = layout else { return XCTFail("Expected agent and existing layout") }
+        guard case .pane(let pane) = split.first else { return XCTFail("Expected agent pane") }
+        XCTAssertEqual(pane.panels, ["Codex (direct)"])
+    }
+}
+
 final class SidebarActiveForegroundColorTests: XCTestCase {
     func testLightAppearanceUsesBlackWithRequestedOpacity() {
         guard let lightAppearance = NSAppearance(named: .aqua),
