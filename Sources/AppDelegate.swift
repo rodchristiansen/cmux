@@ -7444,6 +7444,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         _ = createMainWindow()
     }
 
+    func showNewWorkspaceInSectionPanel(
+        sectionId: UUID,
+        in tabManager: TabManager,
+        agent: WorkspaceAgent,
+        completion: @escaping (Workspace) -> Void
+    ) {
+        // Allow the agent menu to close before presenting a native folder sheet.
+        DispatchQueue.main.async { [weak self, weak tabManager] in
+            guard let self, let tabManager,
+                  let section = tabManager.sections.first(where: { $0.id == sectionId }) else { return }
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.title = String(localized: "sidebar.section.newWorkspace", defaultValue: "New Workspace in Section")
+            panel.prompt = String(localized: "sidebar.section.createWorkspace", defaultValue: "Create Workspace")
+            let seed = tabManager.selectedWorkspace.flatMap { section.contains($0.id) ? $0 : nil }
+                ?? section.workspaceIds.compactMap { id in tabManager.tabs.first { $0.id == id } }.first
+            if let directory = seed?.currentDirectory, !directory.isEmpty {
+                panel.directoryURL = URL(fileURLWithPath: directory)
+            }
+            let finish: (NSApplication.ModalResponse) -> Void = { [weak self, weak tabManager] response in
+                guard response == .OK, let directory = panel.url?.path,
+                      let self, let tabManager,
+                      let workspace = tabManager.makeWorkspaceInSection(
+                        sectionId: sectionId, directory: directory, agent: agent
+                      ) else { return }
+                WorkspaceSetImporter.initializeNewWorkspace(workspace, agent: agent)
+                self.workspaceSetReconciledIds.insert(workspace.id)
+                tabManager.selectedTabId = workspace.id
+                NotificationCenter.default.post(name: .ghosttyDidFocusTab, object: nil,
+                    userInfo: [GhosttyNotificationKey.tabId: workspace.id])
+                completion(workspace)
+            }
+            if let window = self.mainWindowContexts.values.first(where: { $0.tabManager === tabManager })?.window {
+                panel.beginSheetModal(for: window, completionHandler: finish)
+            } else {
+                finish(panel.runModal())
+            }
+        }
+    }
+
     /// Shows the "Open Folder" panel and creates a workspace for the selected directory.
     /// Called from both the SwiftUI menu and `handleCustomShortcut`.
     func showOpenFolderPanel() {

@@ -632,6 +632,40 @@ enum WorkspaceSetImporter {
         return templates.count
     }
 
+    static func initializeNewWorkspace(_ workspace: Workspace, agent: WorkspaceAgent) {
+        workspace.preferredAgent = agent
+        let file = try? parseFile(at: defaultPath)
+        let entry = file.flatMap { findEntry(for: workspace, in: $0) }
+        let panels = file.flatMap { file in entry.map { effectivePanels(for: $0, file: file) } ?? file.defaultPanels } ?? []
+        let layout = file.flatMap { file in entry.map { effectiveLayout(for: $0, file: file) } ?? file.defaultLayout }
+        let template = newWorkspaceTemplate(panels: panels, layout: layout, agent: agent)
+        applyFullTemplate(to: workspace, panels: template.panels, layout: template.layout)
+    }
+
+    nonisolated static func newWorkspaceTemplate(
+        panels: [WorkspaceSetPanelTemplate], layout: WorkspaceSetLayoutNode?, agent: WorkspaceAgent
+    ) -> (panels: [WorkspaceSetPanelTemplate], layout: WorkspaceSetLayoutNode?) {
+        if panels.contains(where: { $0.command.flatMap { agentSwappedCommand($0, to: agent) } != nil }) {
+            return retargeted(panels: panels, layout: layout, to: agent)
+        }
+        // A section may contain terminal-only templates. An explicit agent pick
+        // must still launch that agent, while keeping the template's other panes.
+        var title = agent.panelTitle
+        var suffix = 2
+        while panels.contains(where: { $0.title.caseInsensitiveCompare(title) == .orderedSame }) {
+            title = "\(agent.panelTitle) (\(suffix))"
+            suffix += 1
+        }
+        let agentPanel = WorkspaceSetPanelTemplate(title: title, command: agent.command)
+        let resolvedLayout = layout.map {
+            WorkspaceSetLayoutNode.split(WorkspaceSetSplitLayout(
+                orientation: "vertical", dividerPosition: 0.7,
+                first: .pane(WorkspaceSetPaneLayout(panels: [title], selected: title)), second: $0
+            ))
+        }
+        return ([agentPanel] + panels, resolvedLayout)
+    }
+
     /// The agent to build a workspace's panes with: an explicit pick if the caller
     /// made one, otherwise whatever this workspace remembers, otherwise nil for the
     /// template's own agent. An explicit pick is recorded, so it survives the next

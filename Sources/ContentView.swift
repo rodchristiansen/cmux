@@ -10180,8 +10180,11 @@ struct VerticalTabsSidebar: View {
     }
 
     private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
-        if query.isEmpty { return true }
-        return workspace.title.range(of: query, options: .caseInsensitive) != nil
+        SidebarLayout.matchesSearch(
+            workspaceTitle: workspace.title,
+            sectionName: tabManager.sectionForWorkspace(workspace.id)?.name,
+            query: query
+        )
     }
 
     private var isSidebarSearching: Bool {
@@ -10301,7 +10304,10 @@ struct VerticalTabsSidebar: View {
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
             let filtered = workspacesMatchingFilter(group.workspaces)
-            if hasSidebarFilter && filtered.isEmpty { return nil }
+            let sectionMatches = isSidebarSearching && SidebarLayout.matchesSearch(
+                workspaceTitle: "", sectionName: group.section.name, query: sidebarSearchText
+            )
+            if (hasSidebarFilter || isSidebarSearching) && filtered.isEmpty && !sectionMatches { return nil }
             return SidebarLayout.SectionGroup(section: group.section, workspaces: filtered)
         }
         // Sorting by activity flattens the sidebar: pinned, ungrouped and every
@@ -10470,7 +10476,20 @@ struct VerticalTabsSidebar: View {
                                             section: group.section,
                                             tabManager: tabManager,
                                             workspaceCount: group.workspaces.count,
-                                            isForcedExpanded: isSidebarSearching
+                                            isForcedExpanded: isSidebarSearching,
+                                            onNewWorkspace: { agent in
+                                                AppDelegate.shared?.showNewWorkspaceInSectionPanel(
+                                                    sectionId: group.section.id, in: tabManager, agent: agent
+                                                ) { workspace in
+                                                    sidebarSearchText = ""
+                                                    sidebarFilterActive = false
+                                                    sidebarFilterRunning = false
+                                                    sidebarFilterIdle = false
+                                                    selectedTabIds = [workspace.id]
+                                                    lastSidebarSelectionIndex = tabManager.tabs.firstIndex { $0.id == workspace.id }
+                                                    selection = .tabs
+                                                }
+                                            }
                                         )
 
                                         // A search shows every match, so it opens
@@ -12966,6 +12985,7 @@ private struct SidebarSectionHeaderView: View {
     let tabManager: TabManager
     let workspaceCount: Int
     var isForcedExpanded = false
+    let onNewWorkspace: (WorkspaceAgent) -> Void
     @State private var isEditing = false
     @State private var editedName = ""
     @FocusState private var isTextFieldFocused: Bool
@@ -12974,6 +12994,98 @@ private struct SidebarSectionHeaderView: View {
     private var isShownCollapsed: Bool { section.isCollapsed && !isForcedExpanded }
 
     var body: some View {
+        HStack(spacing: 4) {
+            sectionDisclosure
+            Menu {
+                ForEach(WorkspaceAgent.roster) { agent in
+                    Button(agent.panelTitle) { onNewWorkspace(agent) }
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(String(localized: "sidebar.section.newWorkspace", defaultValue: "New Workspace in Section"))
+            .accessibilityLabel(String(localized: "sidebar.section.newWorkspace", defaultValue: "New Workspace in Section"))
+            .accessibilityIdentifier("sectionNewWorkspace.\(section.id.uuidString)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .onReceive(tabManager.$pendingRenameSectionId) { pendingId in
+            guard pendingId == section.id else { return }
+            tabManager.pendingRenameSectionId = nil
+            editedName = section.name
+            isEditing = true
+        }
+        .contextMenu {
+            Button(section.isCollapsed
+                ? String(localized: "contextMenu.expandSection", defaultValue: "Expand Section")
+                : String(localized: "contextMenu.collapseSection", defaultValue: "Collapse Section")
+            ) {
+                section.toggleCollapsed()
+            }
+
+            Button(String(localized: "contextMenu.renameSection", defaultValue: "Rename Section…")) {
+                editedName = section.name
+                isEditing = true
+            }
+
+            Divider()
+
+            Button(String(localized: "contextMenu.moveSectionUp", defaultValue: "Move Section Up")) {
+                guard let idx = tabManager.sections.firstIndex(where: { $0.id == section.id }), idx > 0 else { return }
+                tabManager.reorderSection(sectionId: section.id, toIndex: idx - 1)
+            }
+            .disabled(tabManager.sections.first?.id == section.id)
+
+            Button(String(localized: "contextMenu.moveSectionDown", defaultValue: "Move Section Down")) {
+                guard let idx = tabManager.sections.firstIndex(where: { $0.id == section.id }),
+                      idx < tabManager.sections.count - 1 else { return }
+                tabManager.reorderSection(sectionId: section.id, toIndex: idx + 1)
+            }
+            .disabled(tabManager.sections.last?.id == section.id)
+
+            Divider()
+
+            Button(String(localized: "contextMenu.deleteSection", defaultValue: "Delete Section"), role: .destructive) {
+                tabManager.deleteSection(sectionId: section.id)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .onDrop(of: SidebarTabDragPayload.dropContentTypes, isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            provider.loadDataRepresentation(forTypeIdentifier: SidebarTabDragPayload.typeIdentifier) { data, _ in
+                guard let data, let str = String(data: data, encoding: .utf8) else { return }
+                let prefix = "cmux.sidebar-tab."
+                guard str.hasPrefix(prefix),
+                      let tabId = UUID(uuidString: String(str.dropFirst(prefix.count))) else { return }
+                Task { @MainActor in
+                    tabManager.moveWorkspaceToSection(tabId: tabId, sectionId: section.id)
+                }
+            }
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private var sectionDisclosure: some View {
+        if isEditing {
+            sectionDisclosureLabel
+        } else {
+            Button { section.toggleCollapsed() } label: { sectionDisclosureLabel }
+                .buttonStyle(.plain)
+                .accessibilityLabel(section.name)
+                .accessibilityHint(isShownCollapsed
+                    ? String(localized: "accessibility.sectionCollapsed", defaultValue: "Collapsed. Double-tap to expand.")
+                    : String(localized: "accessibility.sectionExpanded", defaultValue: "Expanded. Double-tap to collapse."))
+        }
+    }
+
+    private var sectionDisclosureLabel: some View {
         HStack(spacing: 4) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
@@ -13021,72 +13133,7 @@ private struct SidebarSectionHeaderView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .onTapGesture {
-            guard !isEditing else { return }
-            section.toggleCollapsed()
-        }
-        .onReceive(tabManager.$pendingRenameSectionId) { pendingId in
-            guard pendingId == section.id else { return }
-            tabManager.pendingRenameSectionId = nil
-            editedName = section.name
-            isEditing = true
-        }
-        .contextMenu {
-            Button(section.isCollapsed
-                ? String(localized: "contextMenu.expandSection", defaultValue: "Expand Section")
-                : String(localized: "contextMenu.collapseSection", defaultValue: "Collapse Section")
-            ) {
-                section.toggleCollapsed()
-            }
-
-            Button(String(localized: "contextMenu.renameSection", defaultValue: "Rename Section…")) {
-                editedName = section.name
-                isEditing = true
-            }
-
-            Divider()
-
-            Button(String(localized: "contextMenu.moveSectionUp", defaultValue: "Move Section Up")) {
-                guard let idx = tabManager.sections.firstIndex(where: { $0.id == section.id }), idx > 0 else { return }
-                tabManager.reorderSection(sectionId: section.id, toIndex: idx - 1)
-            }
-            .disabled(tabManager.sections.first?.id == section.id)
-
-            Button(String(localized: "contextMenu.moveSectionDown", defaultValue: "Move Section Down")) {
-                guard let idx = tabManager.sections.firstIndex(where: { $0.id == section.id }),
-                      idx < tabManager.sections.count - 1 else { return }
-                tabManager.reorderSection(sectionId: section.id, toIndex: idx + 1)
-            }
-            .disabled(tabManager.sections.last?.id == section.id)
-
-            Divider()
-
-            Button(String(localized: "contextMenu.deleteSection", defaultValue: "Delete Section"), role: .destructive) {
-                tabManager.deleteSection(sectionId: section.id)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(section.name)
-        .accessibilityHint(section.isCollapsed
-            ? String(localized: "accessibility.sectionCollapsed", defaultValue: "Collapsed. Double-tap to expand.")
-            : String(localized: "accessibility.sectionExpanded", defaultValue: "Expanded. Double-tap to collapse."))
-        .accessibilityAddTraits(.isButton)
-        .onDrop(of: SidebarTabDragPayload.dropContentTypes, isTargeted: nil) { providers in
-            guard let provider = providers.first else { return false }
-            provider.loadDataRepresentation(forTypeIdentifier: SidebarTabDragPayload.typeIdentifier) { data, _ in
-                guard let data, let str = String(data: data, encoding: .utf8) else { return }
-                let prefix = "cmux.sidebar-tab."
-                guard str.hasPrefix(prefix),
-                      let tabId = UUID(uuidString: String(str.dropFirst(prefix.count))) else { return }
-                Task { @MainActor in
-                    tabManager.moveWorkspaceToSection(tabId: tabId, sectionId: section.id)
-                }
-            }
-            return true
-        }
     }
 
     private func commitRename() {
