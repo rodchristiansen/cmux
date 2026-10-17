@@ -32,6 +32,15 @@ enum TmuxSessionReaper {
 
     /// Names of every session on the current user's tmux server.
     /// Empty when tmux is absent or no server is running — both are normal.
+    /// PID of the first pane's process in one session, or nil when it has none.
+    static func panePID(of session: String) -> Int32? {
+        guard let tmuxPath, !session.isEmpty,
+              let output = run(tmuxPath, ["list-panes", "-t", "=\(session)", "-F", "#{pane_pid}"]) else {
+            return nil
+        }
+        return output.split(separator: "\n").first.flatMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
     static func liveSessions() -> [String] {
         guard let tmuxPath else { return [] }
         guard let output = run(tmuxPath, ["list-sessions", "-F", "#{session_name}"]) else {
@@ -196,7 +205,12 @@ enum TmuxSessionReaper {
         let current = sessionName(directory: directory, title: title,
                                   instanceIndex: instanceIndex, agent: agent)
         let legacy = sessionName(directory: directory, instanceIndex: instanceIndex, agent: agent)
-        return [current, legacy].reduce(into: [String]()) { names, name in
+        // When two rows share a directory basename (AzDevOps/Cloud/Pulse and
+        // emilycarru-its-infra/pulse), `cmux-lane-session` names the lane from the
+        // title even though the title ends in the basename.
+        let titled = laneSlug(title)
+        let shared = titled.isEmpty ? "" : agent.sessionPrefix + titled
+        return [current, legacy, shared].reduce(into: [String]()) { names, name in
             if !name.isEmpty, !names.contains(name) { names.append(name) }
         }
     }

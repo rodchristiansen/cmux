@@ -288,6 +288,17 @@ final class TmuxLaneNameTests: XCTestCase {
             ["stale"]
         )
     }
+
+    /// A row whose title ends in a basename another row shares gets a lane named
+    /// from the whole title, so that name belongs to the row as well.
+    func testCandidatesIncludeTitledNameForSharedBasename() {
+        let candidates = TmuxSessionReaper.sessionNames(
+            directory: "/Users/rod/Developer/AzDevOps/Cloud/Pulse", title: "AzDevOps · Cloud · Pulse",
+            instanceIndex: 1, agent: .claude
+        )
+        XCTAssertTrue(candidates.contains("azdevops-cloud-pulse"))
+        XCTAssertEqual(candidates.first, "pulse")
+    }
 }
 
 // MARK: - Bounded subprocess runs
