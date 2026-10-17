@@ -10187,24 +10187,23 @@ struct VerticalTabsSidebar: View {
         )
     }
 
+    private func workspacesMatchingSearch(_ workspaces: [Workspace]) -> [Workspace] {
+        let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else { return workspaces }
+        return workspaces.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
+    }
+
     private var isSidebarSearching: Bool {
         !sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func workspacesMatchingFilter(_ workspaces: [Workspace]) -> [Workspace] {
-        let trimmedSearch = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A non-empty search query overrides the Active mode filter: typing
-        // into the search field always spans every workspace so the user can
-        // jump to anything by name without first toggling Active off. When
-        // the query is empty, the Active toggle resumes its usual role.
-        if !trimmedSearch.isEmpty {
-            return workspaces.filter { workspaceMatchesSearch($0, query: trimmedSearch) }
-        }
-        // Chips combine as an intersection: a workspace shows only when it
-        // matches every chip that is on. Running and Idle never overlap, so
-        // turning one on turns the other off.
-        guard hasSidebarFilter else { return workspaces }
-        return workspaces.filter { workspace in
+        // The search query and the chips combine as an intersection: a
+        // workspace shows only when it matches the query and every chip that
+        // is on, so a search can be narrowed to its running or idle matches.
+        let matches = workspacesMatchingSearch(workspaces)
+        guard hasSidebarFilter else { return matches }
+        return matches.filter { workspace in
             (!sidebarFilterActive || workspaceHasAgentSession(workspace)) &&
                 (!sidebarFilterRunning || workspaceHasRunningAgent(workspace)) &&
                 (!sidebarFilterIdle || workspaceHasIdleAgent(workspace))
@@ -10300,11 +10299,17 @@ struct VerticalTabsSidebar: View {
         let activeWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
         let runningWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasRunningAgent($1) ? 1 : 0) }
         let idleWorkspaceCount = tabs.reduce(0) { $0 + (workspaceHasIdleAgent($1) ? 1 : 0) }
+        // The chips count only the search matches, so they say how many of
+        // the matches each chip would leave.
+        let searchMatches = workspacesMatchingSearch(tabs)
+        let activeMatchCount = searchMatches.reduce(0) { $0 + (workspaceHasAgentSession($1) ? 1 : 0) }
+        let runningMatchCount = searchMatches.reduce(0) { $0 + (workspaceHasRunningAgent($1) ? 1 : 0) }
+        let idleMatchCount = searchMatches.reduce(0) { $0 + (workspaceHasIdleAgent($1) ? 1 : 0) }
         let filteredPinnedWorkspaces = workspacesMatchingFilter(layout.pinnedWorkspaces)
         let filteredUngroupedWorkspaces = workspacesMatchingFilter(layout.ungroupedWorkspaces)
         let filteredSectionGroups: [SidebarLayout.SectionGroup] = layout.sectionGroups.compactMap { group in
             let filtered = workspacesMatchingFilter(group.workspaces)
-            let sectionMatches = isSidebarSearching && SidebarLayout.matchesSearch(
+            let sectionMatches = isSidebarSearching && !hasSidebarFilter && SidebarLayout.matchesSearch(
                 workspaceTitle: "", sectionName: group.section.name, query: sidebarSearchText
             )
             if (hasSidebarFilter || isSidebarSearching) && filtered.isEmpty && !sectionMatches { return nil }
@@ -10347,28 +10352,25 @@ struct VerticalTabsSidebar: View {
                     isActiveOn: sidebarFilterActive,
                     isRunningOn: sidebarFilterRunning,
                     isIdleOn: sidebarFilterIdle,
-                    activeCount: activeWorkspaceCount,
-                    runningCount: runningWorkspaceCount,
-                    idleCount: idleWorkspaceCount,
+                    activeCount: activeMatchCount,
+                    runningCount: runningMatchCount,
+                    idleCount: idleMatchCount,
                     sortMode: sidebarSortMode,
                     setSortMode: { sidebarSortModeRaw = $0.rawValue },
-                    // Clicking a chip clears the search field so the toggle's
-                    // intent isn't masked by a stale query. The search override
-                    // in `workspacesMatchingFilter` would otherwise make the
-                    // click look like a no-op while a query is set.
+                    // Chips keep the search query, so they narrow its matches.
+                    // Only one chip is on at a time: Active already covers
+                    // Running and Idle, and those two never overlap.
                     toggleActive: {
-                        sidebarSearchText = ""
                         sidebarFilterActive.toggle()
+                        if sidebarFilterActive { sidebarFilterRunning = false; sidebarFilterIdle = false }
                     },
                     toggleRunning: {
-                        sidebarSearchText = ""
                         sidebarFilterRunning.toggle()
-                        if sidebarFilterRunning { sidebarFilterIdle = false }
+                        if sidebarFilterRunning { sidebarFilterActive = false; sidebarFilterIdle = false }
                     },
                     toggleIdle: {
-                        sidebarSearchText = ""
                         sidebarFilterIdle.toggle()
-                        if sidebarFilterIdle { sidebarFilterRunning = false }
+                        if sidebarFilterIdle { sidebarFilterActive = false; sidebarFilterRunning = false }
                     },
                     searchText: $sidebarSearchText
                 )
@@ -10651,7 +10653,9 @@ private struct SidebarFilterBar: View {
                 iconSize: 10,
                 count: activeCount,
                 isActive: isActiveOn,
-                isDisabled: activeCount == 0,
+                // A chip that is on stays clickable so it can be turned off
+                // even when the search leaves it no matches.
+                isDisabled: activeCount == 0 && !isActiveOn,
                 activeColor: .green,
                 tooltipActive: String(localized: "sidebar.filter.active.turnOff",
                                       defaultValue: "Stop filtering to workspaces with an agent session"),
@@ -10666,7 +10670,7 @@ private struct SidebarFilterBar: View {
                 icon: "bolt.fill",
                 count: runningCount,
                 isActive: isRunningOn,
-                isDisabled: runningCount == 0,
+                isDisabled: runningCount == 0 && !isRunningOn,
                 activeColor: .accentColor,
                 tooltipActive: String(localized: "sidebar.filter.running.turnOff",
                                       defaultValue: "Stop filtering to running agents"),
@@ -10681,7 +10685,7 @@ private struct SidebarFilterBar: View {
                 icon: "pause.fill",
                 count: idleCount,
                 isActive: isIdleOn,
-                isDisabled: idleCount == 0,
+                isDisabled: idleCount == 0 && !isIdleOn,
                 activeColor: .accentColor,
                 tooltipActive: String(localized: "sidebar.filter.idle.turnOff",
                                       defaultValue: "Stop filtering to agents waiting on you"),
