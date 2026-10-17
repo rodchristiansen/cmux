@@ -5607,6 +5607,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 continue
             }
             workspace.ownedTmuxSessions.insert(session)
+            // The pane only runs its wrapper once the workspace is shown, so until
+            // then nothing registers the agent and the row drops out of Active.
+            // The lane's own process stands in for it.
+            if let pid = TmuxSessionReaper.panePID(of: session), pid > 0 {
+                let key = WorkspaceAgent.family(ofCommand: agent.command) == "codex" ? "codex" : "claude_code"
+                workspace.agentPIDs[key] = pid
+            }
             workspaceSetReconciledIds.insert(workspace.id)
             recovered.append(session)
         }
