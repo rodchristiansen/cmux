@@ -10116,6 +10116,18 @@ struct VerticalTabsSidebar: View {
         if sidebarFilterIdle && idle == 0 { sidebarFilterIdle = false }
     }
 
+    /// A search that the on chip filters down to nothing turns the chip off,
+    /// so the matches show without another click. A search with no matches at
+    /// all keeps the chip, since turning it off would show nothing either.
+    private func clearSidebarFilterIfSearchHidesAll() {
+        guard isSidebarSearching, hasSidebarFilter else { return }
+        let matches = workspacesMatchingSearch(tabManager.tabs)
+        guard !matches.isEmpty, workspacesMatchingFilter(matches).isEmpty else { return }
+        sidebarFilterActive = false
+        sidebarFilterRunning = false
+        sidebarFilterIdle = false
+    }
+
     /// Space at top of sidebar for traffic light buttons. In fullscreen the
     /// system menu bar + window controls slide down as an overlay when the
     /// cursor reaches the top; reserve enough room here so the filter/search
@@ -10394,6 +10406,9 @@ struct VerticalTabsSidebar: View {
                 }
                 .onChange(of: idleWorkspaceCount) { _ in
                     autoClearSidebarFilterIfEmpty(active: activeWorkspaceCount, running: runningWorkspaceCount, idle: idleWorkspaceCount)
+                }
+                .onChange(of: sidebarSearchText) { _ in
+                    clearSidebarFilterIfSearchHidesAll()
                 }
                 .onReceive(
                     tabManager.workspaceStatusEntriesPublisher
