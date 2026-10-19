@@ -10194,6 +10194,7 @@ struct VerticalTabsSidebar: View {
     private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
         SidebarLayout.matchesSearch(
             workspaceTitle: workspace.title,
+            workspaceDescription: workspace.customDescription,
             sectionName: tabManager.sectionForWorkspace(workspace.id)?.name,
             query: query
         )

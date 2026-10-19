@@ -21,6 +21,15 @@ final class SidebarSectionSearchTests: XCTestCase {
         XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "API", sectionName: nil, query: "api"))
         XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "", sectionName: "Résumé", query: "resume"))
         XCTAssertTrue(SidebarLayout.matchesSearch(workspaceTitle: "API", sectionName: nil, query: " "))
+        XCTAssertTrue(SidebarLayout.matchesSearch(
+            workspaceTitle: "AzDevOps · Devices · ReportMate",
+            workspaceDescription: "Public GitHub Issues Fixes",
+            sectionName: "AzDevOps",
+            query: "public"
+        ))
+        XCTAssertFalse(SidebarLayout.matchesSearch(
+            workspaceTitle: "API", workspaceDescription: nil, sectionName: nil, query: "public"
+        ))
     }
 }
 
