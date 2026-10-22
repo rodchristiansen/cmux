@@ -7393,6 +7393,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
     }
 
+    /// Collapse or expand every sidebar section in the active main window.
+    @discardableResult
+    func setAllSectionsCollapsedInActiveMainWindow(_ collapsed: Bool, preferredWindow: NSWindow? = nil) -> Bool {
+        guard let manager = synchronizeActiveMainWindowContext(
+            preferredWindow: preferredWindow ?? NSApp.keyWindow ?? NSApp.mainWindow
+        ) else { return false }
+        manager.setAllSectionsCollapsed(collapsed)
+        return true
+    }
+
     @discardableResult
     func toggleSidebarInActiveMainWindow() -> Bool {
         if let activeManager = tabManager,
@@ -11999,6 +12009,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if matchConfiguredShortcut(event: event, action: .toggleSidebar) {
             _ = toggleSidebarInActiveMainWindow()
             return true
+        }
+
+        if matchConfiguredShortcut(event: event, action: .collapseAllSections) {
+            return setAllSectionsCollapsedInActiveMainWindow(true, preferredWindow: mainWindowForShortcutEvent(event))
+        }
+
+        if matchConfiguredShortcut(event: event, action: .expandAllSections) {
+            return setAllSectionsCollapsedInActiveMainWindow(false, preferredWindow: mainWindowForShortcutEvent(event))
         }
 
         if matchConfiguredShortcut(event: event, action: .newTab) {

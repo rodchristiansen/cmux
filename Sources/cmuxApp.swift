@@ -758,6 +758,16 @@ struct cmuxApp: App {
                     }
                 }
 
+                splitCommandButton(title: String(localized: "menu.view.collapseAllSections", defaultValue: "Collapse All Sections"), shortcut: menuShortcut(for: .collapseAllSections)) {
+                    activeTabManager.setAllSectionsCollapsed(true)
+                }
+                .disabled(!activeTabManager.canCollapseAllSections)
+
+                splitCommandButton(title: String(localized: "menu.view.expandAllSections", defaultValue: "Expand All Sections"), shortcut: menuShortcut(for: .expandAllSections)) {
+                    activeTabManager.setAllSectionsCollapsed(false)
+                }
+                .disabled(!activeTabManager.canExpandAllSections)
+
                 Divider()
 
                 splitCommandButton(title: String(localized: "menu.view.nextSurface", defaultValue: "Next Surface"), shortcut: menuShortcut(for: .nextSurface)) {

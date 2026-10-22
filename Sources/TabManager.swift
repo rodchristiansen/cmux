@@ -3090,6 +3090,25 @@ class TabManager: ObservableObject {
         return workspace
     }
 
+    /// True when at least one sidebar section is expanded.
+    var canCollapseAllSections: Bool { sections.contains { !$0.isCollapsed } }
+
+    /// True when at least one sidebar section is collapsed.
+    var canExpandAllSections: Bool { sections.contains { $0.isCollapsed } }
+
+    /// Collapse or expand every sidebar section, through the same path as a
+    /// header click so the state is saved with the session. Returns how many
+    /// sections changed.
+    @discardableResult
+    func setAllSectionsCollapsed(_ collapsed: Bool) -> Int {
+        var changed = 0
+        for section in sections where section.isCollapsed != collapsed {
+            section.setCollapsed(collapsed)
+            changed += 1
+        }
+        return changed
+    }
+
     func renameSection(sectionId: UUID, name: String) {
         guard let section = sections.first(where: { $0.id == sectionId }) else { return }
         section.name = name
