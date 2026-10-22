@@ -6670,7 +6670,16 @@ final class Workspace: Identifiable, ObservableObject {
     private var panelShellActivityStates: [UUID: PanelShellActivityState] = [:]
     /// PIDs associated with agent status entries (e.g. claude_code), keyed by status key.
     /// Used for stale-session detection: if the PID is dead, the status entry is cleared.
-    var agentPIDs: [String: pid_t] = [:]
+    var agentPIDs: [String: pid_t] = [:] {
+        didSet {
+            // The sidebar's Active filter reads this map. Lane wrappers register
+            // a PID with no status entry, so when that agent exits the sweep's
+            // removal is the only change, and without this signal the row stayed
+            // in Active until something else redrew the sidebar.
+            if agentPIDs != oldValue { agentPIDsDidChange.send() }
+        }
+    }
+    let agentPIDsDidChange = PassthroughSubject<Void, Never>()
 
     /// Name of a tmux session this workspace owns, registered by the launcher script
     /// (see `cmux set-tmux-session`). When set, deliberately closing the workspace also

@@ -773,9 +773,14 @@ class TabManager: ObservableObject {
     }
     /// Fires when any workspace's status pills change, so sidebar filters
     /// and sorts that read agent status re-evaluate.
+    /// Fires when any workspace's status pills or agent PIDs change, so the
+    /// sidebar's Active, Running and Idle chips re-evaluate.
     lazy var workspaceStatusEntriesPublisher: AnyPublisher<Void, Never> = $tabs
         .map { tabs in
-            Publishers.MergeMany(tabs.map { $0.$statusEntries.dropFirst().map { _ in () } })
+            Publishers.MergeMany(tabs.flatMap { tab in [
+                tab.$statusEntries.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+                tab.agentPIDsDidChange.eraseToAnyPublisher(),
+            ] })
         }
         .switchToLatest()
         .eraseToAnyPublisher()
@@ -990,7 +995,9 @@ class TabManager: ObservableObject {
     /// This is the safety net for cases where no hook fires (e.g. SIGKILL).
     private func startAgentPIDSweepTimer() {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 30, repeating: 30)
+        // kill(pid, 0) per workspace is cheap, and this is how soon an exited
+        // agent's row leaves the Active filter.
+        timer.schedule(deadline: .now() + 5, repeating: 5)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             DispatchQueue.main.async { [weak self] in

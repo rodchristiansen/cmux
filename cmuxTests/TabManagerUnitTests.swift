@@ -6,6 +6,7 @@ import WebKit
 import ObjectiveC.runtime
 import Bonsplit
 import UserNotifications
+import Combine
 
 #if canImport(cmux_DEV)
 @testable import cmux_DEV
@@ -277,6 +278,22 @@ final class TabManagerChildExitCloseTests: XCTestCase {
     }
 }
 
+
+@MainActor
+final class WorkspaceAgentPIDSignalTests: XCTestCase {
+    func testAgentPIDChangesSignalTheSidebarOnlyWhenTheMapChanges() {
+        let workspace = Workspace()
+        var fired = 0
+        let subscription = workspace.agentPIDsDidChange.sink { fired += 1 }
+        defer { subscription.cancel() }
+
+        workspace.agentPIDs["claude"] = 4242
+        workspace.agentPIDs["claude"] = 4242
+        workspace.agentPIDs.removeValue(forKey: "claude")
+
+        XCTAssertEqual(fired, 2)
+    }
+}
 
 @MainActor
 final class TabManagerWorkspaceOwnershipTests: XCTestCase {
