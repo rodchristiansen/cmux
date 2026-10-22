@@ -94,6 +94,24 @@ final class SidebarSectionWorkspaceCreationTests: XCTestCase {
         XCTAssertEqual(manager.setAllSectionsCollapsed(false), 0)
     }
 
+    func testCollapseOtherSectionsFocusesOneSection() {
+        let manager = TabManager()
+        let first = manager.createSection(name: "First", triggerRename: false)
+        let second = manager.createSection(name: "Second", triggerRename: false)
+        let third = manager.createSection(name: "Third", triggerRename: false)
+        second.setCollapsed(true)
+        XCTAssertTrue(manager.canCollapseOtherSections(than: second.id))
+
+        XCTAssertEqual(manager.collapseOtherSections(than: second.id), 3)
+        XCTAssertTrue(first.isCollapsed)
+        XCTAssertFalse(second.isCollapsed)
+        XCTAssertTrue(third.isCollapsed)
+        XCTAssertFalse(manager.canCollapseOtherSections(than: second.id))
+        XCTAssertEqual(manager.collapseOtherSections(than: second.id), 0)
+        XCTAssertEqual(manager.collapseOtherSections(than: UUID()), 0)
+        XCTAssertFalse(second.isCollapsed)
+    }
+
     func testCollapseAndExpandAllShortcutsDoNotCollide() {
         let collapse = KeyboardShortcutSettings.Action.collapseAllSections.defaultShortcut
         let expand = KeyboardShortcutSettings.Action.expandAllSections.defaultShortcut

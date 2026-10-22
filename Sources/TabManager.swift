@@ -3172,6 +3172,28 @@ class TabManager: ObservableObject {
         return changed
     }
 
+    /// True when focusing on this section would change anything: it is
+    /// collapsed, or another section is expanded.
+    func canCollapseOtherSections(than sectionId: UUID) -> Bool {
+        sections.contains { $0.id == sectionId ? $0.isCollapsed : !$0.isCollapsed }
+    }
+
+    /// Expand one section and collapse every other, through the same path as a
+    /// header click. Returns how many sections changed.
+    @discardableResult
+    func collapseOtherSections(than sectionId: UUID) -> Int {
+        guard sections.contains(where: { $0.id == sectionId }) else { return 0 }
+        var changed = 0
+        for section in sections {
+            let collapsed = section.id != sectionId
+            if section.isCollapsed != collapsed {
+                section.setCollapsed(collapsed)
+                changed += 1
+            }
+        }
+        return changed
+    }
+
     func renameSection(sectionId: UUID, name: String) {
         guard let section = sections.first(where: { $0.id == sectionId }) else { return }
         section.name = name
