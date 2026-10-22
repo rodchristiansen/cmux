@@ -13046,6 +13046,23 @@ private struct SidebarSectionHeaderView: View {
                 section.toggleCollapsed()
             }
 
+            Button(String(localized: "contextMenu.collapseOtherSections", defaultValue: "Collapse Other Sections")) {
+                tabManager.collapseOtherSections(than: section.id)
+            }
+            .disabled(!tabManager.canCollapseOtherSections(than: section.id))
+
+            Button(String(localized: "contextMenu.collapseAllSections", defaultValue: "Collapse All Sections")) {
+                tabManager.setAllSectionsCollapsed(true)
+            }
+            .disabled(!tabManager.canCollapseAllSections)
+
+            Button(String(localized: "contextMenu.expandAllSections", defaultValue: "Expand All Sections")) {
+                tabManager.setAllSectionsCollapsed(false)
+            }
+            .disabled(!tabManager.canExpandAllSections)
+
+            Divider()
+
             Button(String(localized: "contextMenu.renameSection", defaultValue: "Rename Section…")) {
                 editedName = section.name
                 isEditing = true

@@ -88043,6 +88043,57 @@
         }
       }
     },
+    "contextMenu.collapseOtherSections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse Other Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "他のセクションを折りたたむ"
+          }
+        }
+      }
+    },
+    "contextMenu.collapseAllSections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse All Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのセクションを折りたたむ"
+          }
+        }
+      }
+    },
+    "contextMenu.expandAllSections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand All Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのセクションを展開"
+          }
+        }
+      }
+    },
     "shortcut.collapseAllSections.label": {
       "extractionState": "manual",
       "localizations": {
