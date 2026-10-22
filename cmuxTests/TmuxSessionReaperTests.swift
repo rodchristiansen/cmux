@@ -325,3 +325,31 @@ final class TmuxSessionReaperRunTests: XCTestCase {
     }
 
 }
+
+final class DetachedLaneParsingTests: XCTestCase {
+    func testParsesSessionStatesAndSkipsMalformedRows() {
+        let output = "cimian-2\t0\t37184\t2.1.304\ncx-vantage-4\t1\t812\tcodex\nbroken\n\t0\t1\tzsh\n"
+        let states = TmuxSessionReaper.parseSessionStates(output)
+        XCTAssertEqual(states, [
+            .init(session: "cimian-2", attached: false, panePID: 37184, command: "2.1.304"),
+            .init(session: "cx-vantage-4", attached: true, panePID: 812, command: "codex"),
+        ])
+    }
+
+    func testReadsOnlyWorkspaceTagsFromOptions() {
+        let options = "@cmux_ws_AB_12 1\n@other 2\nstatus off\n@cmux_ws_CD_34 1\n"
+        XCTAssertEqual(TmuxSessionReaper.workspaceTags(fromOptions: options), ["@cmux_ws_AB_12", "@cmux_ws_CD_34"])
+    }
+
+    func testCodexLanesAreRecognisedByPrefixOrCommand() {
+        XCTAssertTrue(TmuxSessionReaper.isCodexLane(session: "cx-cloud", command: "node"))
+        XCTAssertTrue(TmuxSessionReaper.isCodexLane(session: "cloud", command: "codex"))
+        XCTAssertFalse(TmuxSessionReaper.isCodexLane(session: "cloud", command: "2.1.304"))
+    }
+
+    func testAttachCommandTargetsTheExactSession() throws {
+        try XCTSkipIf(TmuxSessionReaper.tmuxPath == nil, "tmux not installed")
+        let command = try XCTUnwrap(TmuxSessionReaper.attachCommand(for: "it's-2"))
+        XCTAssertTrue(command.hasSuffix("attach-session -t '=it'\\''s-2'"))
+    }
+}

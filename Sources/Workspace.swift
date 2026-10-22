@@ -6681,6 +6681,33 @@ final class Workspace: Identifiable, ObservableObject {
     }
     let agentPIDsDidChange = PassthroughSubject<Void, Never>()
 
+    /// Agent lanes tagged for this workspace whose tmux session has no client:
+    /// the conversation is alive but nothing shows it. Set by TabManager's lane
+    /// monitor, only when the list changes.
+    @Published var detachedLanes: [TmuxSessionReaper.DetachedLane] = []
+
+    /// Lanes launch recovery tied to this workspace before its pane has run. They
+    /// stay detached until the row is first shown, and that is expected, so they
+    /// keep counting as Active and get no Detached pill until tmux reports them
+    /// attached or gone.
+    var pendingAttachTmuxSessions: Set<String> = []
+
+    /// Detached lanes the sidebar should show, which excludes lanes still waiting
+    /// for this workspace's pane to attach them after a relaunch.
+    var visibleDetachedLanes: [TmuxSessionReaper.DetachedLane] {
+        detachedLanes.filter { !pendingAttachTmuxSessions.contains($0.session) }
+    }
+
+    /// Whether this workspace has a running agent shown in one of its panes. A PID
+    /// that belongs to a detached lane does not count: that agent is alive, but no
+    /// pane shows it.
+    var hasAttachedAgentSession: Bool {
+        let detached = Set(visibleDetachedLanes.map(\.panePID))
+        return agentPIDs.values.contains { pid in
+            pid > 0 && !detached.contains(pid) && kill(pid, 0) == 0
+        }
+    }
+
     /// Name of a tmux session this workspace owns, registered by the launcher script
     /// (see `cmux set-tmux-session`). When set, deliberately closing the workspace also
     /// kills the session, so a persistent `tmux new-session -A` wrapper does not leave
@@ -6739,6 +6766,7 @@ final class Workspace: Identifiable, ObservableObject {
             sidebarObservationSignal($remoteConnectionDetail),
             sidebarObservationSignal($activeRemoteTerminalSessionCount),
             sidebarObservationSignal($listeningPorts),
+            sidebarObservationSignal($detachedLanes),
         ]
 
         return Publishers.MergeMany(publishers).eraseToAnyPublisher()
@@ -9008,7 +9036,8 @@ final class Workspace: Identifiable, ObservableObject {
         inPane paneId: PaneID,
         focus: Bool? = nil,
         workingDirectory: String? = nil,
-        startupEnvironment: [String: String] = [:]
+        startupEnvironment: [String: String] = [:],
+        initialCommand: String? = nil
     ) -> TerminalPanel? {
         let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
         let previousFocusedPanelId = focusedPanelId
@@ -9025,7 +9054,7 @@ final class Workspace: Identifiable, ObservableObject {
             workingDirectory: workingDirectory,
             portOrdinal: portOrdinal,
             instanceIndex: instanceIndex,
-            initialCommand: remoteTerminalStartupCommand,
+            initialCommand: initialCommand ?? remoteTerminalStartupCommand,
             additionalEnvironment: startupEnvironment
         )
         configureTerminalPanel(newPanel)

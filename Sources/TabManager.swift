@@ -780,6 +780,7 @@ class TabManager: ObservableObject {
             Publishers.MergeMany(tabs.flatMap { tab in [
                 tab.$statusEntries.dropFirst().map { _ in () }.eraseToAnyPublisher(),
                 tab.agentPIDsDidChange.eraseToAnyPublisher(),
+                tab.$detachedLanes.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             ] })
         }
         .switchToLatest()
@@ -923,6 +924,7 @@ class TabManager: ObservableObject {
         let inheritedTerminalFontPoints: Float?
     }
     private var agentPIDSweepTimer: DispatchSourceTimer?
+    private var detachedLaneSubscription: AnyCancellable?
     private var workspaceGitMetadataPollTimer: DispatchSourceTimer?
     private var selectedWorkspaceGitMetadataPollTimer: DispatchSourceTimer?
 #if DEBUG
@@ -971,6 +973,7 @@ class TabManager: ObservableObject {
         })
 
         startAgentPIDSweepTimer()
+        startDetachedLaneMonitoring()
         startWorkspaceGitMetadataPollTimer()
         startSelectedWorkspaceGitMetadataPollTimer()
 #if DEBUG
@@ -986,6 +989,66 @@ class TabManager: ObservableObject {
         agentPIDSweepTimer?.cancel()
         workspaceGitMetadataPollTimer?.cancel()
         selectedWorkspaceGitMetadataPollTimer?.cancel()
+    }
+
+    // MARK: - Detached lanes
+
+    private func startDetachedLaneMonitoring() {
+        detachedLaneSubscription = DetachedLaneMonitor.shared.snapshots
+            .dropFirst()
+            .sink { [weak self] snapshot in
+                MainActor.assumeIsolated { self?.applyDetachedLaneSnapshot(snapshot) }
+            }
+        DetachedLaneMonitor.shared.start()
+    }
+
+    /// Copies each workspace's detached lanes out of a tmux snapshot, and lets go of
+    /// launch-recovered lanes once tmux shows them attached or gone.
+    func applyDetachedLaneSnapshot(_ snapshot: TmuxSessionReaper.LaneSnapshot) {
+        for tab in tabs {
+            if !tab.pendingAttachTmuxSessions.isEmpty {
+                tab.pendingAttachTmuxSessions = tab.pendingAttachTmuxSessions.filter {
+                    snapshot.live.contains($0) && !snapshot.attached.contains($0)
+                }
+            }
+            let lanes = snapshot.detachedByTag[TmuxSessionReaper.workspaceTag(for: tab.id)] ?? []
+            if tab.detachedLanes != lanes {
+                tab.detachedLanes = lanes
+            }
+        }
+    }
+
+    /// Selects the workspace and shows the lane in a new surface. The surface goes
+    /// in the pane that hosts the workspace's agent, else the focused pane.
+    func reattachDetachedLane(_ lane: TmuxSessionReaper.DetachedLane, in workspace: Workspace) {
+        guard let command = TmuxSessionReaper.attachCommand(for: lane.session) else {
+            NSSound.beep()
+            return
+        }
+        selectWorkspace(workspace)
+        let agentPanel = workspace.panels.values
+            .compactMap { $0 as? TerminalPanel }
+            .first { panel in
+                let title = panel.displayTitle.lowercased()
+                return title.contains("claude") || title.contains("codex")
+            }
+        let paneId = agentPanel.flatMap { workspace.paneId(forPanelId: $0.id) }
+            ?? workspace.bonsplitController.focusedPaneId
+            ?? workspace.bonsplitController.allPaneIds.first
+        guard let paneId,
+              workspace.newTerminalSurface(inPane: paneId, focus: true, initialCommand: command) != nil else {
+            NSSound.beep()
+            return
+        }
+        DetachedLaneMonitor.shared.refreshSoon()
+    }
+
+    /// Ends a detached lane's tmux session, which quits the agent inside it.
+    func endDetachedLane(_ lane: TmuxSessionReaper.DetachedLane) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = TmuxSessionReaper.kill(lane.session)
+            DetachedLaneMonitor.shared.refreshSoon(after: 0.2)
+        }
     }
 
     // MARK: - Agent PID Sweep
