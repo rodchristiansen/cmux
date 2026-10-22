@@ -11511,10 +11511,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         let alert = NSAlert()
-        alert.messageText = String(localized: "dialog.renameWorkspace.title", defaultValue: "Rename Workspace")
-        alert.informativeText = String(localized: "dialog.renameWorkspace.message", defaultValue: "Enter a custom name for this workspace.")
-        let input = NSTextField(string: tab.customTitle ?? tab.title)
-        input.placeholderString = String(localized: "dialog.renameWorkspace.placeholder", defaultValue: "Workspace name")
+        alert.messageText = String(localized: "dialog.renameSession.title", defaultValue: "Rename Session")
+        alert.informativeText = String(localized: "dialog.renameSession.message", defaultValue: "Enter a name for this workspace's session.")
+        let input = NSTextField(string: TabManager.sessionNameForEditing(tab))
+        input.placeholderString = String(localized: "dialog.renameSession.placeholder", defaultValue: "Session name")
         input.frame = NSRect(x: 0, y: 0, width: 240, height: 22)
         alert.accessoryView = input
         alert.addButton(withTitle: String(localized: "common.rename", defaultValue: "Rename"))
@@ -11528,7 +11528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return true }
-        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue, userInitiated: true)
+        tabManager.renameSession(tabId: tab.id, name: input.stringValue)
         return true
     }
 

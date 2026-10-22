@@ -1904,7 +1904,7 @@ struct ContentView: View {
         var title: String {
             switch kind {
             case .workspace:
-                return String(localized: "commandPalette.rename.workspaceTitle", defaultValue: "Rename Workspace")
+                return String(localized: "commandPalette.rename.sessionTitle", defaultValue: "Rename Session")
             case .tab:
                 return String(localized: "commandPalette.rename.tabTitle", defaultValue: "Rename Tab")
             }
@@ -1913,7 +1913,7 @@ struct ContentView: View {
         var description: String {
             switch kind {
             case .workspace:
-                return String(localized: "commandPalette.rename.workspaceDescription", defaultValue: "Choose a custom workspace name.")
+                return String(localized: "commandPalette.rename.sessionDescription", defaultValue: "Choose a name for this workspace's session.")
             case .tab:
                 return String(localized: "commandPalette.rename.tabDescription", defaultValue: "Choose a custom tab name.")
             }
@@ -1922,7 +1922,7 @@ struct ContentView: View {
         var placeholder: String {
             switch kind {
             case .workspace:
-                return String(localized: "commandPalette.rename.workspacePlaceholder", defaultValue: "Workspace name")
+                return String(localized: "commandPalette.rename.sessionPlaceholder", defaultValue: "Session name")
             case .tab:
                 return String(localized: "commandPalette.rename.tabPlaceholder", defaultValue: "Tab name")
             }
@@ -6736,9 +6736,9 @@ struct ContentView: View {
         contributions.append(
             CommandPaletteCommandContribution(
                 commandId: "palette.renameWorkspace",
-                title: constant(String(localized: "command.renameWorkspace.title", defaultValue: "Rename Workspace…")),
+                title: constant(String(localized: "command.renameSession.title", defaultValue: "Rename Session…")),
                 subtitle: workspaceSubtitle,
-                keywords: ["rename", "workspace", "title"],
+                keywords: ["rename", "session", "workspace", "title", "name"],
                 dismissOnRun: false,
                 when: { $0.bool(CommandPaletteContextKeys.hasWorkspace) }
             )
@@ -8701,7 +8701,7 @@ struct ContentView: View {
         }
         let target = CommandPaletteRenameTarget(
             kind: .workspace(workspaceId: workspace.id),
-            currentName: workspaceDisplayName(workspace)
+            currentName: TabManager.sessionNameForEditing(workspace)
         )
         startRenameFlow(target)
     }
@@ -8779,7 +8779,7 @@ struct ContentView: View {
 
         switch target.kind {
         case .workspace(let workspaceId):
-            tabManager.setCustomTitle(tabId: workspaceId, title: normalizedName, userInitiated: true)
+            tabManager.renameSession(tabId: workspaceId, name: normalizedName ?? "")
         case .tab(let workspaceId, let panelId):
             guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else {
                 NSSound.beep()
@@ -13731,10 +13731,11 @@ private struct TabItemView: View, Equatable {
         let moveDownActionText = String(localized: "sidebar.workspace.moveDownAction", defaultValue: "Move Down")
         let latestNotificationSubtitle = latestNotificationText
         let effectiveSubtitle = latestNotificationSubtitle
-        // A one-line description is the session's task: it heads the row and the
-        // workspace name drops to the line below, so rows in one folder read apart.
-        // Multi-line descriptions are notes and keep the name as the headline.
-        let taskHeadline: String? = {
+        // The workspace name (its path in the workspace set) heads the row, so
+        // rows are found by where they live. A one-line description is the
+        // session's name and sits on the line below; multi-line descriptions
+        // are notes and render as markdown there instead.
+        let sessionName: String? = {
             guard let text = tab.customDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.isEmpty, !text.contains("\n") else { return nil }
             return text
@@ -13798,7 +13799,7 @@ private struct TabItemView: View, Equatable {
                         .safeHelp(protectedWorkspaceTooltip)
                 }
 
-                Text(taskHeadline ?? tab.title)
+                Text(tab.title)
                     .font(.system(size: 12.5, weight: titleFontWeight))
                     .foregroundColor(activePrimaryTextColor)
                     .lineLimit(1)
@@ -13845,8 +13846,8 @@ private struct TabItemView: View, Equatable {
                 .frame(width: trailingAccessoryWidth, height: 16, alignment: .trailing)
             }
 
-            if taskHeadline != nil {
-                Text(tab.title)
+            if let sessionName {
+                Text(sessionName)
                     .font(.system(size: 10.5))
                     .foregroundColor(activeSecondaryColor(0.8))
                     .lineLimit(1)
@@ -14233,12 +14234,12 @@ private struct TabItemView: View, Equatable {
         }
 
         if let key = renameWorkspaceShortcut.keyEquivalent {
-            Button(String(localized: "contextMenu.renameWorkspace", defaultValue: "Rename Workspace…")) {
+            Button(String(localized: "contextMenu.renameSession", defaultValue: "Rename Session…")) {
                 promptRename()
             }
             .keyboardShortcut(key, modifiers: renameWorkspaceShortcut.eventModifiers)
         } else {
-            Button(String(localized: "contextMenu.renameWorkspace", defaultValue: "Rename Workspace…")) {
+            Button(String(localized: "contextMenu.renameSession", defaultValue: "Rename Session…")) {
                 promptRename()
             }
         }
@@ -15119,10 +15120,10 @@ private struct TabItemView: View, Equatable {
 
     private func promptRename() {
         let alert = NSAlert()
-        alert.messageText = String(localized: "alert.renameWorkspace.title", defaultValue: "Rename Workspace")
-        alert.informativeText = String(localized: "alert.renameWorkspace.message", defaultValue: "Enter a custom name for this workspace.")
-        let input = NSTextField(string: tab.customTitle ?? tab.title)
-        input.placeholderString = String(localized: "alert.renameWorkspace.placeholder", defaultValue: "Workspace name")
+        alert.messageText = String(localized: "alert.renameSession.title", defaultValue: "Rename Session")
+        alert.informativeText = String(localized: "alert.renameSession.message", defaultValue: "Enter a name for this workspace's session.")
+        let input = NSTextField(string: TabManager.sessionNameForEditing(tab))
+        input.placeholderString = String(localized: "alert.renameSession.placeholder", defaultValue: "Session name")
         input.frame = NSRect(x: 0, y: 0, width: 240, height: 22)
         alert.accessoryView = input
         alert.addButton(withTitle: String(localized: "alert.renameWorkspace.rename", defaultValue: "Rename"))
@@ -15135,7 +15136,7 @@ private struct TabItemView: View, Equatable {
         }
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
-        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue, userInitiated: true)
+        tabManager.renameSession(tabId: tab.id, name: input.stringValue)
     }
 
     private func beginWorkspaceDescriptionEditFromContextMenu() {

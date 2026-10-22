@@ -2963,6 +2963,12 @@ class TabManager: ObservableObject {
             #endif
             return
         }
+        typeClaudeRename(newName, in: workspace)
+    }
+
+    /// Types `/rename <name>` into each Claude pane on the row whose composer
+    /// is empty. The fallback when the session-title hook is not installed.
+    private func typeClaudeRename(_ newName: String, in workspace: Workspace) {
         // Strip line-splitting characters so the slash command stays one line.
         let safeName = newName
             .replacingOccurrences(of: "\n", with: " ")
@@ -3003,10 +3009,50 @@ class TabManager: ObservableObject {
         #endif
     }
 
+    /// The text a session rename starts from: the row's one-line description,
+    /// which is its session name. Multi-line notes are not a name, so the
+    /// field starts empty for them.
+    static func sessionNameForEditing(_ workspace: Workspace) -> String {
+        guard let text = workspace.customDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.contains("\n") else { return "" }
+        return text
+    }
+
+    /// A rename from the UI names the row's agent session, not the workspace:
+    /// the workspace keeps its path-style name as the row's headline, and the
+    /// name goes on the line below as the description. Any Claude or Codex
+    /// session on the row takes the name too, through the session-title hook,
+    /// which records it as a manual name so automatic titling leaves it alone.
+    /// An empty name clears the description and touches no agent.
+    func renameSession(tabId: UUID, name: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        let workspace = tabs[index]
+        let trimmed = name
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        workspace.setCustomDescription(trimmed.isEmpty ? nil : trimmed)
+        guard !trimmed.isEmpty else { return }
+        let agentPanels = workspace.panels.values.compactMap { $0 as? TerminalPanel }
+            .filter { Self.isAgentCommand($0.configuredCommand) }
+        guard !agentPanels.isEmpty else { return }
+        if !runSessionTitleRename(workspaceId: workspace.id, name: trimmed) {
+            typeClaudeRename(trimmed, in: workspace)
+        }
+    }
+
     private func renameCodexSession(workspaceId: UUID, name: String) {
+        _ = runSessionTitleRename(workspaceId: workspaceId, name: name)
+    }
+
+    /// Hands a rename to `session-title.py rename-row`, which names every Claude
+    /// and Codex session on the row without typing into it. False when the hook
+    /// is not installed or cannot start.
+    @discardableResult
+    private func runSessionTitleRename(workspaceId: UUID, name: String) -> Bool {
         let hook = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/hooks/session-title.py")
-        guard FileManager.default.fileExists(atPath: hook.path) else { return }
+        guard FileManager.default.fileExists(atPath: hook.path) else { return false }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [hook.path, "rename-row", workspaceId.uuidString, name]
@@ -3015,8 +3061,10 @@ class TabManager: ObservableObject {
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
+            return true
         } catch {
-            NSLog("[SessionRename] Could not start Codex rename: %@", error.localizedDescription)
+            NSLog("[SessionRename] Could not start session rename: %@", error.localizedDescription)
+            return false
         }
     }
 

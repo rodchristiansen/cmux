@@ -849,7 +849,7 @@ struct cmuxApp: App {
                     activeTabManager.selectPreviousTab()
                 }
 
-                splitCommandButton(title: String(localized: "menu.view.renameWorkspace", defaultValue: "Rename Workspace…"), shortcut: menuShortcut(for: .renameWorkspace)) {
+                splitCommandButton(title: String(localized: "menu.view.renameSession", defaultValue: "Rename Session…"), shortcut: menuShortcut(for: .renameWorkspace)) {
                     _ = AppDelegate.shared?.requestRenameWorkspaceViaCommandPalette()
                 }
 
@@ -1110,7 +1110,7 @@ struct cmuxApp: App {
         }
         .disabled(workspace == nil)
 
-        Button(String(localized: "menu.view.renameWorkspace", defaultValue: "Rename Workspace…")) {
+        Button(String(localized: "menu.view.renameSession", defaultValue: "Rename Session…")) {
             _ = AppDelegate.shared?.requestRenameWorkspaceViaCommandPalette()
         }
         .disabled(workspace == nil)
