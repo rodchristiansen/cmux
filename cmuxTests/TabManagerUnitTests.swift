@@ -280,6 +280,32 @@ final class TabManagerChildExitCloseTests: XCTestCase {
 
 
 @MainActor
+final class TabManagerSessionRenameTests: XCTestCase {
+    func testRenameSessionSetsTheDescriptionAndKeepsTheWorkspaceName() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        manager.setCustomTitle(tabId: workspace.id, title: "org · repo")
+
+        manager.renameSession(tabId: workspace.id, name: "  Design Mapping\nTables ")
+
+        XCTAssertEqual(workspace.title, "org · repo")
+        XCTAssertEqual(workspace.customDescription, "Design Mapping Tables")
+        XCTAssertEqual(TabManager.sessionNameForEditing(workspace), "Design Mapping Tables")
+
+        manager.renameSession(tabId: workspace.id, name: "   ")
+        XCTAssertNil(workspace.customDescription)
+        XCTAssertEqual(workspace.title, "org · repo")
+    }
+
+    func testMultilineNotesAreNotOfferedAsASessionName() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        manager.setCustomDescription(tabId: workspace.id, description: "line one\nline two")
+        XCTAssertEqual(TabManager.sessionNameForEditing(workspace), "")
+    }
+}
+
+@MainActor
 final class WorkspaceAgentPIDSignalTests: XCTestCase {
     func testAgentPIDChangesSignalTheSidebarOnlyWhenTheMapChanges() {
         let workspace = Workspace()

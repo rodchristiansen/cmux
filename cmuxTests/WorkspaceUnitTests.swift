@@ -88,7 +88,7 @@ final class WorkspaceRenameShortcutDefaultsTests: XCTestCase {
     }
 
     func testRenameWorkspaceShortcutDefaultsAndMetadata() {
-        XCTAssertEqual(KeyboardShortcutSettings.Action.renameWorkspace.label, "Rename Workspace")
+        XCTAssertEqual(KeyboardShortcutSettings.Action.renameWorkspace.label, "Rename Session")
         XCTAssertEqual(KeyboardShortcutSettings.Action.renameWorkspace.defaultsKey, "shortcut.renameWorkspace")
 
         let shortcut = KeyboardShortcutSettings.Action.renameWorkspace.defaultShortcut
