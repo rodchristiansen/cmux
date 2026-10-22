@@ -88076,6 +88076,94 @@
           }
         }
       }
+    },
+    "sidebar.detachedLane.pill": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detached %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "sidebar.detachedLane.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The tmux lane “%@” is still running but no pane shows it. Click to reattach it here."
+          }
+        }
+      }
+    },
+    "sidebar.detachedLane.end.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End the lane “%@”?"
+          }
+        }
+      }
+    },
+    "sidebar.detachedLane.end.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This ends its tmux session and quits the agent running in it. The conversation can still be resumed later."
+          }
+        }
+      }
+    },
+    "sidebar.detachedLane.end.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End Lane"
+          }
+        }
+      }
+    },
+    "sidebar.detachedLane.end.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "contextMenu.reattachLane": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reattach %@"
+          }
+        }
+      }
+    },
+    "contextMenu.endLane": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End Lane %@…"
+          }
+        }
+      }
     }
   }
 }

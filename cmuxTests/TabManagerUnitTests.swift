@@ -293,6 +293,37 @@ final class WorkspaceAgentPIDSignalTests: XCTestCase {
 
         XCTAssertEqual(fired, 2)
     }
+
+    func testDetachedLanePIDDoesNotCountAsActive() {
+        let workspace = Workspace()
+        let pid = getpid()
+        workspace.agentPIDs["claude"] = pid
+        XCTAssertTrue(workspace.hasAttachedAgentSession)
+
+        workspace.detachedLanes = [.init(session: "lane-2", panePID: pid, isCodex: false)]
+        XCTAssertFalse(workspace.hasAttachedAgentSession)
+        XCTAssertEqual(workspace.visibleDetachedLanes.map(\.session), ["lane-2"])
+
+        workspace.pendingAttachTmuxSessions = ["lane-2"]
+        XCTAssertTrue(workspace.hasAttachedAgentSession)
+        XCTAssertTrue(workspace.visibleDetachedLanes.isEmpty)
+    }
+
+    func testSnapshotAssignsLanesByTagAndReleasesAttachedRecoveries() {
+        let manager = TabManager()
+        let workspace = manager.addWorkspace()
+        let lane = TmuxSessionReaper.DetachedLane(session: "lane-2", panePID: 99, isCodex: true)
+        workspace.pendingAttachTmuxSessions = ["recovered", "gone"]
+        var snapshot = TmuxSessionReaper.LaneSnapshot()
+        snapshot.detachedByTag[TmuxSessionReaper.workspaceTag(for: workspace.id)] = [lane]
+        snapshot.live = ["lane-2", "recovered"]
+        snapshot.attached = ["recovered"]
+
+        manager.applyDetachedLaneSnapshot(snapshot)
+
+        XCTAssertEqual(workspace.detachedLanes, [lane])
+        XCTAssertTrue(workspace.pendingAttachTmuxSessions.isEmpty)
+    }
 }
 
 @MainActor

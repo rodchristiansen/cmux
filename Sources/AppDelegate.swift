@@ -5607,6 +5607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 continue
             }
             workspace.ownedTmuxSessions.insert(session)
+            workspace.pendingAttachTmuxSessions.insert(session)
             // The pane only runs its wrapper once the workspace is shown, so until
             // then nothing registers the agent and the row drops out of Active.
             // The lane's own process stands in for it.

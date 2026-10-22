@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Lifecycle for tmux sessions that cmux workspaces own.
 ///
@@ -85,6 +86,90 @@ enum TmuxSessionReaper {
         "@cmux_ws_" + String(id.uuidString.map { $0.isLetter || $0.isNumber ? $0 : "_" })
     }
 
+    /// The `@cmux_ws_*` keys in `tmux show-options -t =<session>:` output.
+    static func workspaceTags(fromOptions output: String) -> Set<String> {
+        Set(output.split(separator: "\n").compactMap { line -> String? in
+            let key = line.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+            return key.hasPrefix("@cmux_ws_") ? key : nil
+        })
+    }
+
+    /// An agent lane whose tmux session is running with no client attached: the
+    /// conversation is alive but no pane shows it.
+    struct DetachedLane: Equatable, Hashable {
+        let session: String
+        let panePID: Int32
+        let isCodex: Bool
+    }
+
+    /// One row of `list-sessions` in `laneStateFormat`.
+    struct SessionState: Equatable {
+        let session: String
+        let attached: Bool
+        let panePID: Int32
+        let command: String
+    }
+
+    static let laneStateFormat =
+        "#{session_name}\t#{session_attached}\t#{pane_pid}\t#{pane_current_command}"
+
+    static func parseSessionStates(_ output: String) -> [SessionState] {
+        output.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 4, !parts[0].isEmpty,
+                  let attached = Int(parts[1]), let pid = Int32(parts[2]) else { return nil }
+            return SessionState(session: parts[0], attached: attached > 0, panePID: pid, command: parts[3])
+        }
+    }
+
+    /// Whether a session runs Codex rather than Claude: codex lanes are named `cx-…`.
+    static func isCodexLane(session: String, command: String) -> Bool {
+        session.hasPrefix("cx-") || command.lowercased().contains("codex")
+    }
+
+    /// What the sidebar needs from tmux: detached lanes by workspace tag, and the
+    /// names of sessions that have a client attached.
+    struct LaneSnapshot: Equatable {
+        var detachedByTag: [String: [DetachedLane]] = [:]
+        var attached: Set<String> = []
+        var live: Set<String> = []
+    }
+
+    /// Runs tmux, so call it off the main thread. Only detached sessions are asked
+    /// for their tags, which keeps a pass to one call plus one per detached lane.
+    static func laneSnapshot() -> LaneSnapshot? {
+        guard let tmuxPath,
+              let output = run(tmuxPath, ["list-sessions", "-F", laneStateFormat]) else { return nil }
+        var snapshot = LaneSnapshot()
+        for state in parseSessionStates(output) {
+            snapshot.live.insert(state.session)
+            if state.attached {
+                snapshot.attached.insert(state.session)
+                continue
+            }
+            guard let options = run(tmuxPath, ["show-options", "-t", "=\(state.session):"]) else { continue }
+            let lane = DetachedLane(
+                session: state.session,
+                panePID: state.panePID,
+                isCodex: isCodexLane(session: state.session, command: state.command)
+            )
+            for tag in workspaceTags(fromOptions: options) {
+                snapshot.detachedByTag[tag, default: []].append(lane)
+            }
+        }
+        for tag in snapshot.detachedByTag.keys {
+            snapshot.detachedByTag[tag]?.sort { $0.session < $1.session }
+        }
+        return snapshot
+    }
+
+    /// The command a new surface runs to show a detached lane.
+    static func attachCommand(for session: String) -> String? {
+        guard let tmuxPath, !session.isEmpty else { return nil }
+        let quoted = "'" + ("=" + session).replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "\(tmuxPath) attach-session -t \(quoted)"
+    }
+
     /// Live session name -> the `@cmux_ws_*` tags it carries.
     ///
     /// The tag is the one link to a workspace that survives a rename: a lane named
@@ -95,11 +180,8 @@ enum TmuxSessionReaper {
         var result: [String: Set<String>] = [:]
         for session in liveSessions() {
             guard let output = run(tmuxPath, ["show-options", "-t", "=\(session):"]) else { continue }
-            let tags = output.split(separator: "\n").compactMap { line -> String? in
-                let key = line.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
-                return key.hasPrefix("@cmux_ws_") ? key : nil
-            }
-            if !tags.isEmpty { result[session] = Set(tags) }
+            let tags = workspaceTags(fromOptions: output)
+            if !tags.isEmpty { result[session] = tags }
         }
         return result
     }
@@ -284,5 +366,43 @@ enum TmuxSessionReaper {
             guard process.terminationStatus == 0 else { return nil }
             return String(data: data, encoding: .utf8)
         }
+    }
+}
+
+/// Polls tmux for detached agent lanes on one background queue for the whole app,
+/// so every window's sidebar reads the same snapshot instead of each running tmux.
+final class DetachedLaneMonitor {
+    static let shared = DetachedLaneMonitor()
+
+    /// The latest snapshot, delivered on the main queue and only when it changed.
+    let snapshots = CurrentValueSubject<TmuxSessionReaper.LaneSnapshot, Never>(.init())
+
+    private let queue = DispatchQueue(label: "com.cmuxterm.detached-lane-monitor", qos: .utility)
+    private var timer: DispatchSourceTimer?
+    private var last: TmuxSessionReaper.LaneSnapshot?
+
+    private init() {}
+
+    /// Starts polling every 10 seconds. Does nothing under XCTest, where the host
+    /// shares the user's tmux server.
+    func start() {
+        guard timer == nil,
+              ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 2, repeating: 10)
+        timer.setEventHandler { [weak self] in self?.poll() }
+        timer.resume()
+        self.timer = timer
+    }
+
+    /// Polls now, for example right after a lane was reattached or ended.
+    func refreshSoon(after delay: TimeInterval = 1) {
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.poll() }
+    }
+
+    private func poll() {
+        guard let snapshot = TmuxSessionReaper.laneSnapshot(), snapshot != last else { return }
+        last = snapshot
+        DispatchQueue.main.async { [weak self] in self?.snapshots.send(snapshot) }
     }
 }

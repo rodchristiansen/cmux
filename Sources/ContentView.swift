@@ -10146,10 +10146,7 @@ struct VerticalTabsSidebar: View {
     /// keeping a workspace flagged Active after the agent has exited
     /// without a clean clear (SIGKILL, crash, ssh hard-disconnect).
     private func workspaceHasAgentSession(_ workspace: Workspace) -> Bool {
-        for pid in workspace.agentPIDs.values where pid > 0 {
-            if kill(pid, 0) == 0 { return true }
-        }
-        return false
+        workspace.hasAttachedAgentSession
     }
 
     private func workspaceHasRunningAgent(_ workspace: Workspace) -> Bool {
@@ -13614,6 +13611,84 @@ private struct TabItemView: View, Equatable {
         }
     }
 
+    /// One pill per agent lane that is still running with no pane showing it.
+    /// Clicking it opens the lane in this workspace.
+    @ViewBuilder
+    private var detachedLaneSection: some View {
+        let lanes = tab.visibleDetachedLanes
+        if !lanes.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(lanes, id: \.session) { lane in
+                    Button {
+                        tabManager.reattachDetachedLane(lane, in: tab)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.portrait.and.arrow.forward")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(detachedLanePillTitle(lane))
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .foregroundColor(usesInvertedActiveForeground ? activePrimaryTextColor : detachedLaneTint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(detachedLaneTint.opacity(usesInvertedActiveForeground ? 0.35 : 0.16))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .safeHelp(detachedLaneHelp(lane))
+                    .accessibilityLabel(detachedLaneHelp(lane))
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// Orange reads clearly against both the dark and light sidebar.
+    private var detachedLaneTint: Color {
+        colorScheme == .dark ? Color(nsColor: .systemOrange) : Color(red: 0.72, green: 0.33, blue: 0.0)
+    }
+
+    private func detachedLanePillTitle(_ lane: TmuxSessionReaper.DetachedLane) -> String {
+        let agent = lane.isCodex ? "Codex" : "Claude"
+        let format = String(localized: "sidebar.detachedLane.pill", defaultValue: "Detached %1$@ · %2$@")
+        return String(format: format, agent, lane.session)
+    }
+
+    private func detachedLaneHelp(_ lane: TmuxSessionReaper.DetachedLane) -> String {
+        let format = String(
+            localized: "sidebar.detachedLane.help",
+            defaultValue: "The tmux lane “%@” is still running but no pane shows it. Click to reattach it here."
+        )
+        return String(format: format, lane.session)
+    }
+
+    private func confirmEndDetachedLane(_ lane: TmuxSessionReaper.DetachedLane) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(
+            format: String(localized: "sidebar.detachedLane.end.title", defaultValue: "End the lane “%@”?"),
+            lane.session
+        )
+        alert.informativeText = String(
+            localized: "sidebar.detachedLane.end.message",
+            defaultValue: "This ends its tmux session and quits the agent running in it. The conversation can still be resumed later."
+        )
+        alert.addButton(withTitle: String(localized: "sidebar.detachedLane.end.confirm", defaultValue: "End Lane"))
+        alert.addButton(withTitle: String(localized: "sidebar.detachedLane.end.cancel", defaultValue: "Cancel"))
+        let manager = tabManager
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .alertFirstButtonReturn { manager.endDetachedLane(lane) }
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
+        }
+    }
+
     private func copyTextToPasteboard(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -13777,6 +13852,8 @@ private struct TabItemView: View, Equatable {
             }
 
             remoteWorkspaceSection
+
+            detachedLaneSection
 
             if detailVisibility.showsMetadata {
                 let metadataEntries = tab.sidebarStatusEntriesInDisplayOrder()
@@ -14153,6 +14230,26 @@ private struct TabItemView: View, Equatable {
             Button(String(localized: "contextMenu.removeCustomWorkspaceName", defaultValue: "Remove Custom Workspace Name")) {
                 tabManager.clearCustomTitle(tabId: tab.id)
             }
+        }
+
+        if !isMulti, !tab.visibleDetachedLanes.isEmpty {
+            ForEach(tab.visibleDetachedLanes, id: \.session) { lane in
+                Button(String(
+                    format: String(localized: "contextMenu.reattachLane", defaultValue: "Reattach %@"),
+                    lane.session
+                )) {
+                    tabManager.reattachDetachedLane(lane, in: tab)
+                }
+            }
+            ForEach(tab.visibleDetachedLanes, id: \.session) { lane in
+                Button(String(
+                    format: String(localized: "contextMenu.endLane", defaultValue: "End Lane %@…"),
+                    lane.session
+                )) {
+                    confirmEndDetachedLane(lane)
+                }
+            }
+            Divider()
         }
 
         if !isMulti {
