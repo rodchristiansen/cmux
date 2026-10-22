@@ -88008,6 +88008,74 @@
           }
         }
       }
+    },
+    "menu.view.collapseAllSections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse All Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのセクションを折りたたむ"
+          }
+        }
+      }
+    },
+    "menu.view.expandAllSections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand All Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのセクションを展開"
+          }
+        }
+      }
+    },
+    "shortcut.collapseAllSections.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse All Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのセクションを折りたたむ"
+          }
+        }
+      }
+    },
+    "shortcut.expandAllSections.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand All Sections"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのセクションを展開"
+          }
+        }
+      }
     }
   }
 }

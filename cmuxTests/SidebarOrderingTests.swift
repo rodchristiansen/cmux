@@ -67,6 +67,43 @@ final class SidebarSectionWorkspaceCreationTests: XCTestCase {
         guard case .pane(let pane) = split.first else { return XCTFail("Expected agent pane") }
         XCTAssertEqual(pane.panels, ["Codex (direct)"])
     }
+
+    func testCollapseAndExpandAllSections() {
+        let manager = TabManager()
+        XCTAssertFalse(manager.canCollapseAllSections)
+        XCTAssertFalse(manager.canExpandAllSections)
+        XCTAssertEqual(manager.setAllSectionsCollapsed(true), 0)
+
+        let first = manager.createSection(name: "First", triggerRename: false)
+        let second = manager.createSection(name: "Second", triggerRename: false)
+        second.setCollapsed(true)
+        XCTAssertTrue(manager.canCollapseAllSections)
+        XCTAssertTrue(manager.canExpandAllSections)
+
+        XCTAssertEqual(manager.setAllSectionsCollapsed(true), 1)
+        XCTAssertTrue(first.isCollapsed)
+        XCTAssertTrue(second.isCollapsed)
+        XCTAssertFalse(manager.canCollapseAllSections)
+        XCTAssertTrue(manager.canExpandAllSections)
+
+        XCTAssertEqual(manager.setAllSectionsCollapsed(false), 2)
+        XCTAssertFalse(first.isCollapsed)
+        XCTAssertFalse(second.isCollapsed)
+        XCTAssertTrue(manager.canCollapseAllSections)
+        XCTAssertFalse(manager.canExpandAllSections)
+        XCTAssertEqual(manager.setAllSectionsCollapsed(false), 0)
+    }
+
+    func testCollapseAndExpandAllShortcutsDoNotCollide() {
+        let collapse = KeyboardShortcutSettings.Action.collapseAllSections.defaultShortcut
+        let expand = KeyboardShortcutSettings.Action.expandAllSections.defaultShortcut
+        let others = KeyboardShortcutSettings.Action.allCases
+            .filter { $0 != .collapseAllSections && $0 != .expandAllSections }
+            .map(\.defaultShortcut)
+        XCTAssertNotEqual(collapse, expand)
+        XCTAssertFalse(others.contains(collapse))
+        XCTAssertFalse(others.contains(expand))
+    }
 }
 
 final class SidebarActiveForegroundColorTests: XCTestCase {
