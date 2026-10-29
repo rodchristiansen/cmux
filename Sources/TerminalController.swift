@@ -1779,6 +1779,9 @@ class TerminalController {
         case "set_agent_pid":
             return setAgentPID(args)
 
+        case "set_agent_prompt":
+            return setAgentPrompt(args)
+
         case "clear_agent_pid":
             return clearAgentPID(args)
 
@@ -15269,6 +15272,36 @@ class TerminalController {
             controller.refreshTrackedAgentPorts(for: tab)
         }
         return "OK"
+    }
+
+    /// Record the prompt the user last gave this workspace's agent, for the agent board.
+    /// Usage: set_agent_prompt [--tab=<id>] -- <text>
+    private func setAgentPrompt(_ args: String) -> String {
+        let parts = splitMetadataBlockArgs(args)
+        let parsed = parseOptionsNoStop(parts.optionsPart)
+        let rawText = parts.markdownPart ?? parsed.positional.joined(separator: " ")
+        let text = Self.normalizedAgentPrompt(rawText)
+        guard !text.isEmpty else {
+            return "ERROR: Usage: set_agent_prompt [--tab=<id>] -- <text>"
+        }
+        let targetResolution = parseSidebarMutationTabTarget(options: parsed.options)
+        guard let target = targetResolution.target else {
+            return targetResolution.error ?? "ERROR: No tab selected"
+        }
+        scheduleSidebarMutation(target: target) { _, tab in
+            tab.agentPrompt = WorkspaceAgentPrompt(text: text, timestamp: Date())
+        }
+        return "OK"
+    }
+
+    /// Collapses whitespace and caps the length, so a pasted wall of text stays one short line.
+    nonisolated static func normalizedAgentPrompt(_ raw: String, limit: Int = 400) -> String {
+        let collapsed = raw
+            .replacingOccurrences(of: "\\n", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard collapsed.count > limit else { return collapsed }
+        return String(collapsed.prefix(limit)) + "…"
     }
 
     /// Register the tmux session this workspace owns, so closing the workspace ends it.

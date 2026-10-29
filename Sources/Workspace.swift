@@ -5943,6 +5943,11 @@ struct SidebarProgressState: Equatable {
     let label: String?
 }
 
+struct WorkspaceAgentPrompt: Equatable {
+    let text: String
+    let timestamp: Date
+}
+
 struct SidebarGitBranchState: Equatable {
     let branch: String
     let isDirty: Bool
@@ -6685,6 +6690,11 @@ final class Workspace: Identifiable, ObservableObject {
     /// the conversation is alive but nothing shows it. Set by TabManager's lane
     /// monitor, only when the list changes.
     @Published var detachedLanes: [TmuxSessionReaper.DetachedLane] = []
+
+    /// The last prompt the user gave this workspace's agent, reported by the
+    /// Claude Code and Codex prompt-submit hooks. The agent board shows it so a
+    /// card says what the agent was asked, not only that it is running.
+    @Published var agentPrompt: WorkspaceAgentPrompt?
 
     /// Lanes launch recovery tied to this workspace before its pane has run. They
     /// stay detached until the row is first shown, and that is expected, so they
@@ -7815,6 +7825,7 @@ final class Workspace: Identifiable, ObservableObject {
         surfaceListeningPorts.removeAll()
         listeningPorts.removeAll()
         metadataBlocks.removeAll()
+        agentPrompt = nil
         resetBrowserPanelsForContextChange(reason: reason)
     }
 

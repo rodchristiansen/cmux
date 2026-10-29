@@ -2631,7 +2631,14 @@ struct ContentView: View {
         let selectedWorkspaceId = tabManager.selectedTabId
         let retiringWorkspaceId = self.retiringWorkspaceId
 
-        return ZStack {
+        return VStack(spacing: 8) {
+          if agentBoardExpanded && !isMinimalMode {
+            AgentBoardView(tabManager: tabManager, onClose: {
+                withAnimation(.easeInOut(duration: 0.2)) { agentBoardExpanded = false }
+            })
+            .transition(.move(edge: .top).combined(with: .opacity))
+          }
+          ZStack {
             ZStack {
                 ForEach(mountedWorkspaces) { tab in
                     let isSelectedWorkspace = selectedWorkspaceId == tab.id
@@ -2681,7 +2688,9 @@ struct ContentView: View {
                 .opacity(sidebarSelectionState.selection == .notifications ? 1 : 0)
                 .allowsHitTesting(sidebarSelectionState.selection == .notifications)
                 .accessibilityHidden(sidebarSelectionState.selection != .notifications)
+          }
         }
+        .animation(.easeInOut(duration: 0.2), value: agentBoardExpanded)
         .padding(.top, {
             if #available(macOS 26.0, *) {
                 return 0  // Native glass titlebar handles spacing via safe area
@@ -2698,6 +2707,8 @@ struct ContentView: View {
             }
         }
     }
+
+    @AppStorage(AgentBoardSettings.expandedKey) private var agentBoardExpanded = false
 
     private var terminalContentWithSidebarDropOverlay: some View {
         terminalContent
@@ -2953,6 +2964,16 @@ struct ContentView: View {
                     }
 
                     ToolbarItemGroup(placement: .primaryAction) {
+                        Button {
+                            agentBoardExpanded.toggle()
+                        } label: {
+                            Image(systemName: agentBoardExpanded ? "rectangle.split.3x1.fill" : "rectangle.split.3x1")
+                        }
+                        .buttonStyle(.accessoryBarAction)
+                        .accessibilityIdentifier("toolbar.agentBoard")
+                        .accessibilityLabel(String(localized: "toolbar.agentBoard.label", defaultValue: "Agent Board"))
+                        .help(KeyboardShortcutSettings.Action.toggleAgentBoard.tooltip(String(localized: "toolbar.agentBoard.tooltip", defaultValue: "Show or hide the Agent Board")))
+
                         ControlGroup {
                             Button {
                                 tabManager.newSurface()

@@ -12969,6 +12969,7 @@ struct CMUXCLI {
                 client: client
             )
             _ = try sendV1Command("clear_notifications --tab=\(workspaceId)", client: client)
+            reportAgentPrompt(parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             try setClaudeStatus(
                 client: client,
                 workspaceId: workspaceId,
@@ -13147,6 +13148,22 @@ struct CMUXCLI {
         default:
             throw CLIError(message: "Unknown claude-hook subcommand: \(subcommand)")
         }
+    }
+
+    /// Hands the submitted prompt to the app so the agent board can show what the
+    /// agent was asked. Best effort: a failure here must never block the hook.
+    private func reportAgentPrompt(
+        parsedInput: ClaudeHookParsedInput,
+        workspaceId: String,
+        client: SocketClient
+    ) {
+        guard let raw = parsedInput.object?["prompt"] as? String else { return }
+        let line = raw
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard !line.isEmpty else { return }
+        let capped = line.count > 400 ? String(line.prefix(400)) + "…" : line
+        _ = try? client.send(command: "set_agent_prompt --tab=\(workspaceId) -- \(capped)")
     }
 
     private func setClaudeStatus(
@@ -14342,6 +14359,7 @@ struct CMUXCLI {
                 )
             }
             _ = try? sendV1Command("clear_notifications --tab=\(workspaceId)", client: client)
+            reportAgentPrompt(parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             try setCodexStatus(
                 client: client,
                 workspaceId: workspaceId,

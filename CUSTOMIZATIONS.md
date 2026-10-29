@@ -116,6 +116,13 @@ Key commits:
 
 Storage: `@AppStorage("sidebar.filter.mode")` in `Sources/ContentView.swift`.
 
+### Agent board
+A collapsible board above the terminals (toolbar button, **View > Toggle Agent Board**, `⌃⌘B`) with one column per agent state — Needs Input, Running, Waiting on You — and one card per workspace that has a Claude Code or Codex agent. Each card shows the workspace, task headline, the last prompt you gave the agent, its last reply or current tool, the working directory, branch, PR, ports and section. Click a card to switch to it; double-click to switch and hide the board; right-click to copy the path, prompt or branch, show the folder in Finder, or open the PR. Drag the bottom edge to resize; height and open state persist.
+
+The prompt comes from the Claude Code and Codex `prompt-submit` hooks, which now send `set_agent_prompt --tab=<id> -- <text>` (whitespace collapsed, capped at 400 characters).
+
+Files: `Sources/AgentBoard.swift`, `Workspace.agentPrompt`, `set_agent_prompt` in `Sources/TerminalController.swift`, hook changes in `CLI/cmux.swift`.
+
 ### Sidebar toggle keyboard shortcut
 Reintroduce the sidebar show/hide toggle with `⌃⌘S`, a leading chevron button, and strip the system-provided disclosure on macOS 26.
 
