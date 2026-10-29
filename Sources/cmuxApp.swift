@@ -758,6 +758,10 @@ struct cmuxApp: App {
                     }
                 }
 
+                splitCommandButton(title: String(localized: "menu.view.toggleAgentBoard", defaultValue: "Toggle Agent Board"), shortcut: menuShortcut(for: .toggleAgentBoard)) {
+                    AgentBoardSettings.toggle()
+                }
+
                 splitCommandButton(title: String(localized: "menu.view.collapseAllSections", defaultValue: "Collapse All Sections"), shortcut: menuShortcut(for: .collapseAllSections)) {
                     activeTabManager.setAllSectionsCollapsed(true)
                 }
