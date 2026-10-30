@@ -1,4 +1,5 @@
 import AppKit
+import Bonsplit
 import Combine
 import SwiftUI
 
@@ -72,6 +73,8 @@ struct AgentBoardCard: Identifiable, Equatable {
     let isSelected: Bool
     /// Recent prompts and the agent's latest message, read from its transcript.
     let digest: AgentTranscriptDigest?
+    /// One sentence from Claude Haiku: what was asked and where it stands.
+    let summary: String?
 
     /// The focused pane's directory, else the workspace's.
     @MainActor
@@ -90,7 +93,8 @@ struct AgentBoardCard: Identifiable, Equatable {
         workspace: Workspace,
         tabManager: TabManager,
         notificationStore: TerminalNotificationStore,
-        digest: AgentTranscriptDigest?
+        digest: AgentTranscriptDigest?,
+        summary: String?
     ) -> AgentBoardCard? {
         let agentEntries = workspace.statusEntries.values.filter(\.isAgentStatus)
         let hasSession = workspace.hasAttachedAgentSession
@@ -172,7 +176,8 @@ struct AgentBoardCard: Identifiable, Equatable {
             unreadCount: notificationStore.unreadCount(forTabId: workspace.id),
             lastActivity: lastActivity,
             isSelected: tabManager.selectedTabId == workspace.id,
-            digest: digest
+            digest: digest,
+            summary: summary
         )
     }
 }
@@ -214,6 +219,10 @@ final class AgentBoardModel: ObservableObject {
             .store(in: &extraCancellables)
         // Ages ("4m ago"), agent liveness and transcripts drift with no event to
         // announce them. Unchanged transcripts are not re-read.
+        AgentBoardSummarizer.shared.$summaries
+            .dropFirst()
+            .sink { [weak self] _ in self?.changes.send() }
+            .store(in: &extraCancellables)
         clockCancellable = Timer.publish(every: 5, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.changes.send() }
@@ -283,8 +292,20 @@ final class AgentBoardModel: ObservableObject {
                 workspace: $0,
                 tabManager: tabManager,
                 notificationStore: notificationStore,
-                digest: digests[$0.id]
+                digest: digests[$0.id],
+                summary: AgentBoardSummarizer.isEnabled ? AgentBoardSummarizer.shared.summaries[$0.id] : nil
             )
+        }
+#if DEBUG
+        dlog("agentBoard.cards count=\(built.count) digests=\(digests.count)")
+#endif
+        for card in built {
+            let prompts = card.digest?.prompts.map(\.text) ?? card.prompt.map { [$0] } ?? []
+            AgentBoardSummarizer.shared.request(card.id, input: .init(
+                taskTitle: card.taskHeadline,
+                prompts: prompts,
+                lastReply: card.digest?.lastReply ?? card.lastMessage
+            ))
         }
         // Most recent activity first in every column.
         let sorted = built.sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
@@ -306,6 +327,7 @@ struct AgentBoardView: View {
     let onClose: () -> Void
 
     @AppStorage("agentBoard.height") private var storedHeight: Double = 300
+    @AppStorage(AgentBoardSummarizer.enabledKey) private var summariesEnabled = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -345,6 +367,13 @@ struct AgentBoardView: View {
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             Spacer()
+            Toggle(isOn: $summariesEnabled) {
+                Image(systemName: "text.badge.star")
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .help(String(localized: "agentBoard.summaries.tooltip", defaultValue: "Summarize each session with Claude Haiku"))
+            .accessibilityLabel(String(localized: "agentBoard.summaries.label", defaultValue: "Summaries"))
             Button(action: onClose) {
                 Image(systemName: "chevron.up")
             }
@@ -441,11 +470,8 @@ private struct AgentBoardCardView: View {
                     .foregroundStyle(Color.accentColor)
                     .lineLimit(1)
             }
-            conversation
-            if let detail = card.statusDetail {
-                labeled(symbol: "gearshape", text: detail, lines: 1)
-            }
-            contextRow
+            gist
+            footer
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -465,66 +491,71 @@ private struct AgentBoardCardView: View {
         .onTapGesture(count: 1, perform: onSelect)
         .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
         .contextMenu { contextMenu }
-        .help(String(localized: "agentBoard.card.help", defaultValue: "Click to switch to this workspace. Double-click to switch and hide the board."))
+        .help(details)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: Text(String(localized: "agentBoard.card.open", defaultValue: "Go to Workspace")), onSelect)
     }
 
-    /// What you last asked, newest first, then what the agent last said.
+    /// The one thing to read: Haiku's summary, else the latest prompt, else the
+    /// agent's last message. Everything else lives in the tooltip.
     @ViewBuilder
-    private var conversation: some View {
-        let prompts = card.digest?.prompts ?? []
-        if prompts.isEmpty, let prompt = card.prompt {
-            promptRow(prompt, date: nil, isLatest: true)
-        }
-        ForEach(Array(prompts.enumerated()), id: \.offset) { index, prompt in
-            promptRow(prompt.text, date: prompt.date, isLatest: index == 0)
-        }
-        if let reply = card.digest?.lastReply ?? card.lastMessage {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 11)
-                Text(reply)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-            .padding(.top, 1)
-            .help(reply)
-            .accessibilityLabel(Text(String.localizedStringWithFormat(
-                String(localized: "agentBoard.card.agentSaid", defaultValue: "Agent said: %@"), reply
-            )))
+    private var gist: some View {
+        if let summary = card.summary {
+            Text(summary)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+        } else if let text = card.digest?.prompts.first?.text ?? card.prompt ?? card.digest?.lastReply ?? card.lastMessage {
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
         }
     }
 
-    private func promptRow(_ text: String, date: Date?, isLatest: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Image(systemName: "person.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .frame(width: 11)
-                .opacity(isLatest ? 1 : 0)
-            Text(text)
-                .font(.system(size: 11, weight: isLatest ? .medium : .regular))
-                .foregroundStyle(isLatest ? Color.primary : Color.secondary)
-                .lineLimit(isLatest ? 2 : 1)
-            Spacer(minLength: 2)
-            if let date {
-                Text(date, format: .relative(presentation: .numeric, unitsStyle: .narrow))
-                    .font(.system(size: 9).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
+    /// Folder, branch and PR on one quiet line.
+    private var footer: some View {
+        let parts = [
+            card.directory.map(Self.shortPath),
+            card.branch.map { card.branchIsDirty ? "\($0) •" : $0 },
+            card.pullRequestLabel,
+        ].compactMap { $0 }
+        return Text(parts.joined(separator: "  ·  "))
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+    }
+
+    /// Hover text with the full picture: prompts, reply, path, branch, ports.
+    private var details: String {
+        var lines: [String] = []
+        if let agent = card.agentName { lines.append(agent) }
+        if let detail = card.statusDetail { lines.append(detail) }
+        let prompts = card.digest?.prompts.map(\.text) ?? card.prompt.map { [$0] } ?? []
+        for prompt in prompts {
+            lines.append(String.localizedStringWithFormat(
+                String(localized: "agentBoard.card.youAsked", defaultValue: "You asked: %@"), prompt
+            ))
         }
-        .help(text)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(String.localizedStringWithFormat(
-            String(localized: "agentBoard.card.youAsked", defaultValue: "You asked: %@"), text
-        )))
+        if let reply = card.digest?.lastReply ?? card.lastMessage {
+            lines.append(String.localizedStringWithFormat(
+                String(localized: "agentBoard.card.agentSaid", defaultValue: "Agent said: %@"), reply
+            ))
+        }
+        if let directory = card.directory { lines.append(directory) }
+        if !card.ports.isEmpty { lines.append(card.ports.map(String.init).joined(separator: ", ")) }
+        if let section = card.sectionName { lines.append(section) }
+        lines.append(String(localized: "agentBoard.card.help", defaultValue: "Click to switch to this workspace. Double-click to switch and hide the board."))
+        return lines.joined(separator: "\n\n")
+    }
+
+    /// The last two folders, which is usually enough to tell repos apart.
+    static func shortPath(_ path: String) -> String {
+        let components = abbreviated(path).split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count > 2 else { return abbreviated(path) }
+        return "…/" + components.suffix(2).joined(separator: "/")
     }
 
     private var titleRow: some View {
@@ -551,36 +582,14 @@ private struct AgentBoardCardView: View {
         }
     }
 
-    private var contextRow: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let directory = card.directory {
-                labeled(symbol: "folder", text: Self.abbreviated(directory), lines: 1, middle: true)
-                    .help(directory)
-            }
-            HStack(spacing: 8) {
-                if let agent = card.agentName {
-                    chip(symbol: "sparkles", text: agent)
-                }
-                if let branch = card.branch {
-                    chip(symbol: "arrow.triangle.branch", text: card.branchIsDirty ? "\(branch) •" : branch)
-                }
-                if let pr = card.pullRequestLabel {
-                    chip(symbol: Self.pullRequestSymbol(card.pullRequestStatus), text: pr)
-                }
-                if !card.ports.isEmpty {
-                    chip(symbol: "network", text: card.ports.prefix(3).map(String.init).joined(separator: ", "))
-                }
-                if let section = card.sectionName {
-                    chip(symbol: "square.stack", text: section)
-                }
-            }
-            .lineLimit(1)
-        }
-    }
-
     @ViewBuilder
     private var contextMenu: some View {
         Button(String(localized: "agentBoard.card.open", defaultValue: "Go to Workspace"), action: onSelect)
+        if let summary = card.summary {
+            Button(String(localized: "agentBoard.card.copySummary", defaultValue: "Copy Summary")) {
+                Self.copy(summary)
+            }
+        }
         if let directory = card.directory {
             Divider()
             Button(String(localized: "agentBoard.card.copyPath", defaultValue: "Copy Path")) {
@@ -605,39 +614,6 @@ private struct AgentBoardCardView: View {
             Button(String(localized: "agentBoard.card.openPullRequest", defaultValue: "Open Pull Request")) {
                 NSWorkspace.shared.open(url)
             }
-        }
-    }
-
-    private func labeled(symbol: String, text: String, lines: Int, middle: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Image(systemName: symbol)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .frame(width: 11)
-            Text(text)
-                .font(.system(size: 11))
-                .foregroundStyle(.primary.opacity(0.85))
-                .lineLimit(lines)
-                .truncationMode(middle ? .middle : .tail)
-        }
-    }
-
-    private func chip(symbol: String, text: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: symbol)
-                .font(.system(size: 9))
-            Text(text)
-                .font(.system(size: 10))
-                .truncationMode(.middle)
-        }
-        .foregroundStyle(.secondary)
-    }
-
-    private static func pullRequestSymbol(_ status: SidebarPullRequestStatus?) -> String {
-        switch status {
-        case .merged: return "arrow.triangle.merge"
-        case .closed: return "xmark.circle"
-        default: return "arrow.triangle.pull"
         }
     }
 

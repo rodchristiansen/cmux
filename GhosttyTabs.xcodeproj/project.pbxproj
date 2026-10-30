@@ -11,6 +11,7 @@
 			A5001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001012 /* ContentView.swift */; };
 			E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */; };
 			A9B0A12D0000000100000003 /* AgentTranscriptDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12D0000000100000004 /* AgentTranscriptDigest.swift */; };
+		A9B0A12D0000000100000005 /* AgentBoardSummarizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12D0000000100000006 /* AgentBoardSummarizer.swift */; };
 		A9B0A12D0000000100000001 /* AgentBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12D0000000100000002 /* AgentBoard.swift */; };
 		A1B2C3D4E5F60001DEADBEEF /* SidebarSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002DEADBEEF /* SidebarSection.swift */; };
 			W5E7C001A1B2C3D4F6070001 /* WorkspaceSetImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = W5E7C002A1B2C3D4F6070001 /* WorkspaceSetImporter.swift */; };
@@ -224,6 +225,7 @@
 			A5001012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 			9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSelectionState.swift; sourceTree = "<group>"; };
 			A9B0A12D0000000100000004 /* AgentTranscriptDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTranscriptDigest.swift; sourceTree = "<group>"; };
+		A9B0A12D0000000100000006 /* AgentBoardSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBoardSummarizer.swift; sourceTree = "<group>"; };
 		A9B0A12D0000000100000002 /* AgentBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBoard.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002DEADBEEF /* SidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSection.swift; sourceTree = "<group>"; };
 			W5E7C002A1B2C3D4F6070001 /* WorkspaceSetImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSetImporter.swift; sourceTree = "<group>"; };
@@ -483,6 +485,7 @@
 					A5001011 /* cmuxApp.swift */,
 					A5001012 /* ContentView.swift */,
 					A9B0A12D0000000100000002 /* AgentBoard.swift */,
+					A9B0A12D0000000100000006 /* AgentBoardSummarizer.swift */,
 					A9B0A12D0000000100000004 /* AgentTranscriptDigest.swift */,
 					A1B2C3D4E5F60002DEADBEEF /* SidebarSection.swift */,
 					W5E7C002A1B2C3D4F6070001 /* WorkspaceSetImporter.swift */,
@@ -822,6 +825,7 @@
 					A5001002 /* ContentView.swift in Sources */,
 					E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */,
 					A9B0A12D0000000100000001 /* AgentBoard.swift in Sources */,
+					A9B0A12D0000000100000005 /* AgentBoardSummarizer.swift in Sources */,
 					A9B0A12D0000000100000003 /* AgentTranscriptDigest.swift in Sources */,
 					A1B2C3D4E5F60001DEADBEEF /* SidebarSection.swift in Sources */,
 					W5E7C001A1B2C3D4F6070001 /* WorkspaceSetImporter.swift in Sources */,
