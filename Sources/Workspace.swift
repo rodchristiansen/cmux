@@ -6696,6 +6696,11 @@ final class Workspace: Identifiable, ObservableObject {
     /// card says what the agent was asked, not only that it is running.
     @Published var agentPrompt: WorkspaceAgentPrompt?
 
+    /// Transcript files of this workspace's agents, keyed by tool ("claude" or
+    /// "codex"), reported by the hooks. The agent board reads recent prompts and
+    /// replies from them.
+    @Published var agentTranscripts: [String: String] = [:]
+
     /// Lanes launch recovery tied to this workspace before its pane has run. They
     /// stay detached until the row is first shown, and that is expected, so they
     /// keep counting as Active and get no Detached pill until tmux reports them
@@ -7826,6 +7831,7 @@ final class Workspace: Identifiable, ObservableObject {
         listeningPorts.removeAll()
         metadataBlocks.removeAll()
         agentPrompt = nil
+        agentTranscripts.removeAll()
         resetBrowserPanelsForContextChange(reason: reason)
     }
 

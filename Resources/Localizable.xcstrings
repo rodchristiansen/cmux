@@ -88759,6 +88759,40 @@
           }
         }
       }
+    },
+    "agentBoard.card.agentSaid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent said: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エージェントの発言: %@"
+          }
+        }
+      }
+    },
+    "agentBoard.card.youAsked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You asked: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あなたの依頼: %@"
+          }
+        }
+      }
     }
   }
 }

@@ -1782,6 +1782,9 @@ class TerminalController {
         case "set_agent_prompt":
             return setAgentPrompt(args)
 
+        case "set_agent_transcript":
+            return setAgentTranscript(args)
+
         case "clear_agent_pid":
             return clearAgentPID(args)
 
@@ -15290,6 +15293,30 @@ class TerminalController {
         }
         scheduleSidebarMutation(target: target) { _, tab in
             tab.agentPrompt = WorkspaceAgentPrompt(text: text, timestamp: Date())
+        }
+        return "OK"
+    }
+
+    /// Record the transcript file of this workspace's Claude Code or Codex agent.
+    /// Usage: set_agent_transcript <claude|codex> [--tab=<id>] -- <path>
+    private func setAgentTranscript(_ args: String) -> String {
+        let usage = "ERROR: Usage: set_agent_transcript <claude|codex> [--tab=<id>] -- <path>"
+        let parts = splitMetadataBlockArgs(args)
+        let parsed = parseOptionsNoStop(parts.optionsPart)
+        guard let tool = parsed.positional.first, ["claude", "codex"].contains(tool),
+              let rawPath = parts.markdownPart?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawPath.hasPrefix("/") || rawPath.hasPrefix("~") else {
+            return usage
+        }
+        let path = (rawPath as NSString).expandingTildeInPath
+        let targetResolution = parseSidebarMutationTabTarget(options: parsed.options)
+        guard let target = targetResolution.target else {
+            return targetResolution.error ?? "ERROR: No tab selected"
+        }
+        scheduleSidebarMutation(target: target) { _, tab in
+            if tab.agentTranscripts[tool] != path {
+                tab.agentTranscripts[tool] = path
+            }
         }
         return "OK"
     }
