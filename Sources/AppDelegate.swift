@@ -12012,11 +12012,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
-        if matchConfiguredShortcut(event: event, action: .toggleAgentBoard) {
-            AgentBoardSettings.toggle()
-            return true
-        }
-
         if matchConfiguredShortcut(event: event, action: .collapseAllSections) {
             return setAllSectionsCollapsedInActiveMainWindow(true, preferredWindow: mainWindowForShortcutEvent(event))
         }

@@ -3,14 +3,14 @@ import Combine
 import CryptoKit
 import Foundation
 
-/// Writes the one-line status on each agent board card ("Checking whether the
-/// Kerberos claims are verified before the report goes out") by asking Claude
-/// Haiku through the user's own `claude` CLI. Summaries are cached on disk by
+/// Writes the one-line summary under each agent workspace in the sidebar
+/// ("Checking whether the Kerberos claims are verified before the report goes
+/// out") by asking the session's own agent CLI. Summaries are cached on disk by
 /// the conversation they describe, so a relaunch does not regenerate them.
 @MainActor
-final class AgentBoardSummarizer: ObservableObject {
-    static let shared = AgentBoardSummarizer()
-    static let enabledKey = "agentBoard.summaries"
+final class AgentSummarizer: ObservableObject {
+    static let shared = AgentSummarizer()
+    static let enabledKey = "sidebarShowAgentSummary"
 
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
@@ -69,7 +69,7 @@ final class AgentBoardSummarizer: ObservableObject {
         }
         pending[workspaceId] = input
 #if DEBUG
-        dlog("agentBoard.summary.queue workspace=\(workspaceId.uuidString.prefix(8)) pending=\(pending.count)")
+        dlog("agentSummary.queue workspace=\(workspaceId.uuidString.prefix(8)) pending=\(pending.count)")
 #endif
         drain()
     }
@@ -94,7 +94,7 @@ final class AgentBoardSummarizer: ObservableObject {
     private func finish(_ workspaceId: UUID, input: Input, text: String?) {
         running.remove(workspaceId)
 #if DEBUG
-        dlog("agentBoard.summary.done workspace=\(workspaceId.uuidString.prefix(8)) ok=\(text != nil)")
+        dlog("agentSummary.done workspace=\(workspaceId.uuidString.prefix(8)) ok=\(text != nil)")
 #endif
         if let text {
             entries[workspaceId] = Entry(
@@ -116,7 +116,7 @@ final class AgentBoardSummarizer: ObservableObject {
 
     private static func prompt(for input: Input) -> String {
         var lines = [
-            "You write status lines for a board of coding-agent sessions.",
+            "You write status lines for a sidebar of coding-agent sessions.",
             "In one plain sentence of at most 14 words, say what the user wants and where it stands.",
             "No preamble, no quotes, no markdown.",
             "",
@@ -156,7 +156,7 @@ final class AgentBoardSummarizer: ObservableObject {
         guard let path = executable(for: tool) else { return nil }
         let home = NSHomeDirectory()
         let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("cmux-agent-board-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("cmux-agent-summary-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let codexOutput = scratch.appendingPathComponent("summary.txt")
@@ -245,7 +245,13 @@ final class AgentBoardSummarizer: ObservableObject {
         guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
         let folder = caches.appendingPathComponent(Bundle.main.bundleIdentifier ?? "cmux", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("agent-board-summaries.json")
+        let url = folder.appendingPathComponent("agent-summaries.json")
+        // Keep summaries written under the old name rather than regenerating them.
+        let legacy = folder.appendingPathComponent("agent-board-summaries.json")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.moveItem(at: legacy, to: url)
+        }
+        return url
     }
 
     private func load() {

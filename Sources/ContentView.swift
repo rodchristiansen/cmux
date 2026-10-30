@@ -2631,14 +2631,7 @@ struct ContentView: View {
         let selectedWorkspaceId = tabManager.selectedTabId
         let retiringWorkspaceId = self.retiringWorkspaceId
 
-        return VStack(spacing: 8) {
-          if agentBoardExpanded && !isMinimalMode {
-            AgentBoardView(tabManager: tabManager, onClose: {
-                withAnimation(.easeInOut(duration: 0.2)) { agentBoardExpanded = false }
-            })
-            .transition(.move(edge: .top).combined(with: .opacity))
-          }
-          ZStack {
+        return ZStack {
             ZStack {
                 ForEach(mountedWorkspaces) { tab in
                     let isSelectedWorkspace = selectedWorkspaceId == tab.id
@@ -2688,9 +2681,7 @@ struct ContentView: View {
                 .opacity(sidebarSelectionState.selection == .notifications ? 1 : 0)
                 .allowsHitTesting(sidebarSelectionState.selection == .notifications)
                 .accessibilityHidden(sidebarSelectionState.selection != .notifications)
-          }
         }
-        .animation(.easeInOut(duration: 0.2), value: agentBoardExpanded)
         .padding(.top, {
             if #available(macOS 26.0, *) {
                 return 0  // Native glass titlebar handles spacing via safe area
@@ -2707,8 +2698,6 @@ struct ContentView: View {
             }
         }
     }
-
-    @AppStorage(AgentBoardSettings.expandedKey) private var agentBoardExpanded = false
 
     private var terminalContentWithSidebarDropOverlay: some View {
         terminalContent
@@ -2964,16 +2953,6 @@ struct ContentView: View {
                     }
 
                     ToolbarItemGroup(placement: .primaryAction) {
-                        Button {
-                            agentBoardExpanded.toggle()
-                        } label: {
-                            Image(systemName: agentBoardExpanded ? "rectangle.split.3x1.fill" : "rectangle.split.3x1")
-                        }
-                        .buttonStyle(.accessoryBarAction)
-                        .accessibilityIdentifier("toolbar.agentBoard")
-                        .accessibilityLabel(String(localized: "toolbar.agentBoard.label", defaultValue: "Agent Board"))
-                        .help(KeyboardShortcutSettings.Action.toggleAgentBoard.tooltip(String(localized: "toolbar.agentBoard.tooltip", defaultValue: "Show or hide the Agent Board")))
-
                         ControlGroup {
                             Button {
                                 tabManager.newSurface()
@@ -10105,6 +10084,7 @@ struct VerticalTabsSidebar: View {
     @StateObject private var dragAutoScrollController = SidebarDragAutoScrollController()
     @StateObject private var dragFailsafeMonitor = SidebarDragFailsafeMonitor()
     @StateObject private var tabItemSettingsStore = SidebarTabItemSettingsStore()
+    @StateObject private var agentContextStore = AgentContextStore()
     @ObservedObject private var keyboardShortcutSettingsObserver = KeyboardShortcutSettingsObserver.shared
     @State private var draggedTabId: UUID?
     @State private var dropIndicator: SidebarDropIndicator?
@@ -10210,9 +10190,10 @@ struct VerticalTabsSidebar: View {
     }
 
     private func workspaceMatchesSearch(_ workspace: Workspace, query: String) -> Bool {
-        SidebarLayout.matchesSearch(
+        let agentText = agentContextStore.contexts[workspace.id]?.searchText ?? ""
+        return SidebarLayout.matchesSearch(
             workspaceTitle: workspace.title,
-            workspaceDescription: workspace.customDescription,
+            workspaceDescription: [workspace.customDescription ?? "", agentText].joined(separator: "\n"),
             sectionName: tabManager.sectionForWorkspace(workspace.id)?.name,
             query: query
         )
@@ -10303,6 +10284,7 @@ struct VerticalTabsSidebar: View {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? nil : trimmed
             }(),
+            agentContext: agentContextStore.contexts[tab.id],
             rowSpacing: tabRowSpacing,
             setSelectionToTabs: { selection = .tabs },
             selectedTabIds: $selectedTabIds,
@@ -10605,6 +10587,7 @@ struct VerticalTabsSidebar: View {
         )
         .onAppear {
             modifierKeyMonitor.start()
+            agentContextStore.start(tabManager: tabManager)
             draggedTabId = nil
             dropIndicator = nil
             SidebarDragLifecycleNotification.postStateDidChange(
@@ -13391,6 +13374,7 @@ private struct TabItemView: View, Equatable {
         lhs.accessibilityWorkspaceCount == rhs.accessibilityWorkspaceCount &&
         lhs.unreadCount == rhs.unreadCount &&
         lhs.latestNotificationText == rhs.latestNotificationText &&
+        lhs.agentContext == rhs.agentContext &&
         lhs.rowSpacing == rhs.rowSpacing &&
         lhs.showsModifierShortcutHints == rhs.showsModifierShortcutHints &&
         lhs.contextMenuWorkspaceIds == rhs.contextMenuWorkspaceIds &&
@@ -13415,6 +13399,8 @@ private struct TabItemView: View, Equatable {
     let accessibilityWorkspaceCount: Int
     let unreadCount: Int
     let latestNotificationText: String?
+    /// The agent session's one-line summary and the prompts behind it.
+    let agentContext: AgentSessionContext?
     let rowSpacing: CGFloat
     let setSelectionToTabs: () -> Void
     @Binding var selectedTabIds: Set<UUID>
@@ -13750,8 +13736,12 @@ private struct TabItemView: View, Equatable {
         let accessibilityHintText = String(localized: "sidebar.workspace.accessibilityHint", defaultValue: "Activate to focus this workspace. Drag to reorder, or use Move Up and Move Down actions.")
         let moveUpActionText = String(localized: "sidebar.workspace.moveUpAction", defaultValue: "Move Up")
         let moveDownActionText = String(localized: "sidebar.workspace.moveDownAction", defaultValue: "Move Down")
-        let latestNotificationSubtitle = latestNotificationText
-        let effectiveSubtitle = latestNotificationSubtitle
+        // The session's summary says more than "waiting for input", so it takes
+        // the subtitle line; the prompts and reply behind it are in its tooltip.
+        let effectiveSubtitle = agentContext?.summary
+            ?? latestNotificationText
+            ?? agentContext?.prompts.first
+        let subtitleHelp = agentContext?.details
         // The workspace name (its path in the workspace set) heads the row, so
         // rows are found by where they live. A one-line description is the
         // session's name and sits on the line below; multi-line descriptions
@@ -13888,6 +13878,7 @@ private struct TabItemView: View, Equatable {
                     .lineLimit(2)
                     .truncationMode(.tail)
                     .multilineTextAlignment(.leading)
+                    .safeHelp(subtitleHelp ?? subtitle)
             }
 
             remoteWorkspaceSection
@@ -14203,6 +14194,12 @@ private struct TabItemView: View, Equatable {
         }
     }
 
+    private func copyToPasteboard(_ string: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(string, forType: .string)
+    }
+
     @ViewBuilder
     private var workspaceContextMenu: some View {
         let targetIds = contextMenuWorkspaceIds
@@ -14326,6 +14323,17 @@ private struct TabItemView: View, Equatable {
             if tab.hasCustomDescription {
                 Button(String(localized: "contextMenu.clearWorkspaceDescription", defaultValue: "Clear Workspace Description")) {
                     tabManager.clearCustomDescription(tabId: tab.id)
+                }
+            }
+
+            if let summary = agentContext?.summary {
+                Button(String(localized: "contextMenu.copyAgentSummary", defaultValue: "Copy Agent Summary")) {
+                    copyToPasteboard(summary)
+                }
+            }
+            if let prompt = agentContext?.prompts.first {
+                Button(String(localized: "contextMenu.copyLastPrompt", defaultValue: "Copy Last Prompt")) {
+                    copyToPasteboard(prompt)
                 }
             }
         }

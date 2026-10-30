@@ -758,10 +758,6 @@ struct cmuxApp: App {
                     }
                 }
 
-                splitCommandButton(title: String(localized: "menu.view.toggleAgentBoard", defaultValue: "Toggle Agent Board"), shortcut: menuShortcut(for: .toggleAgentBoard)) {
-                    AgentBoardSettings.toggle()
-                }
-
                 splitCommandButton(title: String(localized: "menu.view.collapseAllSections", defaultValue: "Collapse All Sections"), shortcut: menuShortcut(for: .collapseAllSections)) {
                     activeTabManager.setAllSectionsCollapsed(true)
                 }
@@ -4330,6 +4326,7 @@ struct SettingsView: View {
     @AppStorage("sidebarShowSSH") private var sidebarShowSSH = true
     @AppStorage("sidebarShowPorts") private var sidebarShowPorts = true
     @AppStorage("sidebarShowLog") private var sidebarShowLog = true
+    @AppStorage(AgentSummarizer.enabledKey) private var sidebarShowAgentSummary = true
     @AppStorage("sidebarShowProgress") private var sidebarShowProgress = true
     @AppStorage("sidebarShowStatusPills") private var sidebarShowMetadata = true
     @AppStorage("sidebarShowAgentIdleStatus") private var sidebarShowAgentIdleStatus = true
@@ -5318,6 +5315,17 @@ struct SettingsView: View {
                                 .controlSize(.small)
                         }
                         .disabled(sidebarHideAllDetails)
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.showAgentSummary", defaultValue: "Summarize Agent Sessions in Sidebar"),
+                            subtitle: String(localized: "settings.app.showAgentSummary.subtitle", defaultValue: "One line on what each Claude Code or Codex session is doing, written by that session's own agent. Hover it for the recent prompts and reply.")
+                        ) {
+                            Toggle("", isOn: $sidebarShowAgentSummary)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
 
                         SettingsCardDivider()
 
@@ -6342,6 +6350,7 @@ struct SettingsView: View {
         sidebarShowSSH = true
         sidebarShowPorts = true
         sidebarShowLog = true
+        sidebarShowAgentSummary = true
         sidebarShowProgress = true
         sidebarShowMetadata = true
         sidebarShowAgentIdleStatus = true
