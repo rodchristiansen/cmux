@@ -300,8 +300,17 @@ final class AgentBoardModel: ObservableObject {
         dlog("agentBoard.cards count=\(built.count) digests=\(digests.count)")
 #endif
         for card in built {
+            // Summarize with the session's own agent; a session of unknown kind is skipped.
+            let tool: AgentBoardSummarizer.Tool?
+            switch card.digest?.tool ?? card.agentName {
+            case "claude", "Claude Code": tool = .claude
+            case "codex", "Codex": tool = .codex
+            default: tool = nil
+            }
+            guard let tool else { continue }
             let prompts = card.digest?.prompts.map(\.text) ?? card.prompt.map { [$0] } ?? []
             AgentBoardSummarizer.shared.request(card.id, input: .init(
+                tool: tool,
                 taskTitle: card.taskHeadline,
                 prompts: prompts,
                 lastReply: card.digest?.lastReply ?? card.lastMessage
@@ -372,7 +381,7 @@ struct AgentBoardView: View {
             }
             .toggleStyle(.button)
             .buttonStyle(.borderless)
-            .help(String(localized: "agentBoard.summaries.tooltip", defaultValue: "Summarize each session with Claude Haiku"))
+            .help(String(localized: "agentBoard.summaries.tooltip", defaultValue: "Summarize each session with its own agent"))
             .accessibilityLabel(String(localized: "agentBoard.summaries.label", defaultValue: "Summaries"))
             Button(action: onClose) {
                 Image(systemName: "chevron.up")

@@ -88800,13 +88800,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Summarize each session with Claude Haiku"
+            "value": "Summarize each session with its own agent"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Claude Haikuで各セッションを要約"
+            "value": "各セッションをそのエージェント自身で要約"
           }
         }
       }

@@ -16,7 +16,14 @@ final class AgentBoardSummarizer: ObservableObject {
         UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
     }
 
+    /// The CLI that summarizes a session: always the one that runs it.
+    enum Tool: String {
+        case claude
+        case codex
+    }
+
     struct Input: Equatable {
+        let tool: Tool
         let taskTitle: String?
         let prompts: [String]
         let lastReply: String?
@@ -24,7 +31,7 @@ final class AgentBoardSummarizer: ObservableObject {
         /// Changes when the user asks something new; a reply alone changes it too,
         /// but those refreshes are rate-limited while an agent is working.
         var key: String {
-            let joined = ([taskTitle ?? ""] + prompts + [lastReply ?? ""]).joined(separator: "\u{1F}")
+            let joined = ([tool.rawValue, taskTitle ?? ""] + prompts + [lastReply ?? ""]).joined(separator: "\u{1F}")
             return SHA256.hash(data: Data(joined.utf8)).map { String(format: "%02x", $0) }.joined()
         }
     }
@@ -41,7 +48,8 @@ final class AgentBoardSummarizer: ObservableObject {
     private var entries: [UUID: Entry] = [:]
     private var pending: [UUID: Input] = [:]
     private var running: Set<UUID> = []
-    private var failedUntil: Date?
+    /// A tool that just failed (not signed in, rate-limited, missing) rests a while.
+    private var failedUntil: [Tool: Date] = [:]
     private let maxConcurrent = 2
     /// While an agent works its reply changes constantly; re-summarize at most this often.
     private let replyRefreshInterval: TimeInterval = 180
@@ -67,13 +75,15 @@ final class AgentBoardSummarizer: ObservableObject {
     }
 
     private func drain() {
-        if let failedUntil, failedUntil > Date() { return }
-        while running.count < maxConcurrent, let (workspaceId, input) = pending.first(where: { !running.contains($0.key) }) {
+        let now = Date()
+        let isResting: (Tool) -> Bool = { [failedUntil] tool in (failedUntil[tool] ?? .distantPast) > now }
+        while running.count < maxConcurrent,
+              let (workspaceId, input) = pending.first(where: { !running.contains($0.key) && !isResting($0.value.tool) }) {
             pending.removeValue(forKey: workspaceId)
             running.insert(workspaceId)
             let prompt = Self.prompt(for: input)
             Task.detached(priority: .utility) { [weak self] in
-                let text = await Self.runClaude(prompt)
+                let text = await Self.run(input.tool, prompt: prompt)
                 await MainActor.run {
                     self?.finish(workspaceId, input: input, text: text)
                 }
@@ -97,12 +107,12 @@ final class AgentBoardSummarizer: ObservableObject {
             save()
         } else {
             // Not signed in, rate-limited, or no CLI: back off instead of retrying every refresh.
-            failedUntil = Date().addingTimeInterval(600)
+            failedUntil[input.tool] = Date().addingTimeInterval(600)
         }
         drain()
     }
 
-    // MARK: - Claude CLI
+    // MARK: - Agent CLIs
 
     private static func prompt(for input: Input) -> String {
         var lines = [
@@ -120,34 +130,59 @@ final class AgentBoardSummarizer: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
-    nonisolated private static func runClaude(_ prompt: String) async -> String? {
+    nonisolated private static func run(_ tool: Tool, prompt: String) async -> String? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: runClaudeBlocking(prompt))
+                continuation.resume(returning: runBlocking(tool, prompt: prompt))
             }
         }
     }
 
-    nonisolated private static func runClaudeBlocking(_ prompt: String) -> String? {
+    nonisolated private static func executable(for tool: Tool) -> String? {
         let home = NSHomeDirectory()
+        let name = tool.rawValue
         let candidates = [
-            "\(home)/.local/bin/claude",
-            "\(home)/.claude/local/claude",
-            "/opt/homebrew/bin/claude",
-            "/usr/local/bin/claude",
+            "\(home)/.local/bin/\(name)",
+            "\(home)/.claude/local/\(name)",
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
         ]
-        guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            return nil
-        }
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// Runs the session's own CLI, so a Claude session is summarized by Claude and
+    /// a Codex session by Codex: the conversation never goes to the other vendor.
+    nonisolated private static func runBlocking(_ tool: Tool, prompt: String) -> String? {
+        guard let path = executable(for: tool) else { return nil }
+        let home = NSHomeDirectory()
+        let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cmux-agent-board-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let codexOutput = scratch.appendingPathComponent("summary.txt")
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
-        // Local settings only, so the user's hooks (and cmux's) do not run for this call.
-        process.arguments = [
-            "-p", "--model", "haiku",
-            "--setting-sources", "local",
-            "--no-session-persistence",
-            "--tools", "",
-        ]
+        switch tool {
+        case .claude:
+            // Local settings only, so the user's hooks (and cmux's) do not run for this call.
+            process.arguments = [
+                "-p", "--model", "haiku",
+                "--setting-sources", "local",
+                "--no-session-persistence",
+                "--tools", "",
+            ]
+        case .codex:
+            // No user config, hooks or saved session; read-only and low effort.
+            process.arguments = [
+                "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
+                "--sandbox", "read-only",
+                "-c", "model_reasoning_effort=\"low\"",
+                "-c", "features.hooks=false",
+                "--output-last-message", codexOutput.path,
+                "-",
+            ]
+        }
         let environment = ProcessInfo.processInfo.environment
         // A clean environment: no CMUX_* variables tying the call to a workspace.
         process.environment = [
@@ -157,9 +192,13 @@ final class AgentBoardSummarizer: ObservableObject {
             "TMPDIR": NSTemporaryDirectory(),
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
         ]
-        process.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        process.currentDirectoryURL = scratch
         let input = Pipe()
-        let output = Pipe()
+        // Output goes to a file, not a pipe, so a hung CLI cannot block the read past the timeout.
+        let stdoutFile = scratch.appendingPathComponent("stdout.txt")
+        FileManager.default.createFile(atPath: stdoutFile.path, contents: nil)
+        guard let output = try? FileHandle(forWritingTo: stdoutFile) else { return nil }
+        defer { try? output.close() }
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
@@ -172,15 +211,17 @@ final class AgentBoardSummarizer: ObservableObject {
         }
         input.fileHandleForWriting.write(Data(prompt.utf8))
         try? input.fileHandleForWriting.close()
-
-        if finished.wait(timeout: .now() + 60) == .timedOut {
+        if finished.wait(timeout: .now() + 90) == .timedOut {
             process.terminate()
             return nil
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        guard process.terminationStatus == 0,
-              let raw = String(data: data, encoding: .utf8) else { return nil }
-        return cleaned(raw)
+        guard process.terminationStatus == 0 else { return nil }
+        let raw: String?
+        switch tool {
+        case .claude: raw = try? String(contentsOf: stdoutFile, encoding: .utf8)
+        case .codex: raw = try? String(contentsOf: codexOutput, encoding: .utf8)
+        }
+        return raw.flatMap(cleaned)
     }
 
     nonisolated static func cleaned(_ raw: String) -> String? {
