@@ -915,6 +915,18 @@ struct cmuxApp: App {
                 splitCommandButton(title: String(localized: "menu.view.showNotifications", defaultValue: "Show Notifications"), shortcut: menuShortcut(for: .showNotifications)) {
                     showNotificationsPopover()
                 }
+
+                Divider()
+
+                splitCommandButton(title: String(localized: "menu.view.showAgentInbox", defaultValue: "Show Agent Inbox"), shortcut: menuShortcut(for: .showAgentInbox)) {
+                    AgentInboxWindowController.shared.show()
+                }
+
+                splitCommandButton(title: String(localized: "menu.view.messageAgent", defaultValue: "Message Agent…"), shortcut: menuShortcut(for: .messageAgent)) {
+                    if let workspace = AgentSteering.selectedWorkspace() {
+                        AgentSteering.presentComposer(for: workspace)
+                    }
+                }
             }
         }
     }
@@ -4327,6 +4339,7 @@ struct SettingsView: View {
     @AppStorage("sidebarShowPorts") private var sidebarShowPorts = true
     @AppStorage("sidebarShowLog") private var sidebarShowLog = true
     @AppStorage(AgentSummarizer.enabledKey) private var sidebarShowAgentSummary = true
+    @AppStorage(AgentUsageStore.showInSidebarKey) private var sidebarShowAgentUsage = true
     @AppStorage("sidebarShowProgress") private var sidebarShowProgress = true
     @AppStorage("sidebarShowStatusPills") private var sidebarShowMetadata = true
     @AppStorage("sidebarShowAgentIdleStatus") private var sidebarShowAgentIdleStatus = true
@@ -5323,6 +5336,17 @@ struct SettingsView: View {
                             subtitle: String(localized: "settings.app.showAgentSummary.subtitle", defaultValue: "One line on what each Claude Code or Codex session is doing, written by that session's own agent. Hover it for the recent prompts and reply.")
                         ) {
                             Toggle("", isOn: $sidebarShowAgentSummary)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            String(localized: "settings.app.showAgentUsage", defaultValue: "Show Claude and Codex Usage in Sidebar"),
+                            subtitle: String(localized: "settings.app.showAgentUsage.subtitle", defaultValue: "How much of each plan's usage limit is spent, at the bottom of the sidebar. Hover it for reset times.")
+                        ) {
+                            Toggle("", isOn: $sidebarShowAgentUsage)
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
@@ -6351,6 +6375,7 @@ struct SettingsView: View {
         sidebarShowPorts = true
         sidebarShowLog = true
         sidebarShowAgentSummary = true
+        sidebarShowAgentUsage = true
         sidebarShowProgress = true
         sidebarShowMetadata = true
         sidebarShowAgentIdleStatus = true

@@ -13,6 +13,10 @@
 			A9B0A12D0000000100000003 /* AgentTranscriptDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12D0000000100000004 /* AgentTranscriptDigest.swift */; };
 		A9B0A12D0000000100000005 /* AgentSummarizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12D0000000100000006 /* AgentSummarizer.swift */; };
 		A9B0A12D0000000100000001 /* AgentContextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12D0000000100000002 /* AgentContextStore.swift */; };
+		A9B0A12E0000000100000007 /* AgentUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12E0000000100000008 /* AgentUsage.swift */; };
+		A9B0A12E0000000100000005 /* AgentInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12E0000000100000006 /* AgentInbox.swift */; };
+		A9B0A12E0000000100000003 /* AgentSteering.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12E0000000100000004 /* AgentSteering.swift */; };
+		A9B0A12E0000000100000001 /* AgentLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0A12E0000000100000002 /* AgentLedger.swift */; };
 		A1B2C3D4E5F60001DEADBEEF /* SidebarSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002DEADBEEF /* SidebarSection.swift */; };
 			W5E7C001A1B2C3D4F6070001 /* WorkspaceSetImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = W5E7C002A1B2C3D4F6070001 /* WorkspaceSetImporter.swift */; };
 			B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */; };
@@ -227,6 +231,10 @@
 			A9B0A12D0000000100000004 /* AgentTranscriptDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTranscriptDigest.swift; sourceTree = "<group>"; };
 		A9B0A12D0000000100000006 /* AgentSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSummarizer.swift; sourceTree = "<group>"; };
 		A9B0A12D0000000100000002 /* AgentContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContextStore.swift; sourceTree = "<group>"; };
+		A9B0A12E0000000100000008 /* AgentUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentUsage.swift; sourceTree = "<group>"; };
+		A9B0A12E0000000100000006 /* AgentInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentInbox.swift; sourceTree = "<group>"; };
+		A9B0A12E0000000100000004 /* AgentSteering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSteering.swift; sourceTree = "<group>"; };
+		A9B0A12E0000000100000002 /* AgentLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLedger.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002DEADBEEF /* SidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSection.swift; sourceTree = "<group>"; };
 			W5E7C002A1B2C3D4F6070001 /* WorkspaceSetImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSetImporter.swift; sourceTree = "<group>"; };
 			B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDragHandleView.swift; sourceTree = "<group>"; };
@@ -485,6 +493,10 @@
 					A5001011 /* cmuxApp.swift */,
 					A5001012 /* ContentView.swift */,
 					A9B0A12D0000000100000002 /* AgentContextStore.swift */,
+					A9B0A12E0000000100000008 /* AgentUsage.swift */,
+					A9B0A12E0000000100000006 /* AgentInbox.swift */,
+					A9B0A12E0000000100000004 /* AgentSteering.swift */,
+					A9B0A12E0000000100000002 /* AgentLedger.swift */,
 					A9B0A12D0000000100000006 /* AgentSummarizer.swift */,
 					A9B0A12D0000000100000004 /* AgentTranscriptDigest.swift */,
 					A1B2C3D4E5F60002DEADBEEF /* SidebarSection.swift */,
@@ -825,6 +837,10 @@
 					A5001002 /* ContentView.swift in Sources */,
 					E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */,
 					A9B0A12D0000000100000001 /* AgentContextStore.swift in Sources */,
+					A9B0A12E0000000100000007 /* AgentUsage.swift in Sources */,
+					A9B0A12E0000000100000005 /* AgentInbox.swift in Sources */,
+					A9B0A12E0000000100000003 /* AgentSteering.swift in Sources */,
+					A9B0A12E0000000100000001 /* AgentLedger.swift in Sources */,
 					A9B0A12D0000000100000005 /* AgentSummarizer.swift in Sources */,
 					A9B0A12D0000000100000003 /* AgentTranscriptDigest.swift in Sources */,
 					A1B2C3D4E5F60001DEADBEEF /* SidebarSection.swift in Sources */,

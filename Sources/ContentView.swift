@@ -11806,6 +11806,9 @@ private struct SidebarFooterButtons: View {
     var body: some View {
         HStack(spacing: 4) {
             SidebarHelpMenuButton(onSendFeedback: onSendFeedback)
+            SidebarAgentInboxButton()
+            Spacer(minLength: 6)
+            SidebarAgentUsageView()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -12507,6 +12510,44 @@ enum FeedbackComposerBridge {
                 return "Couldn't send feedback. Please try again."
             }
         }
+    }
+}
+
+/// Opens the Agent Inbox; the badge counts agents asking you something.
+private struct SidebarAgentInboxButton: View {
+    @ObservedObject private var model = AgentInboxModel.shared
+    @ObservedObject private var keyboardShortcutSettingsObserver = KeyboardShortcutSettingsObserver.shared
+    private let title = String(localized: "sidebar.agentInbox.button", defaultValue: "Agent Inbox")
+
+    var body: some View {
+        Button {
+            AgentInboxWindowController.shared.show()
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "tray")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .frame(width: 22, height: 22)
+                if model.askingCount > 0 {
+                    Text(verbatim: "\(min(model.askingCount, 99))")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 3)
+                        .frame(minWidth: 13, minHeight: 13)
+                        .background(Capsule().fill(Color.accentColor))
+                        .offset(x: 3, y: -1)
+                }
+            }
+        }
+        .buttonStyle(SidebarFooterIconButtonStyle())
+        .frame(width: 22, height: 22)
+        .safeHelp(KeyboardShortcutSettings.Action.showAgentInbox.tooltip(title))
+        .accessibilityLabel(title)
+        .accessibilityValue(String.localizedStringWithFormat(
+            String(localized: "sidebar.agentInbox.asking", defaultValue: "%lld asking"), model.askingCount
+        ))
+        .onAppear { model.start() }
     }
 }
 
@@ -14336,6 +14377,12 @@ private struct TabItemView: View, Equatable {
                     copyToPasteboard(prompt)
                 }
             }
+            if agentContext != nil, AgentSteering.canMessage(tab) {
+                Button(String(localized: "contextMenu.messageAgent", defaultValue: "Message Agent…")) {
+                    AgentSteering.presentComposer(for: tab)
+                }
+            }
+            AgentPullRequestMenu(urls: agentContext?.pullRequests ?? [])
         }
 
         if !remoteContextMenuWorkspaceIds.isEmpty {

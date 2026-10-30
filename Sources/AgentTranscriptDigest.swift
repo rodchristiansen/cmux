@@ -13,6 +13,8 @@ struct AgentTranscriptDigest: Equatable, Sendable {
     var prompts: [Prompt] = []
     var lastReply: String?
     var lastReplyDate: Date?
+    /// Pull request links the agent posted in its replies, oldest first.
+    var pullRequests: [String] = []
     /// "claude" or "codex".
     var tool: String?
     /// The session is running now, or its transcript changed recently, so the
@@ -276,10 +278,13 @@ final class AgentTranscriptReader: @unchecked Sendable {
         for prompt in new.prompts.reversed() {
             appendPrompt(prompt.text, date: prompt.date, to: &chronological)
         }
+        var pullRequests = old.pullRequests
+        for url in new.pullRequests { appendPullRequest(url, to: &pullRequests) }
         return AgentTranscriptDigest(
             prompts: Array(chronological.suffix(promptLimit).reversed()),
             lastReply: new.lastReply ?? old.lastReply,
-            lastReplyDate: new.lastReply != nil ? new.lastReplyDate : old.lastReplyDate
+            lastReplyDate: new.lastReply != nil ? new.lastReplyDate : old.lastReplyDate,
+            pullRequests: pullRequests
         )
     }
 
@@ -290,6 +295,7 @@ final class AgentTranscriptReader: @unchecked Sendable {
         var prompts: [AgentTranscriptDigest.Prompt] = []
         var lastReply: String?
         var lastReplyDate: Date?
+        var pullRequests: [String] = []
 
         for line in lines {
             // Large records are mostly API request blobs and tool output; decode one
@@ -320,6 +326,7 @@ final class AgentTranscriptReader: @unchecked Sendable {
                     .filter { $0["type"] as? String == "text" }
                     .compactMap { $0["text"] as? String }
                     .joined(separator: " ")
+                for url in pullRequestLinks(in: text) { appendPullRequest(url, to: &pullRequests) }
                 if let reply = cleanedReply(text) {
                     lastReply = reply
                     lastReplyDate = date
@@ -335,9 +342,13 @@ final class AgentTranscriptReader: @unchecked Sendable {
                     if let cleaned = cleanedPrompt(text) {
                         appendPrompt(cleaned, date: date, to: &prompts)
                     }
-                } else if role == "assistant", let reply = cleanedReply(texts.joined(separator: " ")) {
-                    lastReply = reply
-                    lastReplyDate = date
+                } else if role == "assistant" {
+                    let text = texts.joined(separator: " ")
+                    for url in pullRequestLinks(in: text) { appendPullRequest(url, to: &pullRequests) }
+                    if let reply = cleanedReply(text) {
+                        lastReply = reply
+                        lastReplyDate = date
+                    }
                 }
             default:
                 continue
@@ -347,8 +358,31 @@ final class AgentTranscriptReader: @unchecked Sendable {
         return AgentTranscriptDigest(
             prompts: Array(prompts.suffix(promptLimit).reversed()),
             lastReply: lastReply,
-            lastReplyDate: lastReplyDate
+            lastReplyDate: lastReplyDate,
+            pullRequests: pullRequests
         )
+    }
+
+    static let pullRequestLimit = 12
+
+    private static let pullRequestPattern = try! NSRegularExpression(
+        pattern: #"https://(?:github\.com/[\w.-]+/[\w.-]+/pull/\d+|dev\.azure\.com/[\w.-]+/[\w.%-]+/_git/[\w.%-]+/pullrequest/\d+)"#
+    )
+
+    /// GitHub and Azure DevOps pull request links in an agent message.
+    static func pullRequestLinks(in text: String) -> [String] {
+        guard text.contains("/pull") else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return pullRequestPattern.matches(in: text, range: range).compactMap {
+            Range($0.range, in: text).map { String(text[$0]) }
+        }
+    }
+
+    /// A link mentioned again moves to the end, so the list reads oldest to newest.
+    private static func appendPullRequest(_ url: String, to list: inout [String]) {
+        list.removeAll { $0 == url }
+        list.append(url)
+        if list.count > pullRequestLimit { list.removeFirst(list.count - pullRequestLimit) }
     }
 
     private static let userTypeMarker = Data(#""type":"user""#.utf8)

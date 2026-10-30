@@ -12087,6 +12087,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        if matchConfiguredShortcut(event: event, action: .showAgentInbox) {
+            AgentInboxWindowController.shared.toggle()
+            return true
+        }
+
+        if matchConfiguredShortcut(event: event, action: .messageAgent),
+           let workspace = AgentSteering.selectedWorkspace() {
+            AgentSteering.presentComposer(for: workspace)
+            return true
+        }
+
         // Check Jump to Unread shortcut
         if matchConfiguredShortcut(event: event, action: .jumpToUnread) {
 #if DEBUG
