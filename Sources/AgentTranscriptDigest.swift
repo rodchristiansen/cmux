@@ -114,6 +114,14 @@ final class AgentTranscriptReader: @unchecked Sendable {
             .max { $0.1 < $1.1 }
         if let reported { return Resolution(path: reported.0, isRunning: false, isDirectoryGuess: false) }
 
+        // A Codex lane runs in tmux without the cmux environment, so its hooks
+        // never reach cmux; `codex-lane` records the lane's thread instead.
+        for name in locator.tmuxSessions {
+            if let path = codexLaneTranscriptPath(tmuxSession: name) {
+                return Resolution(path: path, isRunning: true, isDirectoryGuess: false)
+            }
+        }
+
         // Otherwise find a live Claude Code session by its PID, its tmux session,
         // or, when exactly one live session runs there, its directory.
         let byPID = liveClaude.first { locator.agentPIDs.contains($0.pid) }
@@ -167,6 +175,42 @@ final class AgentTranscriptReader: @unchecked Sendable {
         for folder in folders {
             let candidate = "\(projects)/\(folder)/\(sessionId).jsonl"
             if fileManager.fileExists(atPath: candidate) { return candidate }
+        }
+        return nil
+    }
+
+    /// Thread id to rollout path; a thread's file never moves once found.
+    private var codexRollouts: [String: String] = [:]
+
+    /// `~/.local/state/codex-lane/lanes/<tmux session>` holds the lane's Codex
+    /// thread id; its rollout is `~/.codex/sessions/<y>/<m>/<d>/rollout-…-<id>.jsonl`.
+    private func codexLaneTranscriptPath(tmuxSession: String) -> String? {
+        guard !tmuxSession.contains("/") else { return nil }
+        let ledger = (home as NSString).appendingPathComponent(".local/state/codex-lane/lanes/\(tmuxSession)")
+        guard let raw = try? String(contentsOfFile: ledger, encoding: .utf8) else { return nil }
+        let threadId = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard threadId.count == 36,
+              threadId.allSatisfy({ $0.isHexDigit || $0 == "-" }) else { return nil }
+        if let known = codexRollouts[threadId], fileManager.fileExists(atPath: known) { return known }
+
+        // Thread ids are UUIDv7: the first 48 bits are the creation time in ms,
+        // which names the day folder. Look a day either side for time zones.
+        let hex = threadId.replacingOccurrences(of: "-", with: "").prefix(12)
+        guard let millis = UInt64(hex, radix: 16) else { return nil }
+        let created = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+        let sessions = (home as NSString).appendingPathComponent(".codex/sessions")
+        let calendar = Calendar(identifier: .gregorian)
+        let suffix = "-\(threadId).jsonl"
+        for offset in [0, -1, 1] {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: created) else { continue }
+            let parts = calendar.dateComponents([.year, .month, .day], from: day)
+            guard let year = parts.year, let month = parts.month, let dayOfMonth = parts.day else { continue }
+            let folder = String(format: "%@/%04d/%02d/%02d", sessions, year, month, dayOfMonth)
+            guard let names = try? fileManager.contentsOfDirectory(atPath: folder),
+                  let name = names.first(where: { $0.hasSuffix(suffix) }) else { continue }
+            let path = (folder as NSString).appendingPathComponent(name)
+            codexRollouts[threadId] = path
+            return path
         }
         return nil
     }
