@@ -13859,7 +13859,7 @@ private struct TabItemView: View, Equatable {
 
             if let sessionName {
                 Text(sessionName)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 10.5, weight: .semibold))
                     .foregroundColor(activeSecondaryColor(0.8))
                     .lineLimit(1)
                     .truncationMode(.tail)

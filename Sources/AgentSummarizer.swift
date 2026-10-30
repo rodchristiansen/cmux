@@ -31,7 +31,8 @@ final class AgentSummarizer: ObservableObject {
         /// Changes when the user asks something new; a reply alone changes it too,
         /// but those refreshes are rate-limited while an agent is working.
         var key: String {
-            let joined = ([tool.rawValue, taskTitle ?? ""] + prompts + [lastReply ?? ""]).joined(separator: "\u{1F}")
+            let joined = ([AgentSummarizer.promptVersion, tool.rawValue, taskTitle ?? ""] + prompts + [lastReply ?? ""])
+                .joined(separator: "\u{1F}")
             return SHA256.hash(data: Data(joined.utf8)).map { String(format: "%02x", $0) }.joined()
         }
     }
@@ -114,10 +115,21 @@ final class AgentSummarizer: ObservableObject {
 
     // MARK: - Agent CLIs
 
+    /// Part of every cache key, so changing the wording regenerates old lines.
+    nonisolated static let promptVersion = "2"
+
     private static func prompt(for input: Input) -> String {
         var lines = [
-            "You write status lines for a sidebar of coding-agent sessions.",
-            "In one plain sentence of at most 14 words, say what the user wants and where it stands.",
+            "Write the one-line status shown under a coding-agent session in a sidebar.",
+            "Someone glancing at a list of sessions must tell what this one is about and where it stands.",
+            "Format: the work itself, then its state. At most 14 words.",
+            "Lead with the subject (system, feature, bug, document), never with a person.",
+            "Never say \"the user\", \"user\", \"the agent\", \"session\", \"wants\" or \"asked\".",
+            "State is concrete: what is done, what is in progress, or what is waiting on whom.",
+            "Examples:",
+            "- Kerberos claims check: verified, report draft waiting for review",
+            "- Sidebar agent summaries: shipped in #74, Codex lanes fixed in #75",
+            "- PaperCut API ingestion upgrade: tests failing on auth token refresh",
             "No preamble, no quotes, no markdown.",
             "",
         ]
@@ -234,7 +246,7 @@ final class AgentSummarizer: ObservableObject {
         if failureMarkers.contains(where: lowered.contains) || lowered.hasPrefix("api error") || lowered.hasPrefix("error:") {
             return nil
         }
-        let unquoted = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”*` "))
+        let unquoted = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”*` -•"))
         guard !unquoted.isEmpty else { return nil }
         return unquoted.count > 180 ? String(unquoted.prefix(180)) + "…" : unquoted
     }
