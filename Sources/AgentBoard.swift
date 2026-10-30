@@ -73,6 +73,18 @@ struct AgentBoardCard: Identifiable, Equatable {
     /// Recent prompts and the agent's latest message, read from its transcript.
     let digest: AgentTranscriptDigest?
 
+    /// The focused pane's directory, else the workspace's.
+    @MainActor
+    static func directory(of workspace: Workspace) -> String? {
+        if let focused = workspace.focusedPanelId,
+           let dir = workspace.panelDirectories[focused]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !dir.isEmpty {
+            return dir
+        }
+        let dir = workspace.currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        return dir.isEmpty ? nil : dir
+    }
+
     @MainActor
     static func make(
         workspace: Workspace,
@@ -82,7 +94,12 @@ struct AgentBoardCard: Identifiable, Equatable {
     ) -> AgentBoardCard? {
         let agentEntries = workspace.statusEntries.values.filter(\.isAgentStatus)
         let hasSession = workspace.hasAttachedAgentSession
-        guard !agentEntries.isEmpty || hasSession else { return nil }
+        let detachedLanes = workspace.visibleDetachedLanes
+        // Hooks feed the status pills, but a session the hooks never reached (an
+        // older lane, another cmux) still shows when its transcript is found.
+        guard !agentEntries.isEmpty || hasSession || !detachedLanes.isEmpty || digest?.isLive == true else {
+            return nil
+        }
 
         let latestEntry = agentEntries.max { $0.timestamp < $1.timestamp }
         let column: AgentBoardColumn
@@ -98,7 +115,12 @@ struct AgentBoardCard: Identifiable, Equatable {
             switch latestEntry?.key {
             case "claude_code": return "Claude Code"
             case "codex": return "Codex"
-            default: return nil
+            default:
+                switch digest?.tool {
+                case "claude": return "Claude Code"
+                case "codex": return "Codex"
+                default: return detachedLanes.first.map { $0.isCodex ? "Codex" : "Claude Code" }
+                }
             }
         }()
 
@@ -119,15 +141,7 @@ struct AgentBoardCard: Identifiable, Equatable {
             return parts.isEmpty ? nil : parts.joined(separator: " — ")
         }()
 
-        let directory: String? = {
-            if let focused = workspace.focusedPanelId,
-               let dir = workspace.panelDirectories[focused]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !dir.isEmpty {
-                return dir
-            }
-            let dir = workspace.currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-            return dir.isEmpty ? nil : dir
-        }()
+        let directory = directory(of: workspace)
 
         let statusDate = agentEntries.map(\.timestamp).max()
         let lastActivity = [statusDate, notification?.createdAt, workspace.agentPrompt?.timestamp,
@@ -234,8 +248,9 @@ final class AgentBoardModel: ObservableObject {
     /// Reads transcripts off the main thread, then redraws the cards with them.
     private func refreshTranscripts() {
         guard let tabManager, !isReadingTranscripts else { return }
-        let locators = tabManager.tabs.compactMap { workspace -> AgentTranscriptLocator? in
-            guard cards.contains(where: { $0.id == workspace.id }) else { return nil }
+        // Every workspace, not just the carded ones: finding a live session is
+        // what puts a workspace with no status pill on the board.
+        let locators = tabManager.tabs.map { workspace -> AgentTranscriptLocator in
             var tmux = Set(workspace.ownedTmuxSessions)
             tmux.formUnion(workspace.detachedLanes.map(\.session))
             return AgentTranscriptLocator(
@@ -243,7 +258,7 @@ final class AgentBoardModel: ObservableObject {
                 reportedPaths: Array(workspace.agentTranscripts.values),
                 agentPIDs: Array(workspace.agentPIDs.values) + workspace.detachedLanes.map(\.panePID),
                 tmuxSessions: Array(tmux),
-                directory: cards.first(where: { $0.id == workspace.id })?.directory
+                directory: AgentBoardCard.directory(of: workspace)
             )
         }
         guard !locators.isEmpty else { return }

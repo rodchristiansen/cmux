@@ -13,6 +13,11 @@ struct AgentTranscriptDigest: Equatable, Sendable {
     var prompts: [Prompt] = []
     var lastReply: String?
     var lastReplyDate: Date?
+    /// "claude" or "codex".
+    var tool: String?
+    /// The session is running now, or its transcript changed recently, so the
+    /// workspace belongs on the board even without a status pill.
+    var isLive = false
 
     var isEmpty: Bool { prompts.isEmpty && lastReply == nil }
 }
@@ -61,23 +66,45 @@ final class AgentTranscriptReader: @unchecked Sendable {
         var claimedByCwd: [String: Int] = [:]
         for session in liveClaude { claimedByCwd[session.cwd, default: 0] += 1 }
 
+        let resolved = locators.compactMap { locator -> (UUID, Resolution)? in
+            resolve(locator, liveClaude: liveClaude, claimedByCwd: claimedByCwd).map { (locator.workspaceId, $0) }
+        }
+        // A session matched only by directory is ambiguous when several workspaces
+        // share that directory, or when another workspace owns it outright.
+        let firmSessions = Set(resolved.compactMap { $0.1.isDirectoryGuess ? nil : $0.1.path })
+        var guessCounts: [String: Int] = [:]
+        for (_, resolution) in resolved where resolution.isDirectoryGuess {
+            guessCounts[resolution.path, default: 0] += 1
+        }
+
         var result: [UUID: AgentTranscriptDigest] = [:]
-        for locator in locators {
-            guard let path = resolvePath(locator, liveClaude: liveClaude, claimedByCwd: claimedByCwd),
-                  let digest = digest(atPath: path),
-                  !digest.isEmpty else { continue }
-            result[locator.workspaceId] = digest
+        for (workspaceId, resolution) in resolved {
+            if resolution.isDirectoryGuess,
+               firmSessions.contains(resolution.path) || guessCounts[resolution.path, default: 0] > 1 {
+                continue
+            }
+            guard var digest = digest(atPath: resolution.path), !digest.isEmpty else { continue }
+            digest.tool = resolution.path.contains("/.codex/") ? "codex" : "claude"
+            digest.isLive = resolution.isRunning
+                || (modificationDate(resolution.path).map { Date().timeIntervalSince($0) < 12 * 3600 } ?? false)
+            result[workspaceId] = digest
         }
         return result
     }
 
+    private struct Resolution {
+        let path: String
+        let isRunning: Bool
+        let isDirectoryGuess: Bool
+    }
+
     // MARK: - Finding the transcript
 
-    private func resolvePath(
+    private func resolve(
         _ locator: AgentTranscriptLocator,
         liveClaude: [ClaudeLiveSession],
         claimedByCwd: [String: Int]
-    ) -> String? {
+    ) -> Resolution? {
         // A hook-reported file wins; with two (Claude and Codex), the busier one.
         let reported = locator.reportedPaths
             .compactMap { path -> (String, Date)? in
@@ -85,7 +112,7 @@ final class AgentTranscriptReader: @unchecked Sendable {
                 return (path, date)
             }
             .max { $0.1 < $1.1 }
-        if let reported { return reported.0 }
+        if let reported { return Resolution(path: reported.0, isRunning: false, isDirectoryGuess: false) }
 
         // Otherwise find a live Claude Code session by its PID, its tmux session,
         // or, when exactly one live session runs there, its directory.
@@ -102,8 +129,9 @@ final class AgentTranscriptReader: @unchecked Sendable {
                   claimedByCwd[directory] == 1 else { return nil }
             return liveClaude.first { $0.cwd == directory }
         }()
-        guard let session = byPID ?? byTmux ?? byDirectory else { return nil }
-        return claudeTranscriptPath(sessionId: session.sessionId, cwd: session.cwd)
+        guard let session = byPID ?? byTmux ?? byDirectory,
+              let path = claudeTranscriptPath(sessionId: session.sessionId, cwd: session.cwd) else { return nil }
+        return Resolution(path: path, isRunning: true, isDirectoryGuess: byPID == nil && byTmux == nil)
     }
 
     /// Claude Code writes `~/.claude/sessions/<pid>.json` for every running session.
@@ -230,6 +258,7 @@ final class AgentTranscriptReader: @unchecked Sendable {
             case "user":
                 guard object["isMeta"] as? Bool != true,
                       object["isSidechain"] as? Bool != true,
+                      object["isCompactSummary"] as? Bool != true,
                       let message = object["message"] as? [String: Any],
                       let text = claudeUserText(message["content"]) else { continue }
                 appendPrompt(text, date: date, to: &prompts)
@@ -323,6 +352,7 @@ final class AgentTranscriptReader: @unchecked Sendable {
         guard !trimmed.isEmpty,
               !trimmed.hasPrefix("<"),
               !trimmed.hasPrefix("Caveat:"),
+              !trimmed.hasPrefix("This session is being continued from a previous conversation"),
               !trimmed.hasPrefix("[Request interrupted") else { return nil }
         let withoutImages = trimmed.replacingOccurrences(
             of: #"\[Image #\d+\]"#, with: "", options: .regularExpression
