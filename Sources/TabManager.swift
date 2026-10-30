@@ -2319,7 +2319,7 @@ class TabManager: ObservableObject {
         return nil
     }
 
-    private nonisolated static func runCommand(
+    nonisolated static func runCommand(
         directory: String,
         executable: String,
         arguments: [String],

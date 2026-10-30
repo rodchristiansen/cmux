@@ -41,6 +41,8 @@ enum KeyboardShortcutSettings {
         case sendFeedback
         case showNotifications
         case jumpToUnread
+        case showAgentInbox
+        case messageAgent
         case triggerFlash
 
         // Navigation
@@ -120,6 +122,8 @@ enum KeyboardShortcutSettings {
             case .sendFeedback: return String(localized: "sidebar.help.sendFeedback", defaultValue: "Send Feedback")
             case .showNotifications: return String(localized: "shortcut.showNotifications.label", defaultValue: "Show Notifications")
             case .jumpToUnread: return String(localized: "shortcut.jumpToUnread.label", defaultValue: "Jump to Latest Unread")
+            case .showAgentInbox: return String(localized: "shortcut.showAgentInbox.label", defaultValue: "Show Agent Inbox")
+            case .messageAgent: return String(localized: "shortcut.messageAgent.label", defaultValue: "Message Agent…")
             case .triggerFlash: return String(localized: "shortcut.flashFocusedPanel.label", defaultValue: "Flash Focused Panel")
             case .nextSurface: return String(localized: "shortcut.nextSurface.label", defaultValue: "Next Surface")
             case .prevSurface: return String(localized: "shortcut.previousSurface.label", defaultValue: "Previous Surface")
@@ -232,6 +236,10 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "i", command: true, shift: false, option: false, control: false)
             case .jumpToUnread:
                 return StoredShortcut(key: "u", command: true, shift: true, option: false, control: false)
+            case .showAgentInbox:
+                return StoredShortcut(key: "i", command: true, shift: true, option: false, control: false)
+            case .messageAgent:
+                return StoredShortcut(key: "k", command: true, shift: true, option: false, control: false)
             case .triggerFlash:
                 return StoredShortcut(key: "h", command: true, shift: true, option: false, control: false)
             case .nextSidebarTab:

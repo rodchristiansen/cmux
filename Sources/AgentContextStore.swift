@@ -9,6 +9,8 @@ struct AgentSessionContext: Equatable {
     /// Newest first.
     var prompts: [String]
     var lastReply: String?
+    /// Pull request links the agent posted, newest last.
+    var pullRequests: [String] = []
 
     /// Hover text: what was asked and what the agent said last.
     var details: String? {
@@ -24,6 +26,13 @@ struct AgentSessionContext: Equatable {
             lines.append(String.localizedStringWithFormat(
                 String(localized: "sidebar.agent.agentSaid", defaultValue: "Agent said: %@"),
                 Self.clipped(lastReply)
+            ))
+        }
+        if !pullRequests.isEmpty {
+            let names = pullRequests.suffix(5).map { AgentPullRequest(url: $0).shortName }
+            lines.append(String.localizedStringWithFormat(
+                String(localized: "sidebar.agent.pullRequests", defaultValue: "Pull requests: %@"),
+                names.joined(separator: ", ")
             ))
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n\n")
@@ -47,7 +56,16 @@ struct AgentSessionContext: Equatable {
 final class AgentContextStore: ObservableObject {
     @Published private(set) var contexts: [UUID: AgentSessionContext] = [:]
 
-    private weak var tabManager: TabManager?
+    private(set) weak var tabManager: TabManager?
+
+    /// Every window's store, so the Agent Inbox can list workspaces from all windows.
+    private struct WeakStore { weak var store: AgentContextStore? }
+    private static var registry: [WeakStore] = []
+    static var all: [AgentContextStore] {
+        registry.removeAll { $0.store == nil }
+        return registry.compactMap(\.store)
+    }
+
     private var cancellables = Set<AnyCancellable>()
     private var digests: [UUID: AgentTranscriptDigest] = [:]
     private var isReadingTranscripts = false
@@ -56,6 +74,9 @@ final class AgentContextStore: ObservableObject {
         guard self.tabManager !== tabManager || cancellables.isEmpty else { return }
         stop()
         self.tabManager = tabManager
+        if !Self.registry.contains(where: { $0.store === self }) {
+            Self.registry.append(WeakStore(store: self))
+        }
         tabManager.$tabs
             .map { $0.map(\.id) }
             .removeDuplicates()
@@ -146,10 +167,15 @@ final class AgentContextStore: ObservableObject {
                     lastReply: lastReply
                 ))
             }
+            let pullRequests = digest?.pullRequests ?? []
+            if !pullRequests.isEmpty {
+                AgentPullRequestStatusStore.shared.request(pullRequests)
+            }
             next[workspace.id] = AgentSessionContext(
                 summary: summariesOn ? AgentSummarizer.shared.summaries[workspace.id] : nil,
                 prompts: prompts,
-                lastReply: lastReply
+                lastReply: lastReply,
+                pullRequests: pullRequests
             )
         }
         if next != contexts {
