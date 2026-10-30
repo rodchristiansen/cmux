@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// What the agent board shows from a session's transcript: the last few
+/// What the sidebar shows from a session's transcript: the last few
 /// prompts the user gave, and the agent's latest message.
 struct AgentTranscriptDigest: Equatable, Sendable {
     struct Prompt: Equatable, Sendable {
@@ -16,7 +16,7 @@ struct AgentTranscriptDigest: Equatable, Sendable {
     /// "claude" or "codex".
     var tool: String?
     /// The session is running now, or its transcript changed recently, so the
-    /// workspace belongs on the board even without a status pill.
+    /// workspace gets a summary even without a status pill.
     var isLive = false
 
     var isEmpty: Bool { prompts.isEmpty && lastReply == nil }

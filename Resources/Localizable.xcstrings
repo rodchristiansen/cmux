@@ -88437,58 +88437,58 @@
         }
       }
     },
-    "agentBoard.accessibilityLabel": {
+    "sidebar.agent.youAsked": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Agent Board"
+            "value": "You asked: %@"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "エージェントボード"
+            "value": "依頼内容: %@"
           }
         }
       }
     },
-    "agentBoard.card.copyBranch": {
+    "sidebar.agent.agentSaid": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Copy Branch Name"
+            "value": "Agent said: %@"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ブランチ名をコピー"
+            "value": "エージェントの返答: %@"
           }
         }
       }
     },
-    "agentBoard.card.copyPath": {
+    "contextMenu.copyAgentSummary": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Copy Path"
+            "value": "Copy Agent Summary"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "パスをコピー"
+            "value": "エージェントの要約をコピー"
           }
         }
       }
     },
-    "agentBoard.card.copyPrompt": {
+    "contextMenu.copyLastPrompt": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -88505,342 +88505,36 @@
         }
       }
     },
-    "agentBoard.card.help": {
+    "settings.app.showAgentSummary": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Click to switch to this workspace. Double-click to switch and hide the board."
+            "value": "Summarize Agent Sessions in Sidebar"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "クリックでこのワークスペースに切り替えます。ダブルクリックで切り替えてボードを隠します。"
+            "value": "サイドバーでエージェントセッションを要約"
           }
         }
       }
     },
-    "agentBoard.card.open": {
+    "settings.app.showAgentSummary.subtitle": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Go to Workspace"
+            "value": "One line on what each Claude Code or Codex session is doing, written by that session's own agent. Hover it for the recent prompts and reply."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ワークスペースへ移動"
-          }
-        }
-      }
-    },
-    "agentBoard.card.openPullRequest": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open Pull Request"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "プルリクエストを開く"
-          }
-        }
-      }
-    },
-    "agentBoard.card.revealInFinder": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show in Finder"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Finderで表示"
-          }
-        }
-      }
-    },
-    "agentBoard.close.tooltip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hide Agent Board"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントボードを隠す"
-          }
-        }
-      }
-    },
-    "agentBoard.column.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nothing here"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "なし"
-          }
-        }
-      }
-    },
-    "agentBoard.column.needsInput": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Needs Input"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "入力待ち"
-          }
-        }
-      }
-    },
-    "agentBoard.column.running": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Running"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "実行中"
-          }
-        }
-      }
-    },
-    "agentBoard.column.waiting": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Waiting on You"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "あなたの応答待ち"
-          }
-        }
-      }
-    },
-    "agentBoard.count": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld agents"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 件のエージェント"
-          }
-        }
-      }
-    },
-    "agentBoard.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent Board"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントボード"
-          }
-        }
-      }
-    },
-    "menu.view.toggleAgentBoard": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Toggle Agent Board"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントボードの切り替え"
-          }
-        }
-      }
-    },
-    "shortcut.toggleAgentBoard.label": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Toggle Agent Board"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントボードの切り替え"
-          }
-        }
-      }
-    },
-    "toolbar.agentBoard.label": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent Board"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントボード"
-          }
-        }
-      }
-    },
-    "toolbar.agentBoard.tooltip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show or hide the Agent Board"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントボードの表示/非表示"
-          }
-        }
-      }
-    },
-    "agentBoard.card.agentSaid": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent said: %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エージェントの発言: %@"
-          }
-        }
-      }
-    },
-    "agentBoard.card.youAsked": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You asked: %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "あなたの依頼: %@"
-          }
-        }
-      }
-    },
-    "agentBoard.summaries.tooltip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Summarize each session with its own agent"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "各セッションをそのエージェント自身で要約"
-          }
-        }
-      }
-    },
-    "agentBoard.summaries.label": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Summaries"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "要約"
-          }
-        }
-      }
-    },
-    "agentBoard.card.copySummary": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Copy Summary"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "要約をコピー"
+            "value": "各 Claude Code または Codex セッションの作業内容を、そのセッション自身のエージェントが1行で要約します。ポインタを合わせると最近のプロンプトと返答を表示します。"
           }
         }
       }

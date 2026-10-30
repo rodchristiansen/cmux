@@ -32,7 +32,6 @@ enum KeyboardShortcutSettings {
 
         // Titlebar / primary UI
         case toggleSidebar
-        case toggleAgentBoard
         case collapseAllSections
         case expandAllSections
         case newTab
@@ -112,7 +111,6 @@ enum KeyboardShortcutSettings {
             case .toggleFullScreen: return String(localized: "command.toggleFullScreen.title", defaultValue: "Toggle Full Screen")
             case .quit: return String(localized: "menu.quitCmux", defaultValue: "Quit cmux")
             case .toggleSidebar: return String(localized: "shortcut.toggleSidebar.label", defaultValue: "Toggle Sidebar")
-            case .toggleAgentBoard: return String(localized: "shortcut.toggleAgentBoard.label", defaultValue: "Toggle Agent Board")
             case .collapseAllSections: return String(localized: "shortcut.collapseAllSections.label", defaultValue: "Collapse All Sections")
             case .expandAllSections: return String(localized: "shortcut.expandAllSections.label", defaultValue: "Expand All Sections")
             case .newTab: return String(localized: "shortcut.newWorkspace.label", defaultValue: "New Workspace")
@@ -215,8 +213,6 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "q", command: true, shift: false, option: false, control: false)
             case .toggleSidebar:
                 return StoredShortcut(key: "s", command: true, shift: false, option: false, control: true)
-            case .toggleAgentBoard:
-                return StoredShortcut(key: "b", command: true, shift: false, option: false, control: true)
             case .collapseAllSections:
                 // ⌃⌘← is Ghostty's resize-split default, so add ⌥ to stay clear of it.
                 return StoredShortcut(key: "←", command: true, shift: false, option: true, control: true)
