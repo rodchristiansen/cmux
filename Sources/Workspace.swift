@@ -742,11 +742,11 @@ extension Workspace {
 
         surfaceListeningPorts[panelId] = Array(Set(snapshot.listeningPorts)).sorted()
 
-        if let ttyName = snapshot.ttyName?.trimmingCharacters(in: .whitespacesAndNewlines), !ttyName.isEmpty {
-            surfaceTTYNames[panelId] = ttyName
-        } else {
-            surfaceTTYNames.removeValue(forKey: panelId)
-        }
+        // A restored terminal gets a new pty, and macOS hands the old names to
+        // other terminals, so the saved name now belongs to some other row.
+        // Hooks that find their row by tty then wrote titles and status onto
+        // the wrong workspace. The shell reports the real name once it starts.
+        surfaceTTYNames.removeValue(forKey: panelId)
         syncRemotePortScanTTYs()
 
         if let browserSnapshot = snapshot.browser,
