@@ -119,7 +119,7 @@ Storage: `@AppStorage("sidebar.filter.mode")` in `Sources/ContentView.swift`.
 ### Agent board
 A collapsible board above the terminals (toolbar button, **View > Toggle Agent Board**, `⌃⌘B`) with one column per agent state — Needs Input, Running, Waiting on You — and one card per workspace that has a Claude Code or Codex agent. Each card shows the workspace, task headline, the last prompt you gave the agent, its last reply or current tool, the working directory, branch, PR, ports and section. Click a card to switch to it; double-click to switch and hide the board; right-click to copy the path, prompt or branch, show the folder in Finder, or open the PR. Drag the bottom edge to resize; height and open state persist.
 
-The prompt comes from the Claude Code and Codex `prompt-submit` hooks, which now send `set_agent_prompt --tab=<id> -- <text>` (whitespace collapsed, capped at 400 characters).
+Each card lists your last three prompts (newest first) and the agent's latest message, read from the session's transcript. Every Claude Code and Codex hook event sends `set_agent_transcript <claude|codex> --tab=<id> -- <path>`; before a session has fired a hook, a Claude session is found from `~/.claude/sessions/<pid>.json` by agent PID, tmux session, or a directory only one live session uses. Transcripts are read off the main thread, and a file that grew is parsed only from where the last read stopped (`Sources/AgentTranscriptDigest.swift`). The `prompt-submit` hooks also send `set_agent_prompt --tab=<id> -- <text>`, the fallback when no transcript is found.
 
 Files: `Sources/AgentBoard.swift`, `Workspace.agentPrompt`, `set_agent_prompt` in `Sources/TerminalController.swift`, hook changes in `CLI/cmux.swift`.
 

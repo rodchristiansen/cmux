@@ -12865,6 +12865,7 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            reportAgentTranscript(tool: "claude", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
                 preferred: nil,
                 fallback: surfaceArg,
@@ -12912,6 +12913,7 @@ struct CMUXCLI {
                     fallback: workspaceArg,
                     client: client
                 )
+                reportAgentTranscript(tool: "claude", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
                 let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
                     preferred: mappedSession?.surfaceId,
                     fallback: surfaceArg,
@@ -12968,6 +12970,7 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            reportAgentTranscript(tool: "claude", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             _ = try sendV1Command("clear_notifications --tab=\(workspaceId)", client: client)
             reportAgentPrompt(parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             try setClaudeStatus(
@@ -12989,6 +12992,7 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            reportAgentTranscript(tool: "claude", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             // Override only when pre-tool-use stashed a real AskUserQuestion body.
             // That override means this really is "Needs input"; otherwise a "Waiting"
             // subtitle indicates Claude's 60s idle reminder, not a pending request.
@@ -13092,6 +13096,7 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            reportAgentTranscript(tool: "claude", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             let claudePid = mappedSession?.pid
 
             // AskUserQuestion means Claude is about to ask the user something.
@@ -13148,6 +13153,19 @@ struct CMUXCLI {
         default:
             throw CLIError(message: "Unknown claude-hook subcommand: \(subcommand)")
         }
+    }
+
+    /// Tells the app which transcript file belongs to this workspace's agent, so the
+    /// agent board can show recent prompts and replies. Best effort, like the prompt.
+    private func reportAgentTranscript(
+        tool: String,
+        parsedInput: ClaudeHookParsedInput,
+        workspaceId: String,
+        client: SocketClient
+    ) {
+        guard let path = parsedInput.transcriptPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty, !path.contains("\n") else { return }
+        _ = try? client.send(command: "set_agent_transcript \(tool) --tab=\(workspaceId) -- \(path)")
     }
 
     /// Hands the submitted prompt to the app so the agent board can show what the
@@ -14308,6 +14326,7 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            reportAgentTranscript(tool: "codex", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
                 preferred: nil,
                 fallback: surfaceArg,
@@ -14341,6 +14360,7 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            reportAgentTranscript(tool: "codex", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
             let agentPIDKey = codexAgentPIDKey(sessionId: parsedInput.sessionId ?? mappedSession?.sessionId)
             let codexPid = mappedSession?.pid ?? inferredCodexAgentPID()
             if let sessionId = parsedInput.sessionId, let mappedSession {
@@ -14378,6 +14398,7 @@ struct CMUXCLI {
                     fallback: workspaceArg,
                     client: client
                 )
+                reportAgentTranscript(tool: "codex", parsedInput: parsedInput, workspaceId: workspaceId, client: client)
                 let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
                     preferred: mappedSession?.surfaceId,
                     fallback: surfaceArg,

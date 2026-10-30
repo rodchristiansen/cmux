@@ -70,12 +70,15 @@ struct AgentBoardCard: Identifiable, Equatable {
     let unreadCount: Int
     let lastActivity: Date?
     let isSelected: Bool
+    /// Recent prompts and the agent's latest message, read from its transcript.
+    let digest: AgentTranscriptDigest?
 
     @MainActor
     static func make(
         workspace: Workspace,
         tabManager: TabManager,
-        notificationStore: TerminalNotificationStore
+        notificationStore: TerminalNotificationStore,
+        digest: AgentTranscriptDigest?
     ) -> AgentBoardCard? {
         let agentEntries = workspace.statusEntries.values.filter(\.isAgentStatus)
         let hasSession = workspace.hasAttachedAgentSession
@@ -127,7 +130,8 @@ struct AgentBoardCard: Identifiable, Equatable {
         }()
 
         let statusDate = agentEntries.map(\.timestamp).max()
-        let lastActivity = [statusDate, notification?.createdAt, workspace.agentPrompt?.timestamp]
+        let lastActivity = [statusDate, notification?.createdAt, workspace.agentPrompt?.timestamp,
+                            digest?.prompts.first?.date, digest?.lastReplyDate]
             .compactMap { $0 }
             .max()
 
@@ -153,7 +157,8 @@ struct AgentBoardCard: Identifiable, Equatable {
             ports: ports,
             unreadCount: notificationStore.unreadCount(forTabId: workspace.id),
             lastActivity: lastActivity,
-            isSelected: tabManager.selectedTabId == workspace.id
+            isSelected: tabManager.selectedTabId == workspace.id,
+            digest: digest
         )
     }
 }
@@ -193,8 +198,9 @@ final class AgentBoardModel: ObservableObject {
         tabManager.objectWillChange
             .sink { [weak self] _ in self?.changes.send() }
             .store(in: &extraCancellables)
-        // Ages ("4m ago") and agent liveness drift with no event to announce them.
-        clockCancellable = Timer.publish(every: 30, on: .main, in: .common)
+        // Ages ("4m ago"), agent liveness and transcripts drift with no event to
+        // announce them. Unchanged transcripts are not re-read.
+        clockCancellable = Timer.publish(every: 5, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.changes.send() }
         rebuild()
@@ -217,10 +223,53 @@ final class AgentBoardModel: ObservableObject {
         changes.send()
     }
 
+    private var digests: [UUID: AgentTranscriptDigest] = [:]
+    private var isReadingTranscripts = false
+
     private func rebuild() {
+        rebuildCards()
+        refreshTranscripts()
+    }
+
+    /// Reads transcripts off the main thread, then redraws the cards with them.
+    private func refreshTranscripts() {
+        guard let tabManager, !isReadingTranscripts else { return }
+        let locators = tabManager.tabs.compactMap { workspace -> AgentTranscriptLocator? in
+            guard cards.contains(where: { $0.id == workspace.id }) else { return nil }
+            var tmux = Set(workspace.ownedTmuxSessions)
+            tmux.formUnion(workspace.detachedLanes.map(\.session))
+            return AgentTranscriptLocator(
+                workspaceId: workspace.id,
+                reportedPaths: Array(workspace.agentTranscripts.values),
+                agentPIDs: Array(workspace.agentPIDs.values) + workspace.detachedLanes.map(\.panePID),
+                tmuxSessions: Array(tmux),
+                directory: cards.first(where: { $0.id == workspace.id })?.directory
+            )
+        }
+        guard !locators.isEmpty else { return }
+        isReadingTranscripts = true
+        Task.detached(priority: .utility) { [weak self] in
+            let read = AgentTranscriptReader.shared.digests(for: locators)
+            await MainActor.run {
+                guard let self else { return }
+                self.isReadingTranscripts = false
+                if read != self.digests {
+                    self.digests = read
+                    self.rebuildCards()
+                }
+            }
+        }
+    }
+
+    private func rebuildCards() {
         guard let tabManager else { return }
         let built = tabManager.tabs.compactMap {
-            AgentBoardCard.make(workspace: $0, tabManager: tabManager, notificationStore: notificationStore)
+            AgentBoardCard.make(
+                workspace: $0,
+                tabManager: tabManager,
+                notificationStore: notificationStore,
+                digest: digests[$0.id]
+            )
         }
         // Most recent activity first in every column.
         let sorted = built.sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
@@ -377,15 +426,9 @@ private struct AgentBoardCardView: View {
                     .foregroundStyle(Color.accentColor)
                     .lineLimit(1)
             }
-            if let prompt = card.prompt {
-                labeled(symbol: "text.bubble", text: prompt, lines: 2)
-                    .help(prompt)
-            }
+            conversation
             if let detail = card.statusDetail {
                 labeled(symbol: "gearshape", text: detail, lines: 1)
-            } else if card.column != .running, let message = card.lastMessage {
-                labeled(symbol: "quote.bubble", text: message, lines: 2)
-                    .help(message)
             }
             contextRow
         }
@@ -411,6 +454,62 @@ private struct AgentBoardCardView: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: Text(String(localized: "agentBoard.card.open", defaultValue: "Go to Workspace")), onSelect)
+    }
+
+    /// What you last asked, newest first, then what the agent last said.
+    @ViewBuilder
+    private var conversation: some View {
+        let prompts = card.digest?.prompts ?? []
+        if prompts.isEmpty, let prompt = card.prompt {
+            promptRow(prompt, date: nil, isLatest: true)
+        }
+        ForEach(Array(prompts.enumerated()), id: \.offset) { index, prompt in
+            promptRow(prompt.text, date: prompt.date, isLatest: index == 0)
+        }
+        if let reply = card.digest?.lastReply ?? card.lastMessage {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 11)
+                Text(reply)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            .padding(.top, 1)
+            .help(reply)
+            .accessibilityLabel(Text(String.localizedStringWithFormat(
+                String(localized: "agentBoard.card.agentSaid", defaultValue: "Agent said: %@"), reply
+            )))
+        }
+    }
+
+    private func promptRow(_ text: String, date: Date?, isLatest: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "person.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .frame(width: 11)
+                .opacity(isLatest ? 1 : 0)
+            Text(text)
+                .font(.system(size: 11, weight: isLatest ? .medium : .regular))
+                .foregroundStyle(isLatest ? Color.primary : Color.secondary)
+                .lineLimit(isLatest ? 2 : 1)
+            Spacer(minLength: 2)
+            if let date {
+                Text(date, format: .relative(presentation: .numeric, unitsStyle: .narrow))
+                    .font(.system(size: 9).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+        .help(text)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(String.localizedStringWithFormat(
+            String(localized: "agentBoard.card.youAsked", defaultValue: "You asked: %@"), text
+        )))
     }
 
     private var titleRow: some View {
@@ -476,7 +575,7 @@ private struct AgentBoardCardView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: directory)])
             }
         }
-        if let prompt = card.prompt {
+        if let prompt = card.digest?.prompts.first?.text ?? card.prompt {
             Button(String(localized: "agentBoard.card.copyPrompt", defaultValue: "Copy Last Prompt")) {
                 Self.copy(prompt)
             }
