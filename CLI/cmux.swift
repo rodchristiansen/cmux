@@ -13201,19 +13201,28 @@ struct CMUXCLI {
     /// background shell behind (a deploy watch, a `run_in_background` build) is
     /// still working: Claude wakes when that shell exits, so the row reads
     /// "Running" rather than "Idle". The next Stop re-checks and settles it.
-    /// A turn that ends on an open question stays "Idle" even then, so the
-    /// question is not hidden among rows that are only waiting on a shell.
+    /// A turn that ends on an open question reads "Needs input" instead,
+    /// shell or not, so a question to the user is never lost among rows that
+    /// are only waiting.
     private func setClaudeTurnEndedStatus(
         client: SocketClient,
         workspaceId: String,
         claudePid: Int?,
         parsedInput: ClaudeHookParsedInput
     ) throws {
+        if claudeTurnEndsWithOpenQuestion(parsedInput: parsedInput) {
+            try setClaudeStatus(
+                client: client,
+                workspaceId: workspaceId,
+                value: "Needs input",
+                icon: "bell.fill",
+                color: "#4C8DFF"
+            )
+            return
+        }
         let pid = claudePid ?? ProcessInfo.processInfo.environment["CMUX_CLAUDE_PID"]
             .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        if let pid, pid > 0,
-           claudeBackgroundShellCount(claudePid: pid) > 0,
-           !claudeTurnEndsWithOpenQuestion(parsedInput: parsedInput) {
+        if let pid, pid > 0, claudeBackgroundShellCount(claudePid: pid) > 0 {
             try setClaudeStatus(
                 client: client,
                 workspaceId: workspaceId,
