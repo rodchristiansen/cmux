@@ -12948,7 +12948,8 @@ struct CMUXCLI {
                 try? setClaudeTurnEndedStatus(
                     client: client,
                     workspaceId: workspaceId,
-                    claudePid: mappedSession?.pid
+                    claudePid: mappedSession?.pid,
+                    parsedInput: parsedInput
                 )
                 print("OK")
             } catch {
@@ -13033,7 +13034,8 @@ struct CMUXCLI {
                 try? setClaudeTurnEndedStatus(
                     client: client,
                     workspaceId: workspaceId,
-                    claudePid: mappedSession?.pid
+                    claudePid: mappedSession?.pid,
+                    parsedInput: parsedInput
                 )
                 print("OK")
             } else {
@@ -13199,14 +13201,19 @@ struct CMUXCLI {
     /// background shell behind (a deploy watch, a `run_in_background` build) is
     /// still working: Claude wakes when that shell exits, so the row reads
     /// "Running" rather than "Idle". The next Stop re-checks and settles it.
+    /// A turn that ends on an open question stays "Idle" even then, so the
+    /// question is not hidden among rows that are only waiting on a shell.
     private func setClaudeTurnEndedStatus(
         client: SocketClient,
         workspaceId: String,
-        claudePid: Int?
+        claudePid: Int?,
+        parsedInput: ClaudeHookParsedInput
     ) throws {
         let pid = claudePid ?? ProcessInfo.processInfo.environment["CMUX_CLAUDE_PID"]
             .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        if let pid, pid > 0, claudeBackgroundShellCount(claudePid: pid) > 0 {
+        if let pid, pid > 0,
+           claudeBackgroundShellCount(claudePid: pid) > 0,
+           !claudeTurnEndsWithOpenQuestion(parsedInput: parsedInput) {
             try setClaudeStatus(
                 client: client,
                 workspaceId: workspaceId,
@@ -13224,6 +13231,28 @@ struct CMUXCLI {
                 color: "#8E8E93"
             )
         }
+    }
+
+    /// True when the last assistant message of the turn puts a question to the
+    /// user: a Decisions section, or a prose line ending in a question mark.
+    /// Code blocks are skipped so a `?` in a command or regex does not count.
+    private func claudeTurnEndsWithOpenQuestion(parsedInput: ClaudeHookParsedInput) -> Bool {
+        let text = (parsedInput.object?["last_assistant_message"] as? String)
+            ?? parsedInput.transcriptPath.flatMap { readTranscriptSummary(path: $0)?.lastAssistantFullText }
+        guard let text, !text.isEmpty else { return false }
+        if text.contains("**Decisions**") { return true }
+        var inCodeBlock = false
+        for rawLine in text.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") {
+                inCodeBlock.toggle()
+                continue
+            }
+            if inCodeBlock { continue }
+            let tail = line.trimmingCharacters(in: CharacterSet(charactersIn: "*_)\"' "))
+            if tail.hasSuffix("?") { return true }
+        }
+        return false
     }
 
     /// Counts the Bash-tool shells still alive under a Claude process once its
@@ -13770,6 +13799,7 @@ struct CMUXCLI {
 
     private struct TranscriptSummary {
         let lastAssistantMessage: String?
+        var lastAssistantFullText: String? = nil
     }
 
     private func readTranscriptSummary(path: String) -> TranscriptSummary? {
@@ -13782,6 +13812,7 @@ struct CMUXCLI {
         let lines = content.components(separatedBy: "\n")
 
         var lastAssistantMessage: String?
+        var lastAssistantFullText: String?
 
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -13797,10 +13828,14 @@ struct CMUXCLI {
             let text = extractMessageText(from: message)
             guard let text, !text.isEmpty else { continue }
             lastAssistantMessage = truncate(normalizedSingleLine(text), maxLength: 120)
+            lastAssistantFullText = text
         }
 
         guard lastAssistantMessage != nil else { return nil }
-        return TranscriptSummary(lastAssistantMessage: lastAssistantMessage)
+        return TranscriptSummary(
+            lastAssistantMessage: lastAssistantMessage,
+            lastAssistantFullText: lastAssistantFullText
+        )
     }
 
     private func extractMessageText(from message: [String: Any]) -> String? {
