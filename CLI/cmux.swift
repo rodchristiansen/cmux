@@ -12945,12 +12945,10 @@ struct CMUXCLI {
                     _ = try? sendV1Command("notify_target \(workspaceId) \(surfaceId) \(payload)", client: client)
                 }
 
-                try? setClaudeStatus(
+                try? setClaudeTurnEndedStatus(
                     client: client,
                     workspaceId: workspaceId,
-                    value: "Idle",
-                    icon: "pause.circle.fill",
-                    color: "#8E8E93"
+                    claudePid: mappedSession?.pid
                 )
                 print("OK")
             } catch {
@@ -13032,12 +13030,10 @@ struct CMUXCLI {
             if isIdleReminder {
                 // Claude's 60s idle timer fired, not a real input request.
                 // Don't flip status to "Needs input" and don't raise a notification bubble.
-                try? setClaudeStatus(
+                try? setClaudeTurnEndedStatus(
                     client: client,
                     workspaceId: workspaceId,
-                    value: "Idle",
-                    icon: "pause.circle.fill",
-                    color: "#8E8E93"
+                    claudePid: mappedSession?.pid
                 )
                 print("OK")
             } else {
@@ -13197,6 +13193,62 @@ struct CMUXCLI {
             cmd += " --pid=\(pid)"
         }
         _ = try client.send(command: cmd)
+    }
+
+    /// Status for a Claude session whose turn just ended. A turn that leaves a
+    /// background shell behind (a deploy watch, a `run_in_background` build) is
+    /// still working: Claude wakes when that shell exits, so the row reads
+    /// "Running" rather than "Idle". The next Stop re-checks and settles it.
+    private func setClaudeTurnEndedStatus(
+        client: SocketClient,
+        workspaceId: String,
+        claudePid: Int?
+    ) throws {
+        let pid = claudePid ?? ProcessInfo.processInfo.environment["CMUX_CLAUDE_PID"]
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        if let pid, pid > 0, claudeBackgroundShellCount(claudePid: pid) > 0 {
+            try setClaudeStatus(
+                client: client,
+                workspaceId: workspaceId,
+                value: "Running",
+                icon: "bolt.fill",
+                color: "#4C8DFF",
+                pid: pid
+            )
+        } else {
+            try setClaudeStatus(
+                client: client,
+                workspaceId: workspaceId,
+                value: "Idle",
+                icon: "pause.circle.fill",
+                color: "#8E8E93"
+            )
+        }
+    }
+
+    /// Counts the Bash-tool shells still alive under a Claude process once its
+    /// turn has ended, which are the background shells. Claude's Bash tool
+    /// wraps every command with its shell snapshot and glob options, which
+    /// tells those shells apart from MCP servers, LSPs and hook commands.
+    private func claudeBackgroundShellCount(claudePid: Int) -> Int {
+        let result = CLIProcessRunner.runProcess(
+            executablePath: "/bin/ps",
+            arguments: ["-axo", "ppid=,command="],
+            timeout: 2
+        )
+        guard result.status == 0, !result.timedOut else { return 0 }
+        let markers = ["/shell-snapshots/snapshot-", "NO_EXTENDED_GLOB", "shopt -u extglob"]
+        var count = 0
+        for line in result.stdout.split(separator: "\n") {
+            let trimmed = line.drop(while: { $0 == " " })
+            guard let space = trimmed.firstIndex(of: " "),
+                  Int(trimmed[..<space]) == claudePid else { continue }
+            let command = trimmed[space...]
+            if markers.contains(where: { command.contains($0) }) {
+                count += 1
+            }
+        }
+        return count
     }
 
     private func clearClaudeStatus(client: SocketClient, workspaceId: String) throws {
