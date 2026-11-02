@@ -9,6 +9,27 @@ if zmodload zsh/net/unix 2>/dev/null; then
     _CMUX_HAS_ZSOCKET=1
 fi
 
+# Prefer zsh/zselect for the poll-loop sleeps in the git-HEAD and PR-status
+# watchers (no fork, vs one fork+exec of /bin/sleep per second per pane, each
+# of which an endpoint-security agent inspects). Falls back to /bin/sleep if
+# the module is unavailable.
+typeset -g _CMUX_HAS_ZSELECT=0
+if zmodload zsh/zselect 2>/dev/null; then
+    _CMUX_HAS_ZSELECT=1
+fi
+
+# Fork-free sleep. The argument is in centiseconds (zselect's -t unit), so a
+# one-second wait is `_cmux_sleep_cs 100`. zselect with only -t and no fds
+# returns status 1 on timeout; consume it and return 0 so callers running with
+# ERR_RETURN/ERR_EXIT do not abort, and do not fall through to /bin/sleep.
+_cmux_sleep_cs() {
+    if (( _CMUX_HAS_ZSELECT )); then
+        zselect -t "$1" || :
+        return 0
+    fi
+    sleep "$(( $1 / 100.0 ))"
+}
+
 _cmux_send() {
     local payload="$1"
     if (( _CMUX_HAS_ZSOCKET )); then
@@ -248,9 +269,21 @@ _cmux_tmux_shell_env_signature() {
     print -r -- "${(j:\x1f:)parts}"
 }
 
+# A published environment only matters to a running default tmux server; a
+# server started later inherits it from the shell that starts it. Checking the
+# socket keeps every prompt and command from spawning a tmux client that can
+# only fail when no server is running. tmux ignores a TMUX_TMPDIR that does not
+# resolve and falls back to /tmp, so the socket path follows the same rule.
+_cmux_tmux_default_server_running() {
+    local socket_root="/tmp"
+    [[ -n "${TMUX_TMPDIR:-}" && -e "$TMUX_TMPDIR" ]] && socket_root="$TMUX_TMPDIR"
+    [[ -S "${socket_root%/}/tmux-${UID}/default" ]]
+}
+
 _cmux_tmux_publish_cmux_environment() {
     [[ -z "$TMUX" ]] || return 0
     command -v tmux >/dev/null 2>&1 || return 0
+    _cmux_tmux_default_server_running || return 0
 
     local signature
     signature="$(_cmux_tmux_shell_env_signature)"
@@ -443,15 +476,24 @@ _cmux_git_resolve_head_path() {
     return 1
 }
 
-_cmux_git_head_signature() {
+# Sets REPLY rather than printing, so the per-second HEAD watcher and the
+# prompt hook do not fork a subshell on every read.
+_cmux_git_head_signature_into_reply() {
+    REPLY=""
     local head_path="$1"
     [[ -n "$head_path" && -r "$head_path" ]] || return 1
     local line=""
     if IFS= read -r line < "$head_path"; then
-        print -r -- "$line"
+        REPLY="$line"
         return 0
     fi
     return 1
+}
+
+_cmux_git_head_signature() {
+    local REPLY
+    _cmux_git_head_signature_into_reply "$1" || return 1
+    print -r -- "$REPLY"
 }
 
 _cmux_report_tty_payload() {
@@ -508,7 +550,7 @@ _cmux_ports_kick() {
     if _cmux_socket_is_unix; then
         [[ -n "$CMUX_PANEL_ID" ]] || return 0
     fi
-    _CMUX_PORTS_LAST_RUN="$(_cmux_now)"
+    _CMUX_PORTS_LAST_RUN="${EPOCHSECONDS:-$SECONDS}"
     if _cmux_socket_is_unix; then
         _cmux_send_bg "ports_kick --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID --reason=$reason"
     else
@@ -796,14 +838,14 @@ _cmux_run_pr_probe_with_timeout() {
     probe_pid=$!
 
     while kill -0 "$probe_pid" >/dev/null 2>&1; do
-        sleep 1
+        _cmux_sleep_cs 100
         now="${EPOCHSECONDS:-$SECONDS}"
         if (( _CMUX_ASYNC_JOB_TIMEOUT > 0 )) && (( now - started_at >= _CMUX_ASYNC_JOB_TIMEOUT )); then
             _cmux_kill_process_tree "$probe_pid" TERM
-            sleep 0.2
+            _cmux_sleep_cs 20
             if kill -0 "$probe_pid" >/dev/null 2>&1; then
                 _cmux_kill_process_tree "$probe_pid" KILL
-                sleep 0.2
+                _cmux_sleep_cs 20
             fi
             if ! kill -0 "$probe_pid" >/dev/null 2>&1; then
                 wait "$probe_pid" >/dev/null 2>&1 || true
@@ -822,9 +864,11 @@ _cmux_halt_pr_poll_loop() {
         # the synchronous /bin/ps + awk of tree-kill (~5-13ms).
         kill -KILL -- -"$_CMUX_PR_POLL_PID" 2>/dev/null || true
     fi
+    # preexec runs this before every command: build the path in place instead
+    # of a command substitution, and only spawn rm when the file exists.
     local signal_path=""
-    signal_path="$(_cmux_pr_force_signal_path 2>/dev/null || true)"
-    [[ -n "$signal_path" ]] && /bin/rm -f -- "$signal_path" >/dev/null 2>&1 || true
+    [[ -n "$CMUX_PANEL_ID" ]] && signal_path="/tmp/cmux-pr-force-${CMUX_PANEL_ID}"
+    [[ -n "$signal_path" && -e "$signal_path" ]] && { /bin/rm -f -- "$signal_path" >/dev/null 2>&1 || true; }
     _CMUX_PR_POLL_PID=""
     _CMUX_PR_POLL_PWD=""
 }
@@ -874,7 +918,7 @@ _cmux_start_pr_poll_loop() {
                 if [[ -n "$signal_path" && -f "$signal_path" ]]; then
                     break
                 fi
-                sleep 1
+                _cmux_sleep_cs 100
                 slept=$(( slept + 1 ))
             done
         done
@@ -895,12 +939,14 @@ _cmux_start_git_head_watch() {
     [[ -n "$CMUX_PANEL_ID" ]] || return 0
 
     local watch_pwd="$PWD"
+    local watch_shell_pid="$$"
     local watch_head_path
     watch_head_path="$(_cmux_git_resolve_head_path 2>/dev/null || true)"
     [[ -n "$watch_head_path" ]] || return 0
 
-    local watch_head_signature
-    watch_head_signature="$(_cmux_git_head_signature "$watch_head_path" 2>/dev/null || true)"
+    local REPLY watch_head_signature
+    _cmux_git_head_signature_into_reply "$watch_head_path" 2>/dev/null || true
+    watch_head_signature="$REPLY"
 
     _CMUX_GIT_HEAD_LAST_PWD="$watch_pwd"
     _CMUX_GIT_HEAD_PATH="$watch_head_path"
@@ -910,10 +956,14 @@ _cmux_start_git_head_watch() {
     {
         local last_signature="$watch_head_signature"
         while true; do
-            sleep 1
+            _cmux_sleep_cs 100
+            # Exit with the shell: a watcher whose shell was killed without
+            # running zshexit would otherwise poll forever as an orphan.
+            kill -0 "$watch_shell_pid" >/dev/null 2>&1 || break
 
             local signature
-            signature="$(_cmux_git_head_signature "$watch_head_path" 2>/dev/null || true)"
+            _cmux_git_head_signature_into_reply "$watch_head_path" 2>/dev/null || true
+            signature="$REPLY"
             if [[ -n "$signature" && "$signature" != "$last_signature" ]]; then
                 last_signature="$signature"
                 _cmux_pr_cache_clear
@@ -985,13 +1035,14 @@ _cmux_preexec() {
     _cmux_tmux_sync_cmux_environment
 
     if [[ -z "$_CMUX_TTY_NAME" ]]; then
-        local t
-        t="$(tty 2>/dev/null || true)"
+        # $TTY is set by zsh itself; fall back to tty(1) only without it.
+        local t="${TTY:-}"
+        [[ -n "$t" ]] || t="$(tty 2>/dev/null || true)"
         t="${t##*/}"
         [[ -n "$t" && "$t" != "not a tty" ]] && _CMUX_TTY_NAME="$t"
     fi
 
-    _CMUX_CMD_START="$(_cmux_now)"
+    _CMUX_CMD_START="${EPOCHSECONDS:-$SECONDS}"
     _cmux_report_shell_activity_state running
 
     # Heuristic: commands that may change git branch/dirty state without changing $PWD.
@@ -1029,15 +1080,16 @@ _cmux_precmd() {
     (( _CMUX_GHOSTTY_SEMANTIC_PATCHED )) || _cmux_patch_ghostty_semantic_redraw
 
     if [[ -z "$_CMUX_TTY_NAME" ]]; then
-        local t
-        t="$(tty 2>/dev/null || true)"
+        # $TTY is set by zsh itself; fall back to tty(1) only without it.
+        local t="${TTY:-}"
+        [[ -n "$t" ]] || t="$(tty 2>/dev/null || true)"
         t="${t##*/}"
         [[ -n "$t" && "$t" != "not a tty" ]] && _CMUX_TTY_NAME="$t"
     fi
 
     _cmux_report_tty_once
 
-    local now="$(_cmux_now)"
+    local now="${EPOCHSECONDS:-$SECONDS}"
     local cmd_start="$_CMUX_CMD_START"
     _CMUX_CMD_START=0
     local cmd_dur=0
@@ -1092,8 +1144,9 @@ _cmux_precmd() {
         _CMUX_GIT_HEAD_SIGNATURE=""
     fi
     if [[ -n "$_CMUX_GIT_HEAD_PATH" ]]; then
-        local head_signature
-        head_signature="$(_cmux_git_head_signature "$_CMUX_GIT_HEAD_PATH" 2>/dev/null || true)"
+        local REPLY head_signature
+        _cmux_git_head_signature_into_reply "$_CMUX_GIT_HEAD_PATH" 2>/dev/null || true
+        head_signature="$REPLY"
         if [[ -n "$head_signature" ]]; then
             if [[ -z "$_CMUX_GIT_HEAD_SIGNATURE" ]]; then
                 # The first observed HEAD value establishes the baseline for this
