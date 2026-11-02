@@ -27,6 +27,11 @@ private final class CLISocketSentryTelemetry {
     private let disabledByEnv: Bool
 
 #if canImport(Sentry)
+    // Breadcrumbs wait here until an error is captured. Starting Sentry pulls in
+    // AppKit, which checks the process in with WindowServer as an app; pollers
+    // call the CLI thousands of times an hour, so start it only to send an error.
+    private let pendingLock = NSLock()
+    private var pendingBreadcrumbs: [Breadcrumb] = []
     private static let startupLock = NSLock()
     private static var started = false
     private static let dsn = "https://ecba1ec90ecaee02a102fba931b6d2b3@o4507547940749312.ingest.us.sentry.io/4510796264636416"
@@ -143,7 +148,6 @@ private final class CLISocketSentryTelemetry {
     func breadcrumb(_ message: String, data: [String: Any] = [:]) {
         guard shouldEmit else { return }
 #if canImport(Sentry)
-        Self.ensureStarted()
         var payload = baseContext()
         for (key, value) in data {
             payload[key] = value
@@ -151,7 +155,9 @@ private final class CLISocketSentryTelemetry {
         let crumb = Breadcrumb(level: .info, category: "cmux.cli")
         crumb.message = message
         crumb.data = payload
-        SentrySDK.addBreadcrumb(crumb)
+        pendingLock.lock()
+        pendingBreadcrumbs.append(crumb)
+        pendingLock.unlock()
 #endif
     }
 
@@ -159,6 +165,13 @@ private final class CLISocketSentryTelemetry {
         guard shouldEmit else { return }
 #if canImport(Sentry)
         Self.ensureStarted()
+        pendingLock.lock()
+        let crumbs = pendingBreadcrumbs
+        pendingBreadcrumbs.removeAll()
+        pendingLock.unlock()
+        for crumb in crumbs {
+            SentrySDK.addBreadcrumb(crumb)
+        }
         var context = baseContext()
         context["stage"] = stage
         context["error"] = String(describing: error)
