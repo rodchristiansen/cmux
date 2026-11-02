@@ -797,7 +797,11 @@ class TabManager: ObservableObject {
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).
     private static var nextPortOrdinal: Int = 0
     private static let initialWorkspaceGitProbeDelays: [TimeInterval] = [0, 0.5, 1.5, 3.0, 6.0, 10.0]
-    private static let workspaceGitMetadataPollInterval: TimeInterval = 30
+    // Each tracked workspace costs a git exec per sweep, and an endpoint-security
+    // agent inspects every one. The selected workspace keeps its own 5-second
+    // poll, and shell integration reports branch changes as they happen, so the
+    // background sweep only has to catch remote PR state and stray changes.
+    private static let workspaceGitMetadataPollInterval: TimeInterval = 120
     private static let selectedWorkspaceGitMetadataPollInterval: TimeInterval = 5
     private nonisolated static let workspacePullRequestProbeTimeout: TimeInterval = 5.0
     @Published var selectedTabId: UUID? {
@@ -1110,18 +1114,42 @@ class TabManager: ObservableObject {
 
     private func refreshTrackedWorkspaceGitMetadata() {
         let activeProbeKeys = Set(workspaceGitProbeGenerationByKey.keys)
+        // Rows in a collapsed section are not on screen; they are refreshed when
+        // the section expands (see rebindSectionObservers).
+        let collapsedWorkspaceIds = Set(sections.filter(\.isCollapsed).flatMap(\.workspaceIds))
 
         for workspace in tabs {
-            for panelId in trackedWorkspaceGitMetadataPollCandidatePanelIds(
-                in: workspace,
-                activeProbeKeys: activeProbeKeys
-            ) {
-                scheduleWorkspaceGitMetadataRefreshIfPossible(
-                    workspaceId: workspace.id,
-                    panelId: panelId,
-                    reason: "periodicPoll"
-                )
+            if workspace.id != selectedTabId, collapsedWorkspaceIds.contains(workspace.id) {
+                continue
             }
+            refreshWorkspaceGitMetadata(workspace, activeProbeKeys: activeProbeKeys, reason: "periodicPoll")
+        }
+    }
+
+    private func refreshWorkspaceGitMetadata(
+        _ workspace: Workspace,
+        activeProbeKeys: Set<WorkspaceGitProbeKey>,
+        reason: String
+    ) {
+        for panelId in trackedWorkspaceGitMetadataPollCandidatePanelIds(
+            in: workspace,
+            activeProbeKeys: activeProbeKeys
+        ) {
+            scheduleWorkspaceGitMetadataRefreshIfPossible(
+                workspaceId: workspace.id,
+                panelId: panelId,
+                reason: reason
+            )
+        }
+    }
+
+    /// A collapsed section's rows skip the background sweep, so catch them up
+    /// the moment the section opens.
+    private func refreshSectionWorkspaceGitMetadata(_ section: SidebarSection) {
+        let activeProbeKeys = Set(workspaceGitProbeGenerationByKey.keys)
+        let memberIds = Set(section.workspaceIds)
+        for workspace in tabs where memberIds.contains(workspace.id) {
+            refreshWorkspaceGitMetadata(workspace, activeProbeKeys: activeProbeKeys, reason: "sectionExpanded")
         }
     }
 
@@ -1879,7 +1907,23 @@ class TabManager: ObservableObject {
     private nonisolated static func initialWorkspaceGitMetadataSnapshot(
         for directory: String
     ) -> InitialWorkspaceGitMetadataSnapshot {
-        let branch = normalizedBranchName(runGitCommand(directory: directory, arguments: ["branch", "--show-current"]))
+        // One `git status --porcelain=v2 --branch` answers both the branch and the
+        // dirty state, where this used to run `git branch --show-current` and then
+        // `git status --porcelain`. If it fails, fall back to the branch alone,
+        // which is what a failed status used to leave behind.
+        let branch: String?
+        let isDirty: Bool
+        if let statusOutput = runGitCommand(
+            directory: directory,
+            arguments: ["status", "--porcelain=v2", "--branch", "-uno"]
+        ) {
+            let parsed = parsePorcelainV2BranchStatus(statusOutput)
+            branch = parsed.branch
+            isDirty = parsed.isDirty
+        } else {
+            branch = normalizedBranchName(runGitCommand(directory: directory, arguments: ["branch", "--show-current"]))
+            isDirty = false
+        }
         guard let branch else {
             return InitialWorkspaceGitMetadataSnapshot(
                 branch: nil,
@@ -1888,16 +1932,62 @@ class TabManager: ObservableObject {
             )
         }
 
-        let statusOutput = runGitCommand(directory: directory, arguments: ["status", "--porcelain", "-uno"])
-        let isDirty = !(statusOutput?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         let pullRequest = workspacePullRequestSnapshot(directory: directory, branch: branch)
         return InitialWorkspaceGitMetadataSnapshot(branch: branch, isDirty: isDirty, pullRequest: pullRequest)
     }
 
+    /// Reads the branch and dirty state from `git status --porcelain=v2 --branch -uno`.
+    /// `# branch.head` carries the branch, or `(detached)` for a detached HEAD,
+    /// which maps to nil just as `git branch --show-current` printing nothing did.
+    /// Any non-header line is a tracked change (untracked files are excluded by -uno).
+    nonisolated static func parsePorcelainV2BranchStatus(_ output: String) -> (branch: String?, isDirty: Bool) {
+        var branch: String?
+        var isDirty = false
+        let headPrefix = "# branch.head "
+        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(rawLine)
+            if line.hasPrefix("#") {
+                if line.hasPrefix(headPrefix) {
+                    let head = String(line.dropFirst(headPrefix.count))
+                    branch = head == "(detached)" ? nil : normalizedBranchName(head)
+                }
+                continue
+            }
+            if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                isDirty = true
+            }
+        }
+        return (branch, isDirty)
+    }
+
+    /// The git binary to run, resolved once. `/usr/bin/git` is the Xcode
+    /// command-line shim: every call through it execs `xcrun`, which looks up and
+    /// execs the real git. Prefer a Homebrew git, then the path `xcrun -f git`
+    /// reports, so each probe is one exec instead of two plus a lookup.
+    private nonisolated static let resolvedGitExecutable: String = {
+        let fileManager = FileManager.default
+        for candidate in ["/opt/homebrew/bin/git", "/usr/local/bin/git"]
+        where fileManager.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+        if let output = runCommand(
+            directory: "/",
+            executable: "/usr/bin/xcrun",
+            arguments: ["-f", "git"],
+            timeout: 10
+        ) {
+            let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if path.hasPrefix("/"), fileManager.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        return "git"
+    }()
+
     private nonisolated static func runGitCommand(directory: String, arguments: [String]) -> String? {
         runCommand(
             directory: directory,
-            executable: "git",
+            executable: resolvedGitExecutable,
             arguments: arguments
         )
     }
@@ -3156,6 +3246,16 @@ class TabManager: ObservableObject {
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
                     self?.sectionRevision &+= 1
+                }
+                .store(in: &sectionObserverCancellables)
+            section.$isCollapsed
+                .removeDuplicates()
+                .dropFirst()
+                .filter { !$0 }
+                .receive(on: RunLoop.main)
+                .sink { [weak self, weak section] _ in
+                    guard let self, let section else { return }
+                    self.refreshSectionWorkspaceGitMetadata(section)
                 }
                 .store(in: &sectionObserverCancellables)
         }
