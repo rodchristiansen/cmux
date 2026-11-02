@@ -57,7 +57,11 @@ final class PortScanner: @unchecked Sendable {
     /// Each scan fires at this absolute offset; the recursive scheduler
     /// converts to relative delays between consecutive scans.
     private static let burstOffsets: [Double] = [0.5, 1.5, 3, 5, 7.5, 10]
-    private static let agentRescanInterval: TimeInterval = 2
+    /// Each rescan runs `ps` and `lsof`. At 2 s that was a steady stream of
+    /// process launches for the endpoint scanner to inspect on every agent
+    /// pane, which slowed typing across the whole Mac. A port an agent opens
+    /// still shows up within 10 s.
+    private static let agentRescanInterval: TimeInterval = 10
 
     // MARK: - Public API
 
