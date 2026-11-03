@@ -173,6 +173,10 @@ Fixes:
 - `60aa5e58` Theme sync when system appearance changes while cmux is inactive
 - `f0ce2ff7` Authoritative `NSApp.effectiveAppearance` + global surface sweep (the per-view `effectiveAppearance` can be stale; the system value is the one source of truth)
 
+### CLI starts Sentry only to send an error
+
+Upstream starts Sentry on every CLI socket command just to record breadcrumbs. Sentry pulls in AppKit, so every `cmux` call checked in with WindowServer as a new app. Pollers call the CLI thousands of times an hour, and on 2026-11-01 WindowServer quit and logged the session out. The CLI now keeps breadcrumbs in memory and starts Sentry only when it captures an error, so a successful call never touches WindowServer (`CLI/cmux.swift`, `CLISocketSentryTelemetry`).
+
 ---
 
 ## Workflow
