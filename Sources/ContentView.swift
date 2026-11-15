@@ -2915,21 +2915,11 @@ struct ContentView: View {
                 }
                 .navigationSplitViewStyle(.automatic)
                 .background(SplitViewDividerHider())
-                .background(SystemSidebarToggleStripper().frame(width: 0, height: 0))
+                // NavigationSplitView's own sidebar toggle stays: it drives
+                // columnVisibility above. Removing it also drops View › Show
+                // Sidebar, and re-placing it leaves an empty glass pill when
+                // the sidebar is collapsed.
                 .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                _ = sidebarState.toggle()
-                            }
-                        } label: {
-                            Image(systemName: "sidebar.left")
-                        }
-                        .accessibilityIdentifier("toolbar.toggleSidebar")
-                        .accessibilityLabel(String(localized: "toolbar.sidebar.accessibilityLabel", defaultValue: "Toggle Sidebar"))
-                        .help(String(localized: "toolbar.sidebar.tooltip", defaultValue: "Toggle Sidebar"))
-                    }
-
                     // The classic titlebar carries these too (UpdateTitlebarAccessory);
                     // this toolbar replaces it, so without them here they never show.
                     ToolbarItemGroup(placement: .navigation) {
@@ -3693,7 +3683,8 @@ struct ContentView: View {
             installFileDropOverlay(on: window, tabManager: tabManager)
         }))
 
-        return view
+        // View › Show/Hide Sidebar acts on the key window's sidebar.
+        return AnyView(view.focusedSceneObject(sidebarState))
     }
 
     private func reconcileMountedWorkspaceIds(tabs: [Workspace]? = nil, selectedId: UUID? = nil) {
@@ -16594,100 +16585,6 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
                 inset = leading
             }
         }
-    }
-}
-
-/// Strips the system-injected sidebar toggle from NavigationSplitView's toolbar.
-/// SwiftUI's `.toolbar(removing: .sidebarToggle)` is broken on macOS 26, so we
-/// remove the item via AppKit after SwiftUI finishes setting up the toolbar.
-@available(macOS 26.0, *)
-private struct SystemSidebarToggleStripper: NSViewRepresentable {
-    func makeNSView(context: Context) -> SystemSidebarToggleStripperView {
-        SystemSidebarToggleStripperView()
-    }
-
-    func updateNSView(_ nsView: SystemSidebarToggleStripperView, context: Context) {
-        nsView.scheduleStrip()
-    }
-}
-
-@available(macOS 26.0, *)
-private final class SystemSidebarToggleStripperView: NSView {
-    private var observers: [NSObjectProtocol] = []
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        scheduleStrip()
-        observeToolbarChanges()
-    }
-
-    func scheduleStrip() {
-        DispatchQueue.main.async { [weak self] in
-            self?.stripNow()
-        }
-    }
-
-    private func stripNow() {
-        guard let toolbar = window?.toolbar else { return }
-        for i in (0..<toolbar.items.count).reversed() {
-            if Self.shouldStrip(toolbar.items[i]) {
-                toolbar.removeItem(at: i)
-            }
-        }
-    }
-
-    private static func shouldStrip(_ item: NSToolbarItem) -> Bool {
-        let itemId = item.itemIdentifier.rawValue
-        if itemId.contains("toggleSidebar") || itemId.contains("splitViewSeparator") {
-            return true
-        }
-        // NavigationSplitView re-injects the toggle into the overflow popover
-        // with an opaque identifier, so also match the user-facing label.
-        let label = item.label
-        if label == "Hide Sidebar" || label == "Show Sidebar" {
-            return true
-        }
-        return false
-    }
-
-    private func observeToolbarChanges() {
-        guard observers.isEmpty else { return }
-        let center = NotificationCenter.default
-
-        observers.append(center.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self, notification.object as? NSWindow === self.window else { return }
-            self.scheduleStrip()
-        })
-
-        // Re-strip whenever SwiftUI/NavigationSplitView re-injects an item
-        // (e.g. after a resize that pushes the toggle into the overflow popover).
-        observers.append(center.addObserver(
-            forName: NSToolbar.willAddItemNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  let toolbar = self.window?.toolbar,
-                  notification.object as? NSToolbar === toolbar else { return }
-            self.scheduleStrip()
-        })
-
-        observers.append(center.addObserver(
-            forName: NSWindow.didResizeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self, notification.object as? NSWindow === self.window else { return }
-            self.scheduleStrip()
-        })
-    }
-
-    deinit {
-        observers.forEach(NotificationCenter.default.removeObserver)
     }
 }
 

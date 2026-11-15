@@ -750,14 +750,17 @@ struct cmuxApp: App {
                 }
             }
 
+            // View › Show/Hide Sidebar. Replacing the group keeps one item even
+            // when NavigationSplitView adds its own.
+            CommandGroup(replacing: .sidebar) {
+                SidebarVisibilityMenuButton(
+                    shortcut: menuShortcut(for: .toggleSidebar),
+                    fallbackSidebarState: sidebarState
+                )
+            }
+
             // Tab navigation
             CommandGroup(after: .toolbar) {
-                splitCommandButton(title: String(localized: "menu.view.toggleSidebar", defaultValue: "Toggle Sidebar"), shortcut: menuShortcut(for: .toggleSidebar)) {
-                    if AppDelegate.shared?.toggleSidebarInActiveMainWindow() != true {
-                        sidebarState.toggle()
-                    }
-                }
-
                 splitCommandButton(title: String(localized: "menu.view.collapseAllSections", defaultValue: "Collapse All Sections"), shortcut: menuShortcut(for: .collapseAllSections)) {
                     activeTabManager.setAllSectionsCollapsed(true)
                 }
@@ -6997,5 +7000,37 @@ private struct SettingsRootView: View {
 
     private func applyCurrentSettingsWindowStyle(to window: NSWindow) {
         SettingsAboutTitlebarDebugStore.shared.applyCurrentOptions(to: window, for: .settings)
+    }
+}
+
+/// View › Show Sidebar / Hide Sidebar for the key window, on the configurable
+/// Toggle Sidebar shortcut (⌃⌘S by default). The title follows the key
+/// window's sidebar because each main window publishes its own SidebarState.
+private struct SidebarVisibilityMenuButton: View {
+    let shortcut: StoredShortcut
+    @ObservedObject var fallbackSidebarState: SidebarState
+    @FocusedObject private var focusedSidebarState: SidebarState?
+
+    var body: some View {
+        let isVisible = (focusedSidebarState ?? fallbackSidebarState).isVisible
+        let title = isVisible
+            ? String(localized: "menu.view.hideSidebar", defaultValue: "Hide Sidebar")
+            : String(localized: "menu.view.showSidebar", defaultValue: "Show Sidebar")
+        if let key = shortcut.keyEquivalent {
+            Button(title, action: toggle)
+                .keyboardShortcut(key, modifiers: shortcut.eventModifiers)
+        } else {
+            Button(title, action: toggle)
+        }
+    }
+
+    private func toggle() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if let focusedSidebarState {
+                focusedSidebarState.toggle()
+            } else if AppDelegate.shared?.toggleSidebarInActiveMainWindow() != true {
+                fallbackSidebarState.toggle()
+            }
+        }
     }
 }

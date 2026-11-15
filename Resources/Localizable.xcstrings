@@ -45061,121 +45061,240 @@
         }
       }
     },
-    "menu.view.toggleSidebar": {
+    "menu.view.hideSidebar": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Toggle Sidebar"
+            "value": "Hide Sidebar"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "サイドバーの切り替え"
+            "value": "サイドバーを非表示"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "切换侧边栏"
+            "value": "隐藏边栏"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "切換側邊欄"
+            "value": "隱藏側邊欄"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "사이드바 전환"
+            "value": "사이드바 가리기"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Seitenleiste ein-/ausblenden"
+            "value": "Seitenleiste ausblenden"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alternar barra lateral"
+            "value": "Ocultar barra lateral"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Afficher/masquer la barre latérale"
+            "value": "Masquer la barre latérale"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Attiva/Disattiva barra laterale"
+            "value": "Nascondi barra laterale"
           }
         },
         "da": {
           "stringUnit": {
             "state": "translated",
-            "value": "Slå sidebjælke til/fra"
+            "value": "Skjul indholdsoversigt"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Przełącz pasek boczny"
+            "value": "Ukryj pasek boczny"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Боковая панель"
+            "value": "Скрыть боковое меню"
           }
         },
         "bs": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prebaci bočnu traku"
+            "value": "Sakrij bočnu traku"
           }
         },
         "ar": {
           "stringUnit": {
             "state": "translated",
-            "value": "تبديل الشريط الجانبي"
+            "value": "إخفاء الشريط الجانبي"
           }
         },
         "nb": {
           "stringUnit": {
             "state": "translated",
-            "value": "Slå sidepanelet av/på"
+            "value": "Skjul sidepanel"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alternar Barra Lateral"
+            "value": "Ocultar Barra Lateral"
           }
         },
         "th": {
           "stringUnit": {
             "state": "translated",
-            "value": "สลับแถบด้านข้าง"
+            "value": "ซ่อนแถบด้านข้าง"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kenar Çubuğunu Aç/Kapat"
+            "value": "Kenar Çubuğunu Gizle"
           }
         },
         "uk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Перемкнути бічну панель"
+            "value": "Сховати бічну панель"
+          }
+        }
+      }
+    },
+    "menu.view.showSidebar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Sidebar"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サイドバーを表示"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示边栏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示側邊欄"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사이드바 보기"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seitenleiste einblenden"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar barra lateral"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher la barre latérale"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostra barra laterale"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vis indholdsoversigt"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokaż pasek boczny"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показать боковое меню"
+          }
+        },
+        "bs": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prikaži bočnu traku"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "إظهار الشريط الجانبي"
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vis sidepanel"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar Barra Lateral"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "แสดงแถบด้านข้าง"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kenar Çubuğunu Göster"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показати бічну панель"
           }
         }
       }
