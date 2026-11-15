@@ -159,6 +159,17 @@ Key commits:
 - `2d1e8477` Add leading button, strip system chevron, use `⌃⌘S`
 - `8f6b841a` Revert chevron stripper in favor of removal approach
 
+On macOS 26 the sidebar toggle is now NavigationSplitView's own. The AppKit
+`SystemSidebarToggleStripper` and the hand-drawn `sidebar.left` button are gone:
+`.toolbar(removing: .sidebarToggle)` also drops View › Show Sidebar, and
+`DefaultToolbarItem(kind: .sidebarToggle)` leaves an empty glass pill when the
+sidebar is collapsed. `columnVisibility` binds to each window's `SidebarState`
+(saved in the session snapshot), and View › Show/Hide Sidebar is a SwiftUI
+`CommandGroup(replacing: .sidebar)` on the configurable Toggle Sidebar shortcut
+(`⌃⌘S`), reading the key window through `focusedSceneObject`. Toolbar items stay
+on the split view's own `.toolbar`, never the sidebar or detail column, so a
+collapsed sidebar does not push them into the » overflow menu.
+
 ---
 
 ## Fixes
