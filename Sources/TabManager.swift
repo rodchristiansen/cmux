@@ -801,7 +801,8 @@ class TabManager: ObservableObject {
     // agent inspects every one. The selected workspace keeps its own 5-second
     // poll, and shell integration reports branch changes as they happen, so the
     // background sweep only has to catch remote PR state and stray changes.
-    private static let workspaceGitMetadataPollInterval: TimeInterval = 120
+    // At 120 s, about 290 tracked panes still made ~146 git execs a minute.
+    private static let workspaceGitMetadataPollInterval: TimeInterval = 600
     private static let selectedWorkspaceGitMetadataPollInterval: TimeInterval = 5
     private nonisolated static let workspacePullRequestProbeTimeout: TimeInterval = 5.0
     @Published var selectedTabId: UUID? {
