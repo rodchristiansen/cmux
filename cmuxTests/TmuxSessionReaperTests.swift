@@ -8,6 +8,16 @@ import XCTest
 
 final class TmuxSessionReaperTests: XCTestCase {
 
+    // MARK: - Lane host
+
+    func testSSHArgumentsQuoteEachTmuxWordForTheRemoteShell() {
+        XCTAssertEqual(
+            TmuxSessionReaper.sshArguments(host: "mac-desktop", arguments: ["show-options", "-t", "=it's:"]),
+            ["-o", "BatchMode=yes", "-o", "ConnectTimeout=3", "mac-desktop",
+             "'/opt/homebrew/bin/tmux' 'show-options' '-t' '=it'\\''s:'"]
+        )
+    }
+
     // MARK: - Ownership
 
     func testOrphansExcludesSessionsAnOpenWorkspaceOwns() {

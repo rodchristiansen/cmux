@@ -1050,7 +1050,7 @@ class TabManager: ObservableObject {
     /// Ends a detached lane's tmux session, which quits the agent inside it.
     func endDetachedLane(_ lane: TmuxSessionReaper.DetachedLane) {
         DispatchQueue.global(qos: .userInitiated).async {
-            _ = TmuxSessionReaper.kill(lane.session)
+            _ = TmuxSessionReaper.kill(lane.session, explicit: true)
             DetachedLaneMonitor.shared.refreshSoon(after: 0.2)
         }
     }

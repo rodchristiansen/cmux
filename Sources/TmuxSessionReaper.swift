@@ -31,20 +31,61 @@ enum TmuxSessionReaper {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }()
 
+    /// The Mac whose tmux server holds the lanes, from `defaults write com.cmuxterm.app
+    /// tmuxLaneHost <ssh-host>`. Unset means this Mac's own server.
+    ///
+    /// A laptop that runs every lane on an always-on hub has no lanes of its own, so
+    /// Reattach Live tmux Sessions and the detached-lane sidebar found nothing there.
+    /// With the host set, every read goes to the hub over ssh: list, tags, attach.
+    /// Kills stay local unless the user ends one lane on purpose, so a client never
+    /// prunes the hub's sessions as orphans of its own smaller sidebar.
+    static var laneHost: String? {
+        let value = UserDefaults.standard.string(forKey: "tmuxLaneHost")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    /// tmux on the lane host: Homebrew's Apple-silicon prefix, the hub's layout.
+    static let remoteTmuxPath = "/opt/homebrew/bin/tmux"
+
+    /// Whether there is any tmux to ask, local or on the lane host.
+    static var isAvailable: Bool { laneHost != nil || tmuxPath != nil }
+
+    /// Quote one word for a POSIX shell.
+    static func shellQuote(_ word: String) -> String {
+        "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// ssh arguments that run tmux with `arguments` on `host`. Pure, for tests.
+    static func sshArguments(host: String, arguments: [String]) -> [String] {
+        let remote = ([remoteTmuxPath] + arguments).map(shellQuote).joined(separator: " ")
+        return ["-o", "BatchMode=yes", "-o", "ConnectTimeout=3", host, remote]
+    }
+
+    /// Run tmux on the lane host, or locally when none is set.
+    static func tmux(_ arguments: [String], timeout: TimeInterval = 3) -> String? {
+        if let host = laneHost {
+            return run("/usr/bin/ssh", sshArguments(host: host, arguments: arguments),
+                       timeout: max(timeout, 8))
+        }
+        guard let tmuxPath else { return nil }
+        return run(tmuxPath, arguments, timeout: timeout)
+    }
+
     /// Names of every session on the current user's tmux server.
     /// Empty when tmux is absent or no server is running — both are normal.
     /// PID of the first pane's process in one session, or nil when it has none.
     static func panePID(of session: String) -> Int32? {
-        guard let tmuxPath, !session.isEmpty,
-              let output = run(tmuxPath, ["list-panes", "-t", "=\(session)", "-F", "#{pane_pid}"]) else {
+        // A pane on the lane host has a pid on that Mac, not this one.
+        guard laneHost == nil, !session.isEmpty,
+              let output = tmux(["list-panes", "-t", "=\(session)", "-F", "#{pane_pid}"]) else {
             return nil
         }
         return output.split(separator: "\n").first.flatMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
     }
 
     static func liveSessions() -> [String] {
-        guard let tmuxPath else { return [] }
-        guard let output = run(tmuxPath, ["list-sessions", "-F", "#{session_name}"]) else {
+        guard let output = tmux(["list-sessions", "-F", "#{session_name}"]) else {
             return []
         }
         return output
@@ -61,11 +102,7 @@ enum TmuxSessionReaper {
     /// routinely owns a session called plain `azdevops`), and an explicit lane word does
     /// not appear in the workspace at all. `session_path` sidesteps both.
     static func liveSessionsWithPaths() -> [(session: String, directory: String)] {
-        guard let tmuxPath else { return [] }
-        guard let output = run(
-            tmuxPath,
-            ["list-sessions", "-F", "#{session_name}\t#{session_path}"]
-        ) else {
+        guard let output = tmux(["list-sessions", "-F", "#{session_name}\t#{session_path}"]) else {
             return []
         }
         return output.split(separator: "\n").compactMap { line in
@@ -138,8 +175,7 @@ enum TmuxSessionReaper {
     /// Runs tmux, so call it off the main thread. Only detached sessions are asked
     /// for their tags, which keeps a pass to one call plus one per detached lane.
     static func laneSnapshot() -> LaneSnapshot? {
-        guard let tmuxPath,
-              let output = run(tmuxPath, ["list-sessions", "-F", laneStateFormat]) else { return nil }
+        guard let output = tmux(["list-sessions", "-F", laneStateFormat]) else { return nil }
         var snapshot = LaneSnapshot()
         for state in parseSessionStates(output) {
             snapshot.live.insert(state.session)
@@ -147,7 +183,7 @@ enum TmuxSessionReaper {
                 snapshot.attached.insert(state.session)
                 continue
             }
-            guard let options = run(tmuxPath, ["show-options", "-t", "=\(state.session):"]) else { continue }
+            guard let options = tmux(["show-options", "-t", "=\(state.session):"]) else { continue }
             let lane = DetachedLane(
                 session: state.session,
                 panePID: state.panePID,
@@ -165,8 +201,14 @@ enum TmuxSessionReaper {
 
     /// The command a new surface runs to show a detached lane.
     static func attachCommand(for session: String) -> String? {
-        guard let tmuxPath, !session.isEmpty else { return nil }
-        let quoted = "'" + ("=" + session).replacingOccurrences(of: "'", with: "'\\''") + "'"
+        guard !session.isEmpty else { return nil }
+        let quoted = shellQuote("=" + session)
+        if let host = laneHost {
+            // The remote shell parses the command once more, so it is quoted again.
+            let remote = "\(remoteTmuxPath) attach-session -t \(quoted)"
+            return "/usr/bin/ssh -t \(shellQuote(host)) \(shellQuote(remote))"
+        }
+        guard let tmuxPath else { return nil }
         return "\(tmuxPath) attach-session -t \(quoted)"
     }
 
@@ -176,10 +218,10 @@ enum TmuxSessionReaper {
     /// after its workspace's title keeps its old name when the title changes, and no
     /// prediction from the new title can find it.
     static func workspaceTagsBySession() -> [String: Set<String>] {
-        guard let tmuxPath else { return [:] }
+        guard isAvailable else { return [:] }
         var result: [String: Set<String>] = [:]
         for session in liveSessions() {
-            guard let output = run(tmuxPath, ["show-options", "-t", "=\(session):"]) else { continue }
+            guard let output = tmux(["show-options", "-t", "=\(session):"]) else { continue }
             let tags = workspaceTags(fromOptions: output)
             if !tags.isEmpty { result[session] = tags }
         }
@@ -307,9 +349,17 @@ enum TmuxSessionReaper {
     }
 
     /// Kill one session. Returns false if tmux is missing or the session is already gone.
+    ///
+    /// On a lane host only an explicit end reaches it: closing a workspace or pruning
+    /// orphans on a client must never take a lane the hub's own sidebar still shows.
     @discardableResult
-    static func kill(_ session: String) -> Bool {
-        guard let tmuxPath, !session.isEmpty else { return false }
+    static func kill(_ session: String, explicit: Bool = false) -> Bool {
+        guard !session.isEmpty else { return false }
+        if laneHost != nil {
+            guard explicit else { return false }
+            return tmux(killArguments(for: session)) != nil
+        }
+        guard let tmuxPath else { return false }
         return run(tmuxPath, killArguments(for: session)) != nil
     }
 
@@ -323,7 +373,9 @@ enum TmuxSessionReaper {
 
     /// Live sessions that no open workspace has registered.
     static func orphans(ownedSessions: Set<String>) -> [String] {
-        orphans(live: liveSessions(), ownedSessions: ownedSessions)
+        // A client's sidebar is a subset of the hub's, so it cannot judge orphans there.
+        guard laneHost == nil else { return [] }
+        return orphans(live: liveSessions(), ownedSessions: ownedSessions)
     }
 
     /// Run a command and return its stdout, or nil on failure or timeout.
